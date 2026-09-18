@@ -2,7 +2,43 @@ import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const itemsMock = vi.hoisted(() => ({
+  saveItem: vi.fn(),
+  loadItem: vi.fn(),
+  listItems: vi.fn(),
+  setItemPinned: vi.fn(),
+  setItemsFavorite: vi.fn(),
+  moveItemsToCollection: vi.fn(),
+  trashItems: vi.fn(),
+  importFile: vi.fn(),
+  setItemTags: vi.fn(),
+}))
+
+const filesMock = vi.hoisted(() => ({
+  pickFile: vi.fn(),
+  openItemFile: vi.fn(),
+  revealItemFile: vi.fn(),
+  openSourceUrl: vi.fn(),
+}))
+
+const collectionsMock = vi.hoisted(() => ({
+  listCollections: vi.fn(),
+  saveCollection: vi.fn(),
+  deleteCollection: vi.fn(),
+}))
+
+const tagsMock = vi.hoisted(() => ({
+  listTags: vi.fn(),
+  saveTag: vi.fn(),
+  deleteTag: vi.fn(),
+}))
+
+vi.mock('../data/items', () => itemsMock)
+vi.mock('../data/files', () => filesMock)
+vi.mock('../data/collections', () => collectionsMock)
+vi.mock('../data/tags', () => tagsMock)
 
 import { AppRoutes } from '../app/router'
 import { navigationGroups } from '../app/navigation'
@@ -11,44 +47,18 @@ import ModulePage, { moduleRoutes } from '../features/modules/ModulePage'
 // Documented dock destinations, independent of the dashboard component.
 const dockDestinations = navigationGroups.flatMap((group) => group.links)
 
-// Documented module destinations, independent of ModulePage metadata.
-const MODULE_DESTINATIONS = [
-  {
-    path: '/items',
-    title: 'All Items',
-    description: 'Browse saved items from one place.',
-    emptyTitle: 'No items yet.',
-  },
-  {
-    path: '/notes',
-    title: 'Notes',
-    description: 'Keep written notes on this device.',
-    emptyTitle: 'No notes yet.',
-  },
-  {
-    path: '/sources',
-    title: 'Sources',
-    description: 'Keep links and source material together.',
-    emptyTitle: 'No sources yet.',
-  },
-  {
-    path: '/files',
-    title: 'Files',
-    description: 'Keep local files within reach.',
-    emptyTitle: 'No files yet.',
-  },
-  {
-    path: '/collections',
-    title: 'Collections',
-    description: 'Organize items into named collections.',
-    emptyTitle: 'No collections yet.',
-  },
-  {
-    path: '/tags',
-    title: 'Tags',
-    description: 'Use tags to describe saved items.',
-    emptyTitle: 'No tags yet.',
-  },
+// Real Phase 3 pages own these routes; each keeps its own title.
+const REAL_DESTINATIONS = [
+  { path: '/items', title: 'All Items' },
+  { path: '/notes', title: 'Notes' },
+  { path: '/sources', title: 'Sources' },
+  { path: '/files', title: 'Files' },
+  { path: '/collections', title: 'Collections' },
+  { path: '/tags', title: 'Tags' },
+]
+
+// Favorites, Recent, and Trash keep the shared placeholder shell until Phase 4.
+const PLACEHOLDER_DESTINATIONS = [
   {
     path: '/favorites',
     title: 'Favorites',
@@ -77,8 +87,28 @@ function renderRoute(path: string) {
   )
 }
 
+beforeEach(() => {
+  vi.clearAllMocks()
+  itemsMock.listItems.mockResolvedValue([])
+  itemsMock.loadItem.mockResolvedValue(undefined)
+  collectionsMock.listCollections.mockResolvedValue([])
+  tagsMock.listTags.mockResolvedValue([])
+  filesMock.pickFile.mockResolvedValue(null)
+})
+
 describe('documented destinations', () => {
-  it.each(MODULE_DESTINATIONS)(
+  it.each(REAL_DESTINATIONS)(
+    'opens $path with its own title',
+    async ({ path, title }) => {
+      renderRoute(path)
+
+      expect(
+        await screen.findByRole('heading', { level: 1, name: title, exact: true }),
+      ).toBeInTheDocument()
+    },
+  )
+
+  it.each(PLACEHOLDER_DESTINATIONS)(
     'opens $path with its own title and description',
     async ({ path, title, description }) => {
       renderRoute(path)
@@ -113,8 +143,8 @@ describe('documented destinations', () => {
   })
 })
 
-describe('module route shells', () => {
-  it.each(MODULE_DESTINATIONS)(
+describe('placeholder module route shells', () => {
+  it.each(PLACEHOLDER_DESTINATIONS)(
     'shows the $path empty state without active unavailable controls',
     async ({ path, emptyTitle }) => {
       renderRoute(path)
@@ -148,7 +178,7 @@ describe('module route shells', () => {
     }
   })
 
-  it.each(MODULE_DESTINATIONS)(
+  it.each(PLACEHOLDER_DESTINATIONS)(
     'offers a live Dashboard next step on $path',
     async ({ path, emptyTitle }) => {
       renderRoute(path)

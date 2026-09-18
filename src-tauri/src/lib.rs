@@ -9,6 +9,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             use tauri::Manager;
 
@@ -43,6 +45,19 @@ pub fn run() {
             vault::list_collections,
             vault::list_activity,
             vault::list_index_state,
+            vault::set_item_pinned,
+            vault::set_items_favorite,
+            vault::move_items_to_collection,
+            vault::trash_items,
+            vault::save_collection,
+            vault::delete_collection,
+            vault::list_tags,
+            vault::save_tag,
+            vault::delete_tag,
+            vault::pick_file,
+            vault::open_item_file,
+            vault::reveal_item_file,
+            vault::open_source_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kivo")

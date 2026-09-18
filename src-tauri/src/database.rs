@@ -11,6 +11,7 @@ const PHASE_ONE_MIGRATION: &str = include_str!("../migrations/0001_phase_one.sql
 const PHASE_TWO_MIGRATION: &str =
     include_str!("../migrations/0002_drop_unused_preference_columns.sql");
 const PHASE_TWO_SCHEMA_MIGRATION: &str = include_str!("../migrations/0003_phase_two.sql");
+const PHASE_THREE_MIGRATION: &str = include_str!("../migrations/0004_phase_three.sql");
 
 struct Migration {
     version: i64,
@@ -31,6 +32,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 3,
         sql: PHASE_TWO_SCHEMA_MIGRATION,
+    },
+    Migration {
+        version: 4,
+        sql: PHASE_THREE_MIGRATION,
     },
 ];
 
@@ -622,7 +627,7 @@ mod tests {
         apply_migrations(&mut connection).expect("first migration");
         apply_migrations(&mut connection).expect("second migration");
 
-        assert_eq!(read_user_version(&connection), 3);
+        assert_eq!(read_user_version(&connection), 4);
 
         for table in [
             "profile",
@@ -650,7 +655,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
-        assert_eq!(read_user_version(&connection), 3);
+        assert_eq!(read_user_version(&connection), 4);
 
         // Dropping a table gives the test a way to detect whether the migration ran again.
         connection
@@ -663,7 +668,7 @@ mod tests {
             !table_exists(&connection, "preferences"),
             "an up-to-date database must not re-run its migration"
         );
-        assert_eq!(read_user_version(&connection), 3);
+        assert_eq!(read_user_version(&connection), 4);
     }
 
     #[test]
@@ -686,7 +691,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 3);
+        assert_eq!(read_user_version(&connection), 4);
         assert_eq!(
             read_preferences(&connection).expect("read preferences"),
             Preferences {
@@ -751,7 +756,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 3);
+        assert_eq!(read_user_version(&connection), 4);
         assert!(
             !table_exists(&connection, "starter_collections"),
             "the onboarding table is dropped after the copy"
@@ -783,6 +788,78 @@ mod tests {
                 start_at_login: true,
             }
         );
+    }
+
+    #[test]
+    fn migration_four_adds_phase_three_columns_and_keeps_data() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        // Stage a version-three vault the way it shipped, with an item and a
+        // collection, then let the gate upgrade it with migration four.
+        connection
+            .execute_batch(PHASE_ONE_MIGRATION)
+            .expect("apply phase one");
+        connection
+            .execute_batch(PHASE_TWO_MIGRATION)
+            .expect("apply phase two");
+        connection
+            .execute_batch(PHASE_TWO_SCHEMA_MIGRATION)
+            .expect("apply version three");
+        connection
+            .execute(
+                "INSERT INTO collections (id, name, sort_order, created_at)
+                 VALUES ('col-1', 'Projects', 0, '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("seed collection");
+        connection
+            .execute(
+                "INSERT INTO items
+                   (id, kind, title, description, content, url, collection_id, is_favorite,
+                    created_at, updated_at)
+                 VALUES ('item-1', 'note', 'Kept', '', 'body', NULL, 'col-1', 1,
+                         '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z')",
+                [],
+            )
+            .expect("seed item");
+        connection
+            .pragma_update(None, "user_version", 3)
+            .expect("set version three");
+
+        apply_migrations(&mut connection).expect("upgrade database");
+
+        assert_eq!(read_user_version(&connection), 4);
+
+        let (title, content, is_pinned, deleted_at, icon): (
+            String,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+        ) = connection
+            .query_row(
+                "SELECT i.title, i.content, i.is_pinned, i.deleted_at, c.icon
+                 FROM items i
+                 JOIN collections c ON c.id = i.collection_id
+                 WHERE i.id = 'item-1'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("read upgraded item");
+
+        assert_eq!(title, "Kept");
+        assert_eq!(content, "body");
+        assert_eq!(is_pinned, 0, "existing items start unpinned");
+        assert_eq!(deleted_at, None, "existing items start live");
+        assert_eq!(icon, None, "existing collections start without an icon");
     }
 
     #[test]

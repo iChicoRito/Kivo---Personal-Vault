@@ -1,9 +1,11 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::database::DatabaseState;
 
@@ -26,6 +28,8 @@ pub struct Item {
     pub url: Option<String>,
     pub collection_id: Option<String>,
     pub is_favorite: bool,
+    pub is_pinned: bool,
+    pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub tags: Vec<String>,
@@ -40,8 +44,10 @@ pub struct ItemSummary {
     pub kind: String,
     pub title: String,
     pub is_favorite: bool,
+    pub is_pinned: bool,
     pub collection_id: Option<String>,
     pub updated_at: String,
+    pub file: Option<FileDetails>,
     pub file_missing: bool,
 }
 
@@ -52,6 +58,16 @@ pub struct Collection {
     pub name: String,
     pub sort_order: i64,
     pub created_at: String,
+    pub icon: Option<String>,
+    pub item_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub id: String,
+    pub name: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -83,6 +99,34 @@ pub struct ItemInput {
     pub url: Option<String>,
     pub collection_id: Option<String>,
     pub is_favorite: Option<bool>,
+    #[serde(default)]
+    pub is_pinned: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemFilter {
+    pub kind: Option<String>,
+    pub collection_id: Option<String>,
+    pub tag_id: Option<String>,
+    pub favorite: Option<bool>,
+    pub query: Option<String>,
+    pub sort: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagInput {
+    pub id: Option<String>,
+    pub name: String,
 }
 
 // The raw item row plus its optional file record, before tags and disk state join in.
@@ -95,6 +139,8 @@ struct StoredItem {
     url: Option<String>,
     collection_id: Option<String>,
     is_favorite: bool,
+    is_pinned: bool,
+    deleted_at: Option<String>,
     created_at: String,
     updated_at: String,
     original_name: Option<String>,
@@ -105,6 +151,24 @@ struct StoredItem {
 
 fn new_id(connection: &Connection) -> rusqlite::Result<String> {
     connection.query_row("SELECT lower(hex(randomblob(16)))", [], |row| row.get(0))
+}
+
+// `%` and `_` are LIKE wildcards, so a literal query escapes them and the SQL
+// uses `ESCAPE '\'`. The backslash itself must be escaped first.
+fn escaped_like_pattern(query: &str) -> String {
+    let mut pattern = String::with_capacity(query.len() + 2);
+    pattern.push('%');
+
+    for character in query.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            pattern.push('\\');
+        }
+
+        pattern.push(character);
+    }
+
+    pattern.push('%');
+    pattern
 }
 
 fn upsert_index_state(connection: &Connection, item_id: &str) -> rusqlite::Result<()> {
@@ -145,7 +209,8 @@ fn read_item(
     let stored = connection
         .query_row(
             "SELECT i.id, i.kind, i.title, i.description, i.content, i.url,
-                    i.collection_id, i.is_favorite, i.created_at, i.updated_at,
+                    i.collection_id, i.is_favorite, i.is_pinned, i.deleted_at,
+                    i.created_at, i.updated_at,
                     f.original_name, f.byte_size, f.imported_at, f.stored_name
              FROM items i
              LEFT JOIN files f ON f.item_id = i.id
@@ -161,12 +226,14 @@ fn read_item(
                     url: row.get(5)?,
                     collection_id: row.get(6)?,
                     is_favorite: row.get::<_, i64>(7)? != 0,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                    original_name: row.get(10)?,
-                    byte_size: row.get(11)?,
-                    imported_at: row.get(12)?,
-                    stored_name: row.get(13)?,
+                    is_pinned: row.get::<_, i64>(8)? != 0,
+                    deleted_at: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    original_name: row.get(12)?,
+                    byte_size: row.get(13)?,
+                    imported_at: row.get(14)?,
+                    stored_name: row.get(15)?,
                 })
             },
         )
@@ -208,6 +275,8 @@ fn read_item(
         url: stored.url,
         collection_id: stored.collection_id,
         is_favorite: stored.is_favorite,
+        is_pinned: stored.is_pinned,
+        deleted_at: stored.deleted_at,
         created_at: stored.created_at,
         updated_at: stored.updated_at,
         tags,
@@ -219,31 +288,110 @@ fn read_item(
 fn read_item_summaries(
     connection: &Connection,
     files_dir: &Path,
+    filter: Option<&ItemFilter>,
 ) -> rusqlite::Result<Vec<ItemSummary>> {
-    let mut statement = connection.prepare(
-        "SELECT i.id, i.kind, i.title, i.is_favorite, i.collection_id, i.updated_at,
-                f.stored_name
+    let mut sql = String::from(
+        "SELECT i.id, i.kind, i.title, i.is_favorite, i.is_pinned, i.collection_id,
+                i.updated_at, f.stored_name, f.original_name, f.byte_size, f.imported_at
          FROM items i
          LEFT JOIN files f ON f.item_id = i.id
-         ORDER BY i.updated_at DESC, i.title COLLATE NOCASE ASC",
-    )?;
+         WHERE i.deleted_at IS NULL",
+    );
+    let mut values: Vec<rusqlite::types::Value> = Vec::new();
 
-    let rows = statement.query_map([], |row| {
+    if let Some(filter) = filter {
+        if let Some(kind) = filter.kind.as_deref().filter(|value| !value.is_empty()) {
+            sql.push_str(" AND i.kind = ?");
+            values.push(rusqlite::types::Value::Text(kind.to_string()));
+        }
+
+        if let Some(collection_id) = filter
+            .collection_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            sql.push_str(" AND i.collection_id = ?");
+            values.push(rusqlite::types::Value::Text(collection_id.to_string()));
+        }
+
+        if let Some(tag_id) = filter.tag_id.as_deref().filter(|value| !value.is_empty()) {
+            sql.push_str(
+                " AND EXISTS (SELECT 1 FROM item_tags it
+                              WHERE it.item_id = i.id AND it.tag_id = ?)",
+            );
+            values.push(rusqlite::types::Value::Text(tag_id.to_string()));
+        }
+
+        if let Some(favorite) = filter.favorite {
+            sql.push_str(" AND i.is_favorite = ?");
+            values.push(rusqlite::types::Value::Integer(i64::from(favorite)));
+        }
+
+        if let Some(query) = filter
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+        {
+            let pattern = escaped_like_pattern(query);
+            sql.push_str(
+                " AND (i.title LIKE ? ESCAPE '\\'
+                    OR i.description LIKE ? ESCAPE '\\'
+                    OR i.content LIKE ? ESCAPE '\\'
+                    OR i.url LIKE ? ESCAPE '\\'
+                    OR f.original_name LIKE ? ESCAPE '\\')",
+            );
+
+            for _ in 0..5 {
+                values.push(rusqlite::types::Value::Text(pattern.clone()));
+            }
+        }
+    }
+
+    let order = match filter.and_then(|filter| filter.sort.as_deref()) {
+        Some("title") => "i.title COLLATE NOCASE ASC, i.updated_at DESC",
+        Some("created") => "i.created_at DESC, i.updated_at DESC",
+        Some("kind") => "i.kind ASC, i.updated_at DESC",
+        _ => "i.updated_at DESC, i.title COLLATE NOCASE ASC",
+    };
+
+    sql.push_str(" ORDER BY ");
+    sql.push_str(order);
+
+    let mut statement = connection.prepare(&sql)?;
+
+    let rows = statement.query_map(rusqlite::params_from_iter(values.iter()), |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, i64>(3)? != 0,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, Option<String>>(6)?,
+            row.get::<_, i64>(4)? != 0,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<i64>>(9)?,
+            row.get::<_, Option<String>>(10)?,
         ))
     })?;
 
     let mut summaries = Vec::new();
 
     for row in rows {
-        let (id, kind, title, is_favorite, collection_id, updated_at, stored_name) = row?;
+        let (
+            id,
+            kind,
+            title,
+            is_favorite,
+            is_pinned,
+            collection_id,
+            updated_at,
+            stored_name,
+            original_name,
+            byte_size,
+            imported_at,
+        ) = row?;
 
         let file_missing = kind == "file"
             && stored_name
@@ -251,13 +399,24 @@ fn read_item_summaries(
                 .map(|name| !files_dir.join(name).is_file())
                 .unwrap_or(false);
 
+        let file = match (original_name, byte_size, imported_at) {
+            (Some(original_name), Some(byte_size), Some(imported_at)) => Some(FileDetails {
+                original_name,
+                byte_size,
+                imported_at,
+            }),
+            _ => None,
+        };
+
         summaries.push(ItemSummary {
             id,
             kind,
             title,
             is_favorite,
+            is_pinned,
             collection_id,
             updated_at,
+            file,
             file_missing,
         });
     }
@@ -265,12 +424,34 @@ fn read_item_summaries(
     Ok(summaries)
 }
 
+const COLLECTION_SELECT: &str = "SELECT c.id, c.name, c.sort_order, c.created_at, c.icon,
+            (SELECT COUNT(*) FROM items i
+             WHERE i.collection_id = c.id AND i.deleted_at IS NULL)
+     FROM collections c";
+
+fn read_collection(connection: &Connection, id: &str) -> rusqlite::Result<Option<Collection>> {
+    connection
+        .query_row(
+            &format!("{COLLECTION_SELECT} WHERE c.id = ?1"),
+            params![id],
+            |row| {
+                Ok(Collection {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    created_at: row.get(3)?,
+                    icon: row.get(4)?,
+                    item_count: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+}
+
 fn read_collections(connection: &Connection) -> rusqlite::Result<Vec<Collection>> {
-    let mut statement = connection.prepare(
-        "SELECT id, name, sort_order, created_at
-         FROM collections
-         ORDER BY sort_order ASC, name COLLATE NOCASE ASC",
-    )?;
+    let mut statement = connection.prepare(&format!(
+        "{COLLECTION_SELECT} ORDER BY c.sort_order ASC, c.name COLLATE NOCASE ASC"
+    ))?;
 
     let collections = statement
         .query_map([], |row| {
@@ -279,11 +460,52 @@ fn read_collections(connection: &Connection) -> rusqlite::Result<Vec<Collection>
                 name: row.get(1)?,
                 sort_order: row.get(2)?,
                 created_at: row.get(3)?,
+                icon: row.get(4)?,
+                item_count: row.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<Collection>>>()?;
 
     Ok(collections)
+}
+
+const TAG_SELECT: &str = "SELECT t.id, t.name,
+            (SELECT COUNT(*) FROM item_tags it
+             JOIN items i ON i.id = it.item_id
+             WHERE it.tag_id = t.id AND i.deleted_at IS NULL)
+     FROM tags t";
+
+fn read_tags(connection: &Connection) -> rusqlite::Result<Vec<Tag>> {
+    let mut statement =
+        connection.prepare(&format!("{TAG_SELECT} ORDER BY t.name COLLATE NOCASE ASC"))?;
+
+    let tags = statement
+        .query_map([], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                count: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<Tag>>>()?;
+
+    Ok(tags)
+}
+
+fn read_tag(connection: &Connection, id: &str) -> rusqlite::Result<Option<Tag>> {
+    connection
+        .query_row(
+            &format!("{TAG_SELECT} WHERE t.id = ?1"),
+            params![id],
+            |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    count: row.get(2)?,
+                })
+            },
+        )
+        .optional()
 }
 
 fn read_activity(connection: &Connection) -> rusqlite::Result<Vec<ActivityEntry>> {
@@ -339,22 +561,28 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
 
     let is_update = input.id.is_some();
 
-    let (id, kind) = match &input.id {
+    // An existing item keeps its stored kind, content, and url. Only the fields
+    // that belong to its kind are rewritten, so a file item can update its
+    // metadata without gaining note or source data.
+    let (id, kind, stored_content, stored_url) = match &input.id {
         Some(id) => {
-            let stored_kind: Option<String> = connection
-                .query_row("SELECT kind FROM items WHERE id = ?1", params![id], |row| {
-                    row.get(0)
-                })
+            let stored: Option<(String, Option<String>, Option<String>)> = connection
+                .query_row(
+                    "SELECT kind, content, url FROM items WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
                 .optional()
                 .map_err(|error| format!("Could not save the item: {error}"))?;
 
-            let stored_kind = stored_kind.ok_or_else(|| "Item was not found".to_string())?;
+            let (stored_kind, stored_content, stored_url) =
+                stored.ok_or_else(|| "Item was not found".to_string())?;
 
             if input.kind != stored_kind {
                 return Err("Item type cannot change".to_string());
             }
 
-            (id.clone(), stored_kind)
+            (id.clone(), stored_kind, stored_content, stored_url)
         }
         None => {
             match input.kind.as_str() {
@@ -366,7 +594,7 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
             let id =
                 new_id(connection).map_err(|error| format!("Could not save the item: {error}"))?;
 
-            (id, input.kind.clone())
+            (id, input.kind.clone(), None, None)
         }
     };
 
@@ -398,13 +626,14 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
                 return Err("Source items need a web address".to_string());
             }
 
-            (None, Some(url.to_string()))
+            (input.content.clone(), Some(url.to_string()))
         }
-        _ => (None, None),
+        _ => (stored_content, stored_url),
     };
 
     let description = input.description.clone();
     let is_favorite = i64::from(input.is_favorite.unwrap_or(false));
+    let is_pinned = i64::from(input.is_pinned.unwrap_or(false));
     let action = if is_update { "updated" } else { "created" };
 
     let transaction = connection
@@ -416,9 +645,9 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
             .execute(
                 "UPDATE items
                  SET title = ?1, description = ?2, content = ?3, url = ?4,
-                     collection_id = ?5, is_favorite = ?6,
+                     collection_id = ?5, is_favorite = ?6, is_pinned = ?7,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                 WHERE id = ?7",
+                 WHERE id = ?8",
                 params![
                     title,
                     description,
@@ -426,6 +655,7 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
                     url,
                     collection_id,
                     is_favorite,
+                    is_pinned,
                     id
                 ],
             )
@@ -435,8 +665,8 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
             .execute(
                 "INSERT INTO items
                    (id, kind, title, description, content, url, collection_id, is_favorite,
-                    created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                    is_pinned, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
                 params![
@@ -447,7 +677,8 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
                     content,
                     url,
                     collection_id,
-                    is_favorite
+                    is_favorite,
+                    is_pinned
                 ],
             )
             .map_err(|error| format!("Could not save the item: {error}"))?;
@@ -576,6 +807,335 @@ fn replace_item_tags(
     Ok(stored)
 }
 
+fn write_item_pin(connection: &mut Connection, id: &str, pinned: bool) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not update the item: {error}"))?;
+
+    let updated = transaction
+        .execute(
+            "UPDATE items SET is_pinned = ?1 WHERE id = ?2",
+            params![i64::from(pinned), id],
+        )
+        .map_err(|error| format!("Could not update the item: {error}"))?;
+
+    if updated == 0 {
+        return Err("Item was not found".to_string());
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not update the item: {error}"))
+}
+
+fn write_items_favorite(
+    connection: &mut Connection,
+    ids: &[String],
+    favorite: bool,
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not update the items: {error}"))?;
+
+    for id in ids {
+        transaction
+            .execute(
+                "UPDATE items SET is_favorite = ?1 WHERE id = ?2",
+                params![i64::from(favorite), id],
+            )
+            .map_err(|error| format!("Could not update the items: {error}"))?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not update the items: {error}"))
+}
+
+fn write_items_collection(
+    connection: &mut Connection,
+    ids: &[String],
+    collection_id: Option<&str>,
+) -> Result<(), String> {
+    if let Some(collection_id) = collection_id {
+        let exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM collections WHERE id = ?1",
+                params![collection_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("Could not move the items: {error}"))?;
+
+        if exists == 0 {
+            return Err("Collection does not exist".to_string());
+        }
+    }
+
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not move the items: {error}"))?;
+
+    for id in ids {
+        transaction
+            .execute(
+                "UPDATE items SET collection_id = ?1 WHERE id = ?2",
+                params![collection_id, id],
+            )
+            .map_err(|error| format!("Could not move the items: {error}"))?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not move the items: {error}"))
+}
+
+fn write_trashed_items(connection: &mut Connection, ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not move the items to Trash: {error}"))?;
+
+    for id in ids {
+        let updated = transaction
+            .execute(
+                "UPDATE items
+                 SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id],
+            )
+            .map_err(|error| format!("Could not move the items to Trash: {error}"))?;
+
+        if updated == 0 {
+            continue;
+        }
+
+        transaction
+            .execute(
+                "INSERT INTO activity (item_id, action, created_at)
+                 VALUES (?1, 'trashed', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                params![id],
+            )
+            .map_err(|error| format!("Could not move the items to Trash: {error}"))?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not move the items to Trash: {error}"))
+}
+
+fn write_collection(
+    connection: &mut Connection,
+    input: &CollectionInput,
+) -> Result<String, String> {
+    let name = input.name.trim().to_string();
+
+    if name.is_empty() {
+        return Err("Collection name is required".to_string());
+    }
+
+    let icon = input
+        .icon
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not save the collection: {error}"))?;
+
+    let duplicate: Option<String> = transaction
+        .query_row(
+            "SELECT id FROM collections WHERE name = ?1 COLLATE NOCASE",
+            params![name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("Could not save the collection: {error}"))?;
+
+    let id = match &input.id {
+        Some(id) => {
+            let exists: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM collections WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("Could not save the collection: {error}"))?;
+
+            if exists == 0 {
+                return Err("Collection was not found".to_string());
+            }
+
+            if duplicate
+                .as_deref()
+                .is_some_and(|duplicate| duplicate != id.as_str())
+            {
+                return Err("A collection with that name already exists".to_string());
+            }
+
+            transaction
+                .execute(
+                    "UPDATE collections SET name = ?1, icon = ?2 WHERE id = ?3",
+                    params![name, icon, id],
+                )
+                .map_err(|error| format!("Could not save the collection: {error}"))?;
+
+            id.clone()
+        }
+        None => {
+            if duplicate.is_some() {
+                return Err("A collection with that name already exists".to_string());
+            }
+
+            let id = new_id(&transaction)
+                .map_err(|error| format!("Could not save the collection: {error}"))?;
+
+            transaction
+                .execute(
+                    "INSERT INTO collections (id, name, sort_order, created_at, icon)
+                     VALUES (?1, ?2,
+                             (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM collections),
+                             strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?3)",
+                    params![id, name, icon],
+                )
+                .map_err(|error| format!("Could not save the collection: {error}"))?;
+
+            id
+        }
+    };
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not save the collection: {error}"))?;
+
+    Ok(id)
+}
+
+fn remove_collection(connection: &mut Connection, id: &str) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not delete the collection: {error}"))?;
+
+    let deleted = transaction
+        .execute("DELETE FROM collections WHERE id = ?1", params![id])
+        .map_err(|error| format!("Could not delete the collection: {error}"))?;
+
+    if deleted == 0 {
+        return Err("Collection was not found".to_string());
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not delete the collection: {error}"))
+}
+
+fn write_tag(connection: &mut Connection, input: &TagInput) -> Result<String, String> {
+    let name = input.name.trim().to_string();
+
+    if name.is_empty() {
+        return Err("Tag name is required".to_string());
+    }
+
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not save the tag: {error}"))?;
+
+    let duplicate: Option<String> = transaction
+        .query_row(
+            "SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE",
+            params![name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("Could not save the tag: {error}"))?;
+
+    let id = match &input.id {
+        Some(id) => {
+            let exists: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM tags WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("Could not save the tag: {error}"))?;
+
+            if exists == 0 {
+                return Err("Tag was not found".to_string());
+            }
+
+            if duplicate
+                .as_deref()
+                .is_some_and(|duplicate| duplicate != id.as_str())
+            {
+                return Err("A tag with that name already exists".to_string());
+            }
+
+            transaction
+                .execute("UPDATE tags SET name = ?1 WHERE id = ?2", params![name, id])
+                .map_err(|error| format!("Could not save the tag: {error}"))?;
+
+            id.clone()
+        }
+        None => {
+            if duplicate.is_some() {
+                return Err("A tag with that name already exists".to_string());
+            }
+
+            let id =
+                new_id(&transaction).map_err(|error| format!("Could not save the tag: {error}"))?;
+
+            transaction
+                .execute(
+                    "INSERT INTO tags (id, name, created_at)
+                     VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                    params![id, name],
+                )
+                .map_err(|error| format!("Could not save the tag: {error}"))?;
+
+            id
+        }
+    };
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not save the tag: {error}"))?;
+
+    Ok(id)
+}
+
+fn remove_tag(connection: &mut Connection, id: &str) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not delete the tag: {error}"))?;
+
+    transaction
+        .execute("DELETE FROM item_tags WHERE tag_id = ?1", params![id])
+        .map_err(|error| format!("Could not delete the tag: {error}"))?;
+
+    let deleted = transaction
+        .execute("DELETE FROM tags WHERE id = ?1", params![id])
+        .map_err(|error| format!("Could not delete the tag: {error}"))?;
+
+    if deleted == 0 {
+        return Err("Tag was not found".to_string());
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not delete the tag: {error}"))
+}
+
 // The extension keeps ASCII letters and digits only, capped at ten characters.
 fn filtered_extension(path: &Path) -> String {
     let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
@@ -676,12 +1236,16 @@ fn load_item_with_state(state: &DatabaseState, id: &str) -> Result<Item, String>
     item.ok_or_else(|| "Item was not found".to_string())
 }
 
-fn list_items_with_state(state: &DatabaseState) -> Result<Vec<ItemSummary>, String> {
+fn list_items_with_state(
+    state: &DatabaseState,
+    filter: Option<&ItemFilter>,
+) -> Result<Vec<ItemSummary>, String> {
     let connection = state.require_connection()?;
 
     read_item_summaries(
         connection.as_ref().expect("checked above"),
         state.files_dir(),
+        filter,
     )
     .map_err(|error| format!("Could not list the items: {error}"))
 }
@@ -724,6 +1288,162 @@ fn list_index_state_with_state(state: &DatabaseState) -> Result<Vec<IndexState>,
 
     read_index_state(connection.as_ref().expect("checked above"))
         .map_err(|error| format!("Could not list the index state: {error}"))
+}
+
+fn set_item_pinned_with_state(
+    state: &DatabaseState,
+    id: &str,
+    pinned: bool,
+) -> Result<Item, String> {
+    {
+        let mut connection = state.require_connection()?;
+        write_item_pin(connection.as_mut().expect("checked above"), id, pinned)?;
+    }
+
+    load_item_with_state(state, id)
+}
+
+fn set_items_favorite_with_state(
+    state: &DatabaseState,
+    ids: &[String],
+    favorite: bool,
+) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    write_items_favorite(connection.as_mut().expect("checked above"), ids, favorite)
+}
+
+fn move_items_to_collection_with_state(
+    state: &DatabaseState,
+    ids: &[String],
+    collection_id: Option<&str>,
+) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    write_items_collection(
+        connection.as_mut().expect("checked above"),
+        ids,
+        collection_id,
+    )
+}
+
+fn trash_items_with_state(state: &DatabaseState, ids: &[String]) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    write_trashed_items(connection.as_mut().expect("checked above"), ids)
+}
+
+fn save_collection_with_state(
+    state: &DatabaseState,
+    input: &CollectionInput,
+) -> Result<Collection, String> {
+    let id = {
+        let mut connection = state.require_connection()?;
+        write_collection(connection.as_mut().expect("checked above"), input)?
+    };
+
+    let connection = state.require_connection()?;
+    let collection = read_collection(connection.as_ref().expect("checked above"), &id)
+        .map_err(|error| format!("Could not read the collection: {error}"))?;
+
+    collection.ok_or_else(|| "Collection was not found".to_string())
+}
+
+fn delete_collection_with_state(state: &DatabaseState, id: &str) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    remove_collection(connection.as_mut().expect("checked above"), id)
+}
+
+fn list_tags_with_state(state: &DatabaseState) -> Result<Vec<Tag>, String> {
+    let connection = state.require_connection()?;
+
+    read_tags(connection.as_ref().expect("checked above"))
+        .map_err(|error| format!("Could not list the tags: {error}"))
+}
+
+fn save_tag_with_state(state: &DatabaseState, input: &TagInput) -> Result<Tag, String> {
+    let id = {
+        let mut connection = state.require_connection()?;
+        write_tag(connection.as_mut().expect("checked above"), input)?
+    };
+
+    let connection = state.require_connection()?;
+    let tag = read_tag(connection.as_ref().expect("checked above"), &id)
+        .map_err(|error| format!("Could not read the tag: {error}"))?;
+
+    tag.ok_or_else(|| "Tag was not found".to_string())
+}
+
+fn delete_tag_with_state(state: &DatabaseState, id: &str) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    remove_tag(connection.as_mut().expect("checked above"), id)
+}
+
+// Resolves the managed file for a file item, rejecting a missing item, a
+// non-file item, and a file that is no longer on disk.
+fn managed_file_path_with_state(state: &DatabaseState, id: &str) -> Result<PathBuf, String> {
+    let connection = state.require_connection()?;
+
+    let row: Option<(String, Option<String>)> = connection
+        .as_ref()
+        .expect("checked above")
+        .query_row(
+            "SELECT i.kind, f.stored_name
+             FROM items i
+             LEFT JOIN files f ON f.item_id = i.id
+             WHERE i.id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("Could not read the item: {error}"))?;
+
+    let (kind, stored_name) = row.ok_or_else(|| "Item was not found".to_string())?;
+
+    if kind != "file" {
+        return Err("This item is not a file".to_string());
+    }
+
+    let stored_name = stored_name.ok_or_else(|| "The file is missing".to_string())?;
+    let path = state.files_dir().join(stored_name);
+
+    if !path.is_file() {
+        return Err("The file is missing".to_string());
+    }
+
+    Ok(path)
+}
+
+fn source_url_with_state(state: &DatabaseState, id: &str) -> Result<String, String> {
+    let connection = state.require_connection()?;
+
+    let row: Option<(String, Option<String>)> = connection
+        .as_ref()
+        .expect("checked above")
+        .query_row(
+            "SELECT kind, url FROM items WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("Could not read the item: {error}"))?;
+
+    let (kind, url) = row.ok_or_else(|| "Item was not found".to_string())?;
+
+    if kind != "source" {
+        return Err("This item is not a source".to_string());
+    }
+
+    let url = url.unwrap_or_default();
+    let url = url.trim();
+
+    if url.is_empty() {
+        return Err("This source has no web address".to_string());
+    }
+
+    Ok(url.to_string())
 }
 
 fn import_file_with_state(state: &DatabaseState, source_path: &str) -> Result<Item, String> {
@@ -787,8 +1507,11 @@ pub fn load_item(id: String, state: State<'_, DatabaseState>) -> Result<Item, St
 }
 
 #[tauri::command]
-pub fn list_items(state: State<'_, DatabaseState>) -> Result<Vec<ItemSummary>, String> {
-    list_items_with_state(state.inner())
+pub fn list_items(
+    filter: Option<ItemFilter>,
+    state: State<'_, DatabaseState>,
+) -> Result<Vec<ItemSummary>, String> {
+    list_items_with_state(state.inner(), filter.as_ref())
 }
 
 #[tauri::command]
@@ -813,6 +1536,114 @@ pub fn list_activity(state: State<'_, DatabaseState>) -> Result<Vec<ActivityEntr
 #[tauri::command]
 pub fn list_index_state(state: State<'_, DatabaseState>) -> Result<Vec<IndexState>, String> {
     list_index_state_with_state(state.inner())
+}
+
+#[tauri::command]
+pub fn set_item_pinned(
+    id: String,
+    pinned: bool,
+    state: State<'_, DatabaseState>,
+) -> Result<Item, String> {
+    set_item_pinned_with_state(state.inner(), &id, pinned)
+}
+
+#[tauri::command]
+pub fn set_items_favorite(
+    ids: Vec<String>,
+    favorite: bool,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    set_items_favorite_with_state(state.inner(), &ids, favorite)
+}
+
+#[tauri::command]
+pub fn move_items_to_collection(
+    ids: Vec<String>,
+    collection_id: Option<String>,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    move_items_to_collection_with_state(state.inner(), &ids, collection_id.as_deref())
+}
+
+#[tauri::command]
+pub fn trash_items(ids: Vec<String>, state: State<'_, DatabaseState>) -> Result<(), String> {
+    trash_items_with_state(state.inner(), &ids)
+}
+
+#[tauri::command]
+pub fn save_collection(
+    input: CollectionInput,
+    state: State<'_, DatabaseState>,
+) -> Result<Collection, String> {
+    save_collection_with_state(state.inner(), &input)
+}
+
+#[tauri::command]
+pub fn delete_collection(id: String, state: State<'_, DatabaseState>) -> Result<(), String> {
+    delete_collection_with_state(state.inner(), &id)
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, DatabaseState>) -> Result<Vec<Tag>, String> {
+    list_tags_with_state(state.inner())
+}
+
+#[tauri::command]
+pub fn save_tag(input: TagInput, state: State<'_, DatabaseState>) -> Result<Tag, String> {
+    save_tag_with_state(state.inner(), &input)
+}
+
+#[tauri::command]
+pub fn delete_tag(id: String, state: State<'_, DatabaseState>) -> Result<(), String> {
+    delete_tag_with_state(state.inner(), &id)
+}
+
+#[tauri::command]
+pub fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
+    Ok(app
+        .dialog()
+        .file()
+        .blocking_pick_file()
+        .map(|path| path.to_string()))
+}
+
+#[tauri::command]
+pub fn open_item_file(
+    id: String,
+    app: AppHandle,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    let path = managed_file_path_with_state(state.inner(), &id)?;
+
+    app.opener()
+        .open_path(path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|error| format!("Could not open the file: {error}"))
+}
+
+#[tauri::command]
+pub fn reveal_item_file(
+    id: String,
+    app: AppHandle,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    let path = managed_file_path_with_state(state.inner(), &id)?;
+
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|error| format!("Could not reveal the file: {error}"))
+}
+
+#[tauri::command]
+pub fn open_source_url(
+    id: String,
+    app: AppHandle,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    let url = source_url_with_state(state.inner(), &id)?;
+
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| format!("Could not open the address: {error}"))
 }
 
 #[cfg(test)]
@@ -872,6 +1703,7 @@ mod tests {
             url: None,
             collection_id: None,
             is_favorite: None,
+            is_pinned: None,
         }
     }
 
@@ -885,6 +1717,7 @@ mod tests {
             url: Some(url.to_string()),
             collection_id: None,
             is_favorite: None,
+            is_pinned: None,
         }
     }
 
@@ -899,6 +1732,13 @@ mod tests {
                 params![id, name, sort_order],
             )
             .expect("seed collection");
+    }
+
+    fn titles(summaries: &[ItemSummary]) -> Vec<String> {
+        summaries
+            .iter()
+            .map(|summary| summary.title.clone())
+            .collect()
     }
 
     fn stored_name(state: &DatabaseState, item_id: &str) -> String {
@@ -1210,7 +2050,7 @@ mod tests {
         assert_eq!(loaded.title, "photo.png");
         assert!(loaded.file.is_some());
 
-        let summaries = list_items_with_state(&state).expect("list after delete");
+        let summaries = list_items_with_state(&state, None).expect("list after delete");
         let summary = summaries
             .iter()
             .find(|summary| summary.id == item.id)
@@ -1241,6 +2081,7 @@ mod tests {
                 url: None,
                 collection_id: Some("col-move".to_string()),
                 is_favorite: Some(true),
+                is_pinned: None,
             },
         )
         .expect("rename and move");
@@ -1305,7 +2146,7 @@ mod tests {
                 .expect("age newer item");
         }
 
-        let summaries = list_items_with_state(&state).expect("list items");
+        let summaries = list_items_with_state(&state, None).expect("list items");
         assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].id, newer.id);
         assert_eq!(summaries[1].id, older.id);
@@ -1314,7 +2155,44 @@ mod tests {
         assert!(!summaries[0].is_favorite);
         assert_eq!(summaries[0].collection_id, None);
         assert_eq!(summaries[0].updated_at, "2021-01-01T00:00:00.000Z");
+        assert_eq!(summaries[0].file, None);
         assert!(!summaries[0].file_missing);
+    }
+
+    #[test]
+    fn list_items_summaries_include_file_details() {
+        let vault = TempVault::new("summary-file");
+        let state = vault.state();
+
+        let source = vault.root.join("report.txt");
+        fs::write(&source, b"hello world").expect("write source file");
+
+        let item = import_file_with_state(&state, &source.to_string_lossy()).expect("import file");
+        let summaries = list_items_with_state(&state, None).expect("list items");
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, item.id);
+        let file = summaries[0].file.as_ref().expect("summary file details");
+        assert_eq!(file.original_name, "report.txt");
+        assert_eq!(file.byte_size, 11);
+        assert!(!file.imported_at.is_empty());
+        assert!(!summaries[0].file_missing);
+    }
+
+    #[test]
+    fn source_items_store_and_reload_a_personal_note() {
+        let vault = TempVault::new("source-note");
+        let state = vault.state();
+
+        let mut input = source_input("Rust", "https://www.rust-lang.org");
+        input.content = Some("Read the book list".to_string());
+
+        let saved = save_item_with_state(&state, &input).expect("save source");
+        assert_eq!(saved.content.as_deref(), Some("Read the book list"));
+
+        let loaded = load_item_with_state(&state, &saved.id).expect("load source");
+        assert_eq!(loaded.content.as_deref(), Some("Read the book list"));
+        assert_eq!(loaded.url.as_deref(), Some("https://www.rust-lang.org"));
     }
 
     #[test]
@@ -1385,5 +2263,767 @@ mod tests {
         assert_eq!(activity[0].action, "updated");
         assert_eq!(activity[1].action, "created");
         assert_eq!(activity[0].item_id.as_deref(), Some(saved.id.as_str()));
+    }
+
+    #[test]
+    fn list_items_filters_by_kind_collection_and_favorite() {
+        let vault = TempVault::new("list-filter");
+        let state = vault.state();
+        seed_collection(&state, "col-a", "Alpha", 0);
+        seed_collection(&state, "col-b", "Beta", 1);
+
+        let mut in_alpha = note_input("Alpha note", "body");
+        in_alpha.collection_id = Some("col-a".to_string());
+        let alpha = save_item_with_state(&state, &in_alpha).expect("save alpha note");
+
+        let mut favorited = note_input("Favorite note", "body");
+        favorited.collection_id = Some("col-b".to_string());
+        favorited.is_favorite = Some(true);
+        let favorited = save_item_with_state(&state, &favorited).expect("save favorite note");
+
+        let source = save_item_with_state(&state, &source_input("Site", "https://example.com"))
+            .expect("save source");
+
+        let mut filter = ItemFilter {
+            kind: Some("note".to_string()),
+            ..ItemFilter::default()
+        };
+        let notes = list_items_with_state(&state, Some(&filter)).expect("list notes");
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().all(|summary| summary.kind == "note"));
+        assert!(!notes.iter().any(|summary| summary.id == source.id));
+
+        filter = ItemFilter {
+            collection_id: Some("col-a".to_string()),
+            ..ItemFilter::default()
+        };
+        let in_collection =
+            list_items_with_state(&state, Some(&filter)).expect("list collection items");
+        assert_eq!(in_collection.len(), 1);
+        assert_eq!(in_collection[0].id, alpha.id);
+
+        filter = ItemFilter {
+            favorite: Some(true),
+            ..ItemFilter::default()
+        };
+        let favorites = list_items_with_state(&state, Some(&filter)).expect("list favorites");
+        assert_eq!(favorites.len(), 1);
+        assert_eq!(favorites[0].id, favorited.id);
+
+        filter = ItemFilter {
+            kind: Some("note".to_string()),
+            favorite: Some(true),
+            ..ItemFilter::default()
+        };
+        let combined = list_items_with_state(&state, Some(&filter)).expect("list combined");
+        assert_eq!(combined.len(), 1);
+        assert_eq!(combined[0].id, favorited.id);
+    }
+
+    #[test]
+    fn list_items_filters_by_tag() {
+        let vault = TempVault::new("list-tag-filter");
+        let state = vault.state();
+
+        let tagged =
+            save_item_with_state(&state, &note_input("Tagged", "body")).expect("save tagged");
+        let untagged =
+            save_item_with_state(&state, &note_input("Untagged", "body")).expect("save untagged");
+
+        set_item_tags_with_state(&state, &tagged.id, &["Work".to_string()]).expect("set tag");
+
+        let tags = list_tags_with_state(&state).expect("list tags");
+        let tag = tags
+            .iter()
+            .find(|tag| tag.name == "Work")
+            .expect("work tag");
+
+        let filter = ItemFilter {
+            tag_id: Some(tag.id.clone()),
+            ..ItemFilter::default()
+        };
+        let filtered = list_items_with_state(&state, Some(&filter)).expect("list by tag");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, tagged.id);
+        assert!(!filtered.iter().any(|summary| summary.id == untagged.id));
+    }
+
+    #[test]
+    fn list_items_query_escapes_like_wildcards() {
+        let vault = TempVault::new("list-query");
+        let state = vault.state();
+
+        let percent =
+            save_item_with_state(&state, &note_input("100% done", "body")).expect("save percent");
+        let underscore =
+            save_item_with_state(&state, &note_input("a_b note", "body")).expect("save underscore");
+        let _decoy =
+            save_item_with_state(&state, &note_input("1005 done", "body")).expect("save decoy");
+        let _other =
+            save_item_with_state(&state, &note_input("axb note", "body")).expect("save other");
+
+        let filter = ItemFilter {
+            query: Some("100%".to_string()),
+            ..ItemFilter::default()
+        };
+        let found = list_items_with_state(&state, Some(&filter)).expect("percent query");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, percent.id);
+
+        let filter = ItemFilter {
+            query: Some("a_b".to_string()),
+            ..ItemFilter::default()
+        };
+        let found = list_items_with_state(&state, Some(&filter)).expect("underscore query");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, underscore.id);
+
+        // Every note shares the content "body", so a content query reaches all four.
+        let filter = ItemFilter {
+            query: Some("body".to_string()),
+            ..ItemFilter::default()
+        };
+        let found = list_items_with_state(&state, Some(&filter)).expect("content query");
+        assert_eq!(found.len(), 4);
+
+        // The original file name is part of the search.
+        let source_path = vault.root.join("quarterly-report.txt");
+        fs::write(&source_path, b"data").expect("write source file");
+        let file_item =
+            import_file_with_state(&state, &source_path.to_string_lossy()).expect("import file");
+
+        let filter = ItemFilter {
+            query: Some("quarterly".to_string()),
+            ..ItemFilter::default()
+        };
+        let found = list_items_with_state(&state, Some(&filter)).expect("file name query");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, file_item.id);
+    }
+
+    #[test]
+    fn list_items_sorts_by_whitelisted_columns() {
+        let vault = TempVault::new("list-sort");
+        let state = vault.state();
+
+        let beta = save_item_with_state(&state, &note_input("Beta", "b")).expect("save beta");
+        let alpha = save_item_with_state(&state, &note_input("Alpha", "a")).expect("save alpha");
+        let source = save_item_with_state(&state, &source_input("A source", "https://example.com"))
+            .expect("save source");
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_ref().expect("connection is initialized");
+
+            for (id, stamp) in [
+                (&beta.id, "2020-01-01T00:00:00.000Z"),
+                (&alpha.id, "2021-01-01T00:00:00.000Z"),
+                (&source.id, "2022-01-01T00:00:00.000Z"),
+            ] {
+                connection
+                    .execute(
+                        "UPDATE items
+                         SET created_at = ?2, updated_at = ?2
+                         WHERE id = ?1",
+                        params![id, stamp],
+                    )
+                    .expect("age item");
+            }
+        }
+
+        let summaries = list_items_with_state(&state, None).expect("default sort");
+        assert_eq!(titles(&summaries), vec!["A source", "Alpha", "Beta"]);
+
+        for (sort, expected) in [
+            ("title", vec!["A source", "Alpha", "Beta"]),
+            ("created", vec!["A source", "Alpha", "Beta"]),
+        ] {
+            let filter = ItemFilter {
+                sort: Some(sort.to_string()),
+                ..ItemFilter::default()
+            };
+            let summaries = list_items_with_state(&state, Some(&filter)).expect("sorted summaries");
+            assert_eq!(titles(&summaries), expected, "sort {sort}");
+        }
+
+        let filter = ItemFilter {
+            sort: Some("kind".to_string()),
+            ..ItemFilter::default()
+        };
+        let summaries = list_items_with_state(&state, Some(&filter)).expect("kind sort");
+        assert_eq!(summaries[0].kind, "note");
+        assert_eq!(summaries[1].kind, "note");
+        assert_eq!(summaries[2].kind, "source");
+    }
+
+    #[test]
+    fn trashed_items_leave_lists_and_counts() {
+        let vault = TempVault::new("trash-excluded");
+        let state = vault.state();
+        seed_collection(&state, "col-live", "Live", 0);
+
+        let mut kept_input = note_input("Kept", "body");
+        kept_input.collection_id = Some("col-live".to_string());
+        let kept = save_item_with_state(&state, &kept_input).expect("save kept");
+
+        let mut trashed_input = note_input("Trashed", "body");
+        trashed_input.collection_id = Some("col-live".to_string());
+        let trashed = save_item_with_state(&state, &trashed_input).expect("save trashed");
+
+        set_item_tags_with_state(&state, &trashed.id, &["Gone".to_string()]).expect("tag trashed");
+        let tag_id = list_tags_with_state(&state).expect("list tags")[0]
+            .id
+            .clone();
+
+        let collections = list_collections_with_state(&state).expect("counts before trash");
+        let live = collections
+            .iter()
+            .find(|collection| collection.id == "col-live")
+            .expect("live collection");
+        assert_eq!(live.item_count, 2);
+
+        trash_items_with_state(&state, std::slice::from_ref(&trashed.id)).expect("trash item");
+
+        let summaries = list_items_with_state(&state, None).expect("list after trash");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, kept.id);
+
+        let collections = list_collections_with_state(&state).expect("counts after trash");
+        let live = collections
+            .iter()
+            .find(|collection| collection.id == "col-live")
+            .expect("live collection");
+        assert_eq!(live.item_count, 1);
+
+        let tags = list_tags_with_state(&state).expect("tags after trash");
+        let tag = tags.iter().find(|tag| tag.id == tag_id).expect("tag");
+        assert_eq!(tag.count, 0);
+
+        // The row survives with its deleted_at stamp for the Phase 4 restore.
+        let loaded = load_item_with_state(&state, &trashed.id).expect("load trashed item");
+        assert!(loaded.deleted_at.is_some());
+        assert!(!loaded.is_pinned);
+    }
+
+    #[test]
+    fn pin_round_trips_through_save_and_toggle() {
+        let vault = TempVault::new("pin");
+        let state = vault.state();
+
+        let saved = save_item_with_state(&state, &note_input("Pin me", "body")).expect("save note");
+        assert!(!saved.is_pinned);
+
+        let pinned = set_item_pinned_with_state(&state, &saved.id, true).expect("pin item");
+        assert!(pinned.is_pinned);
+
+        let loaded = load_item_with_state(&state, &saved.id).expect("load pinned");
+        assert!(loaded.is_pinned);
+
+        let summaries = list_items_with_state(&state, None).expect("list pinned");
+        assert!(summaries[0].is_pinned);
+
+        let mut update = note_input("Pin me", "body");
+        update.id = Some(saved.id.clone());
+        update.is_pinned = Some(true);
+        let updated = save_item_with_state(&state, &update).expect("save with pin");
+        assert!(updated.is_pinned);
+
+        let unpinned = set_item_pinned_with_state(&state, &saved.id, false).expect("unpin item");
+        assert!(!unpinned.is_pinned);
+
+        let error =
+            set_item_pinned_with_state(&state, "missing", true).expect_err("missing item rejected");
+        assert_eq!(error, "Item was not found");
+    }
+
+    #[test]
+    fn batch_favorite_changes_only_listed_items() {
+        let vault = TempVault::new("batch-favorite");
+        let state = vault.state();
+
+        let first = save_item_with_state(&state, &note_input("First", "body")).expect("save first");
+        let second =
+            save_item_with_state(&state, &note_input("Second", "body")).expect("save second");
+        let third = save_item_with_state(&state, &note_input("Third", "body")).expect("save third");
+
+        set_items_favorite_with_state(&state, &[first.id.clone(), second.id.clone()], true)
+            .expect("favorite two");
+
+        let summaries = list_items_with_state(&state, None).expect("list items");
+        let favorite_ids: Vec<&str> = summaries
+            .iter()
+            .filter(|summary| summary.is_favorite)
+            .map(|summary| summary.id.as_str())
+            .collect();
+        assert_eq!(favorite_ids.len(), 2);
+        assert!(favorite_ids.contains(&first.id.as_str()));
+        assert!(favorite_ids.contains(&second.id.as_str()));
+        assert!(!favorite_ids.contains(&third.id.as_str()));
+
+        set_items_favorite_with_state(&state, std::slice::from_ref(&second.id), false)
+            .expect("unfavorite one");
+        let loaded = load_item_with_state(&state, &second.id).expect("load second");
+        assert!(!loaded.is_favorite);
+    }
+
+    #[test]
+    fn batch_move_assigns_and_clears_collections() {
+        let vault = TempVault::new("batch-move");
+        let state = vault.state();
+        seed_collection(&state, "col-move-a", "Alpha", 0);
+
+        let first = save_item_with_state(&state, &note_input("First", "body")).expect("save first");
+        let second =
+            save_item_with_state(&state, &note_input("Second", "body")).expect("save second");
+
+        move_items_to_collection_with_state(
+            &state,
+            &[first.id.clone(), second.id.clone()],
+            Some("col-move-a"),
+        )
+        .expect("move both");
+
+        let loaded = load_item_with_state(&state, &first.id).expect("load first");
+        assert_eq!(loaded.collection_id.as_deref(), Some("col-move-a"));
+
+        move_items_to_collection_with_state(&state, std::slice::from_ref(&first.id), None)
+            .expect("clear one");
+        let loaded = load_item_with_state(&state, &first.id).expect("load cleared");
+        assert_eq!(loaded.collection_id, None);
+
+        let still = load_item_with_state(&state, &second.id).expect("load second");
+        assert_eq!(still.collection_id.as_deref(), Some("col-move-a"));
+
+        let error = move_items_to_collection_with_state(
+            &state,
+            std::slice::from_ref(&first.id),
+            Some("missing-collection"),
+        )
+        .expect_err("unknown collection rejected");
+        assert_eq!(error, "Collection does not exist");
+    }
+
+    #[test]
+    fn trash_writes_one_activity_row_per_item() {
+        let vault = TempVault::new("trash-activity");
+        let state = vault.state();
+
+        let first = save_item_with_state(&state, &note_input("First", "body")).expect("save first");
+        let second =
+            save_item_with_state(&state, &note_input("Second", "body")).expect("save second");
+
+        trash_items_with_state(&state, &[first.id.clone(), second.id.clone()]).expect("trash both");
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_ref().expect("connection is initialized");
+
+            for id in [&first.id, &second.id] {
+                let (deleted_at, trashed): (Option<String>, i64) = connection
+                    .query_row(
+                        "SELECT i.deleted_at,
+                                (SELECT COUNT(*) FROM activity a
+                                 WHERE a.item_id = i.id AND a.action = 'trashed')
+                         FROM items i
+                         WHERE i.id = ?1",
+                        params![id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .expect("read trashed state");
+
+                assert!(deleted_at.is_some());
+                assert_eq!(trashed, 1);
+            }
+        }
+
+        // Trashing an already-trashed item does not add a second activity row.
+        trash_items_with_state(&state, std::slice::from_ref(&first.id)).expect("trash again");
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let trashed: i64 = connection
+                .as_ref()
+                .expect("connection is initialized")
+                .query_row(
+                    "SELECT COUNT(*) FROM activity
+                     WHERE item_id = ?1 AND action = 'trashed'",
+                    params![first.id],
+                    |row| row.get(0),
+                )
+                .expect("count trash activity");
+            assert_eq!(trashed, 1);
+        }
+    }
+
+    #[test]
+    fn collections_carry_icon_and_live_item_count() {
+        let vault = TempVault::new("collection-icon");
+        let state = vault.state();
+
+        let created = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: None,
+                name: "  Projects  ".to_string(),
+                icon: Some("  folder  ".to_string()),
+            },
+        )
+        .expect("create collection");
+
+        assert_eq!(created.name, "Projects");
+        assert_eq!(created.icon.as_deref(), Some("folder"));
+        assert_eq!(created.item_count, 0);
+
+        let mut input = note_input("In project", "body");
+        input.collection_id = Some(created.id.clone());
+        let item = save_item_with_state(&state, &input).expect("save item in collection");
+
+        let collections = list_collections_with_state(&state).expect("list collections");
+        let stored = collections
+            .iter()
+            .find(|collection| collection.id == created.id)
+            .expect("stored collection");
+        assert_eq!(stored.item_count, 1);
+        assert_eq!(stored.icon.as_deref(), Some("folder"));
+
+        trash_items_with_state(&state, std::slice::from_ref(&item.id)).expect("trash item");
+        let collections = list_collections_with_state(&state).expect("list after trash");
+        let stored = collections
+            .iter()
+            .find(|collection| collection.id == created.id)
+            .expect("stored collection");
+        assert_eq!(stored.item_count, 0);
+    }
+
+    #[test]
+    fn save_collection_validates_and_renames() {
+        let vault = TempVault::new("save-collection");
+        let state = vault.state();
+
+        let created = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: None,
+                name: "Projects".to_string(),
+                icon: None,
+            },
+        )
+        .expect("create collection");
+        assert_eq!(created.sort_order, 0);
+
+        let second = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: None,
+                name: "Archive".to_string(),
+                icon: None,
+            },
+        )
+        .expect("create second collection");
+        assert_eq!(second.sort_order, 1);
+
+        let error = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: None,
+                name: "   ".to_string(),
+                icon: None,
+            },
+        )
+        .expect_err("blank name rejected");
+        assert_eq!(error, "Collection name is required");
+
+        let error = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: None,
+                name: "  projects  ".to_string(),
+                icon: None,
+            },
+        )
+        .expect_err("duplicate name rejected");
+        assert_eq!(error, "A collection with that name already exists");
+
+        // Renaming a collection to its own name stays valid.
+        let same = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: Some(created.id.clone()),
+                name: "Projects".to_string(),
+                icon: None,
+            },
+        )
+        .expect("same name rename");
+        assert_eq!(same.name, "Projects");
+
+        let renamed = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: Some(created.id.clone()),
+                name: "Projects renamed".to_string(),
+                icon: Some("star".to_string()),
+            },
+        )
+        .expect("rename collection");
+        assert_eq!(renamed.name, "Projects renamed");
+        assert_eq!(renamed.icon.as_deref(), Some("star"));
+
+        let error = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: Some(created.id.clone()),
+                name: "archive".to_string(),
+                icon: None,
+            },
+        )
+        .expect_err("duplicate rename rejected");
+        assert_eq!(error, "A collection with that name already exists");
+
+        let error = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: Some("missing".to_string()),
+                name: "Ghost".to_string(),
+                icon: None,
+            },
+        )
+        .expect_err("missing collection rejected");
+        assert_eq!(error, "Collection was not found");
+    }
+
+    #[test]
+    fn delete_collection_keeps_its_items() {
+        let vault = TempVault::new("delete-collection");
+        let state = vault.state();
+
+        let collection = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: None,
+                name: "Temporary".to_string(),
+                icon: None,
+            },
+        )
+        .expect("create collection");
+
+        let mut input = note_input("Kept", "body");
+        input.collection_id = Some(collection.id.clone());
+        let item = save_item_with_state(&state, &input).expect("save item");
+
+        delete_collection_with_state(&state, &collection.id).expect("delete collection");
+
+        let loaded = load_item_with_state(&state, &item.id).expect("load item after delete");
+        assert_eq!(loaded.collection_id, None);
+        assert_eq!(loaded.title, "Kept");
+
+        let collections = list_collections_with_state(&state).expect("list collections");
+        assert!(collections.is_empty());
+
+        let error = delete_collection_with_state(&state, &collection.id)
+            .expect_err("missing collection rejected");
+        assert_eq!(error, "Collection was not found");
+    }
+
+    #[test]
+    fn list_tags_counts_live_items() {
+        let vault = TempVault::new("tag-counts");
+        let state = vault.state();
+
+        let first = save_item_with_state(&state, &note_input("First", "body")).expect("save first");
+        let second =
+            save_item_with_state(&state, &note_input("Second", "body")).expect("save second");
+
+        set_item_tags_with_state(&state, &first.id, &["Work".to_string()]).expect("tag first");
+        set_item_tags_with_state(&state, &second.id, &["Work".to_string()]).expect("tag second");
+
+        let tags = list_tags_with_state(&state).expect("list tags");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "Work");
+        assert_eq!(tags[0].count, 2);
+
+        trash_items_with_state(&state, std::slice::from_ref(&first.id)).expect("trash first");
+        let tags = list_tags_with_state(&state).expect("list tags after trash");
+        assert_eq!(tags[0].count, 1);
+    }
+
+    #[test]
+    fn save_tag_validates_and_renames() {
+        let vault = TempVault::new("save-tag");
+        let state = vault.state();
+
+        let created = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: None,
+                name: "  Work  ".to_string(),
+            },
+        )
+        .expect("create tag");
+        assert_eq!(created.name, "Work");
+        assert_eq!(created.count, 0);
+
+        let error = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: None,
+                name: "   ".to_string(),
+            },
+        )
+        .expect_err("blank name rejected");
+        assert_eq!(error, "Tag name is required");
+
+        let error = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: None,
+                name: "work".to_string(),
+            },
+        )
+        .expect_err("duplicate name rejected");
+        assert_eq!(error, "A tag with that name already exists");
+
+        // Renaming a tag to its own spelling stays valid.
+        let same = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: Some(created.id.clone()),
+                name: "Work".to_string(),
+            },
+        )
+        .expect("same name rename");
+        assert_eq!(same.name, "Work");
+
+        let renamed = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: Some(created.id.clone()),
+                name: "Personal".to_string(),
+            },
+        )
+        .expect("rename tag");
+        assert_eq!(renamed.name, "Personal");
+
+        let other = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: None,
+                name: "Home".to_string(),
+            },
+        )
+        .expect("create other tag");
+
+        let error = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: Some(other.id.clone()),
+                name: "personal".to_string(),
+            },
+        )
+        .expect_err("duplicate rename rejected");
+        assert_eq!(error, "A tag with that name already exists");
+
+        let error = save_tag_with_state(
+            &state,
+            &TagInput {
+                id: Some("missing".to_string()),
+                name: "Ghost".to_string(),
+            },
+        )
+        .expect_err("missing tag rejected");
+        assert_eq!(error, "Tag was not found");
+    }
+
+    #[test]
+    fn delete_tag_keeps_its_items() {
+        let vault = TempVault::new("delete-tag");
+        let state = vault.state();
+
+        let item = save_item_with_state(&state, &note_input("Kept", "body")).expect("save item");
+        set_item_tags_with_state(&state, &item.id, &["Work".to_string()]).expect("tag item");
+
+        let tag = list_tags_with_state(&state).expect("list tags")[0].clone();
+
+        delete_tag_with_state(&state, &tag.id).expect("delete tag");
+
+        let loaded = load_item_with_state(&state, &item.id).expect("load item after delete");
+        assert_eq!(loaded.title, "Kept");
+        assert!(loaded.tags.is_empty());
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let links: i64 = connection
+                .as_ref()
+                .expect("connection is initialized")
+                .query_row(
+                    "SELECT COUNT(*) FROM item_tags WHERE tag_id = ?1",
+                    params![tag.id],
+                    |row| row.get(0),
+                )
+                .expect("count tag links");
+            assert_eq!(links, 0);
+        }
+
+        let error = delete_tag_with_state(&state, &tag.id).expect_err("missing tag rejected");
+        assert_eq!(error, "Tag was not found");
+    }
+
+    #[test]
+    fn file_items_update_metadata_but_are_never_created_through_save() {
+        let vault = TempVault::new("file-save");
+        let state = vault.state();
+        seed_collection(&state, "col-files", "Files", 0);
+
+        let source = vault.root.join("report.txt");
+        fs::write(&source, b"hello").expect("write source file");
+        let item = import_file_with_state(&state, &source.to_string_lossy()).expect("import file");
+
+        let updated = save_item_with_state(
+            &state,
+            &ItemInput {
+                id: Some(item.id.clone()),
+                kind: "file".to_string(),
+                title: "Renamed report".to_string(),
+                description: "updated metadata".to_string(),
+                content: Some("must not be stored".to_string()),
+                url: Some("https://example.com/must-not-be-stored".to_string()),
+                collection_id: Some("col-files".to_string()),
+                is_favorite: Some(true),
+                is_pinned: Some(true),
+            },
+        )
+        .expect("update file metadata");
+
+        assert_eq!(updated.kind, "file");
+        assert_eq!(updated.title, "Renamed report");
+        assert_eq!(updated.description, "updated metadata");
+        assert_eq!(updated.collection_id.as_deref(), Some("col-files"));
+        assert!(updated.is_favorite);
+        assert!(updated.is_pinned);
+        assert_eq!(updated.content, None, "file content stays empty");
+        assert_eq!(updated.url, None, "file url stays empty");
+        assert_eq!(
+            updated
+                .file
+                .as_ref()
+                .map(|file| file.original_name.as_str()),
+            Some("report.txt")
+        );
+
+        let error = save_item_with_state(
+            &state,
+            &ItemInput {
+                id: None,
+                kind: "file".to_string(),
+                title: "New file".to_string(),
+                description: String::new(),
+                content: None,
+                url: None,
+                collection_id: None,
+                is_favorite: None,
+                is_pinned: None,
+            },
+        )
+        .expect_err("file creation rejected");
+        assert_eq!(error, "File items are created by import");
     }
 }

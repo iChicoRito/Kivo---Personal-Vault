@@ -6,8 +6,13 @@ import {
   importFile,
   listItems,
   loadItem,
+  moveItemsToCollection,
   saveItem,
+  setItemPinned,
   setItemTags,
+  setItemsFavorite,
+  trashItems,
+  type ItemFilter,
   type ItemInput,
   type ItemSummary,
   type VaultItem,
@@ -23,6 +28,7 @@ const NOTE: VaultItem = {
   url: null,
   collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
   isFavorite: true,
+  isPinned: true,
   createdAt: '2026-09-14T09:30:00.000Z',
   updatedAt: '2026-09-16T14:05:00.000Z',
   tags: ['design', 'planning'],
@@ -39,6 +45,7 @@ const FILE_ITEM: VaultItem = {
   url: null,
   collectionId: null,
   isFavorite: false,
+  isPinned: false,
   createdAt: '2026-09-15T08:00:00.000Z',
   updatedAt: '2026-09-15T08:00:00.000Z',
   tags: [],
@@ -59,6 +66,8 @@ const SUMMARIES: ItemSummary[] = [
     collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
     updatedAt: '2026-09-16T14:05:00.000Z',
     fileMissing: false,
+    isPinned: true,
+    file: null,
   },
   {
     id: FILE_ITEM.id,
@@ -68,6 +77,12 @@ const SUMMARIES: ItemSummary[] = [
     collectionId: null,
     updatedAt: '2026-09-15T08:00:00.000Z',
     fileMissing: true,
+    isPinned: false,
+    file: {
+      originalName: 'Budget 2026.pdf',
+      byteSize: 284_915,
+      importedAt: '2026-09-15T08:00:00.000Z',
+    },
   },
 ]
 
@@ -86,6 +101,7 @@ describe('items data contract', () => {
       url: 'https://example.com/notes',
       collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
       isFavorite: true,
+      isPinned: true,
     }
 
     getTauriInvoke().mockResolvedValue({ ...NOTE })
@@ -102,8 +118,26 @@ describe('items data contract', () => {
         url: 'https://example.com/notes',
         collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         isFavorite: true,
+        isPinned: true,
       },
     })
+  })
+
+  it('updates file metadata through save_item with kind file', async () => {
+    const input: ItemInput = {
+      id: FILE_ITEM.id,
+      kind: 'file',
+      title: 'Budget 2026 renamed.pdf',
+      description: 'Annual budget',
+      collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+      isFavorite: true,
+      isPinned: true,
+    }
+
+    getTauriInvoke().mockResolvedValue({ ...FILE_ITEM, ...input })
+
+    await expect(saveItem(input)).resolves.toEqual({ ...FILE_ITEM, ...input })
+    expect(getTauriInvoke()).toHaveBeenCalledWith('save_item', { input })
   })
 
   it('reads one item with load_item and { id }', async () => {
@@ -113,11 +147,74 @@ describe('items data contract', () => {
     expect(getTauriInvoke()).toHaveBeenCalledWith('load_item', { id: NOTE.id })
   })
 
-  it('reads all items with list_items and no arguments', async () => {
+  it('reads all items with list_items and a null filter by default', async () => {
     getTauriInvoke().mockResolvedValue([...SUMMARIES])
 
     await expect(listItems()).resolves.toEqual(SUMMARIES)
-    expect(getTauriInvoke()).toHaveBeenCalledWith('list_items')
+    expect(getTauriInvoke()).toHaveBeenCalledWith('list_items', { filter: null })
+  })
+
+  it('passes a full filter through list_items', async () => {
+    const filter: ItemFilter = {
+      kind: 'note',
+      collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+      tagId: 'c3d4e5f60718293a4b5c6d7e8f90123',
+      favorite: true,
+      query: 'meeting',
+      sort: 'updated',
+    }
+
+    getTauriInvoke().mockResolvedValue([])
+
+    await expect(listItems(filter)).resolves.toEqual([])
+    expect(getTauriInvoke()).toHaveBeenCalledWith('list_items', { filter })
+  })
+
+  it('pins one item with set_item_pinned and { id, pinned }', async () => {
+    getTauriInvoke().mockResolvedValue(undefined)
+
+    await expect(setItemPinned(NOTE.id, true)).resolves.toBeUndefined()
+    expect(getTauriInvoke()).toHaveBeenCalledWith('set_item_pinned', {
+      id: NOTE.id,
+      pinned: true,
+    })
+  })
+
+  it('marks items favorite with set_items_favorite and { ids, favorite }', async () => {
+    getTauriInvoke().mockResolvedValue(undefined)
+
+    await expect(setItemsFavorite([NOTE.id, FILE_ITEM.id], true)).resolves.toBeUndefined()
+    expect(getTauriInvoke()).toHaveBeenCalledWith('set_items_favorite', {
+      ids: [NOTE.id, FILE_ITEM.id],
+      favorite: true,
+    })
+  })
+
+  it('moves items with move_items_to_collection and { ids, collectionId }', async () => {
+    const ids = [NOTE.id, FILE_ITEM.id]
+
+    getTauriInvoke().mockResolvedValue(undefined)
+
+    await expect(moveItemsToCollection(ids, 'a1b2c3d4e5f60718293a4b5c6d7e8f90')).resolves.toBeUndefined()
+    expect(getTauriInvoke()).toHaveBeenCalledWith('move_items_to_collection', {
+      ids,
+      collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    })
+
+    await expect(moveItemsToCollection(ids, null)).resolves.toBeUndefined()
+    expect(getTauriInvoke()).toHaveBeenLastCalledWith('move_items_to_collection', {
+      ids,
+      collectionId: null,
+    })
+  })
+
+  it('trashes items with trash_items and { ids }', async () => {
+    const ids = [NOTE.id, FILE_ITEM.id]
+
+    getTauriInvoke().mockResolvedValue(undefined)
+
+    await expect(trashItems(ids)).resolves.toBeUndefined()
+    expect(getTauriInvoke()).toHaveBeenCalledWith('trash_items', { ids })
   })
 
   it('imports a file through import_file with { sourcePath }', async () => {
