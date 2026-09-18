@@ -18,6 +18,7 @@ import SaveSourceDialog from '../sources/SaveSourceDialog'
 type QuickAddDialogProps = {
   open: boolean
   onClose: () => void
+  initialMode?: 'menu' | 'collection'
 }
 
 const NOTE_ERROR = 'Kivo could not create a note. Try again.'
@@ -25,16 +26,16 @@ const IMPORT_ERROR = 'Kivo could not import that file. Try again.'
 const COLLECTION_ERROR = 'Kivo could not create the collection. Try again.'
 const COLLECTION_REQUIRED = 'Collection name is required.'
 
-export function QuickAddDialog({ open, onClose }: QuickAddDialogProps) {
+export function QuickAddDialog({ open, onClose, initialMode = 'menu' }: QuickAddDialogProps) {
   const navigate = useNavigate()
-  const [mode, setMode] = useState<'menu' | 'collection'>('menu')
+  const [mode, setMode] = useState<'menu' | 'collection'>(initialMode)
   const [collectionName, setCollectionName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
 
   function close() {
-    setMode('menu')
+    setMode(initialMode)
     setCollectionName('')
     setError(null)
     onClose()

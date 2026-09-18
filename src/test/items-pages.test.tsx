@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const itemsMock = vi.hoisted(() => ({
@@ -161,6 +162,18 @@ const COLLECTIONS: Collection[] = [
 
 const TAGS: Tag[] = [{ id: 'tag-1', name: 'alpha', count: 1 }]
 
+const PAGED_ITEMS: ItemSummary[] = Array.from({ length: 12 }, (_, index) => ({
+  id: `page-${index + 1}`,
+  kind: 'note',
+  title: `Paged item ${String(index + 1).padStart(2, '0')}`,
+  isFavorite: false,
+  collectionId: null,
+  updatedAt: `2026-02-${String(index + 1).padStart(2, '0')}T10:00:00Z`,
+  fileMissing: false,
+  isPinned: false,
+  file: null,
+}))
+
 function toSummary(item: VaultItem): ItemSummary {
   return {
     id: item.id,
@@ -175,13 +188,34 @@ function toSummary(item: VaultItem): ItemSummary {
   }
 }
 
+// The Quick Add menu uses useNavigate, so the page needs a router around it.
 function renderItemsPage() {
-  return render(<ItemsPage />)
+  return render(
+    <MemoryRouter>
+      <ItemsPage />
+    </MemoryRouter>,
+  )
 }
 
-async function chooseSelectOption(triggerName: RegExp, optionName: string) {
-  fireEvent.click(screen.getByRole('button', { name: triggerName }))
-  fireEvent.click(await screen.findByRole('option', { name: optionName }))
+function itemTitles(): string[] {
+  return screen.getAllByRole('rowheader').map((cell) => cell.textContent ?? '')
+}
+
+async function openFiltersMenu() {
+  fireEvent.click(screen.getByRole('button', { name: 'Filters' }))
+  await screen.findByRole('menuitem', { name: 'Kind' })
+}
+
+// Open a Filters submenu with the keyboard instead of a mouse click: ArrowRight moves
+// focus into the submenu synchronously, while a jsdom click opens it with a deferred
+// focus step that races with React Aria's popover focus handling and closes it again.
+async function chooseFilterItem(submenuName: string, itemName: string) {
+  const trigger = screen.getByRole('menuitem', { name: submenuName })
+  trigger.focus()
+  fireEvent.keyDown(trigger, { key: 'ArrowRight' })
+
+  const item = await screen.findByRole('menuitemradio', { name: itemName })
+  fireEvent.keyDown(item, { key: 'Enter' })
 }
 
 function renderDetails(itemId: string | null = 'note-1') {
@@ -216,23 +250,49 @@ beforeEach(() => {
 })
 
 describe('ItemsPage', () => {
-  it('shows a loading state and then the item rows', async () => {
+  it('shows the item table with the mocked rows and no view toggle', async () => {
     renderItemsPage()
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading your items')
+
     expect(await screen.findByText('Alpha note')).toBeInTheDocument()
     expect(screen.getByText('Beta source')).toBeInTheDocument()
+
+    const table = screen.getByRole('grid', { name: 'All items' })
+    expect(within(table).getByText('Alpha note')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Title/ })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Kind/ })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Status/ })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /Updated/ })).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: 'List view' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Grid view' })).not.toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('shows the empty state when there are no items', async () => {
+  it('shows the empty state inside the table when there are no items', async () => {
     itemsMock.listItems.mockResolvedValue([])
     renderItemsPage()
 
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'No items yet.', exact: true }),
+      await screen.findByText('No items yet. Save a note, source, or file to see it here.'),
     ).toBeInTheDocument()
-    expect(screen.getByText('EMPTY STATE')).toBeInTheDocument()
+    expect(screen.getByRole('grid', { name: 'All items' })).toBeInTheDocument()
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+  })
+
+  it('shows a filter message inside the table when nothing matches', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    itemsMock.listItems.mockResolvedValue([])
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search items' }), {
+      target: { value: 'zzz' },
+    })
+
+    expect(
+      await screen.findByText('No items match your search or filters.'),
+    ).toBeInTheDocument()
   })
 
   it('shows an error alert and reloads from Try again', async () => {
@@ -250,7 +310,7 @@ describe('ItemsPage', () => {
     expect(itemsMock.listItems).toHaveBeenCalledTimes(2)
   })
 
-  it('reloads with the combined filter when the search term changes', async () => {
+  it('reloads with the query filter when the search term changes', async () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
     itemsMock.listItems.mockClear()
@@ -260,77 +320,150 @@ describe('ItemsPage', () => {
     })
 
     await waitFor(() =>
-      expect(itemsMock.listItems).toHaveBeenCalledWith(
-        expect.objectContaining({ query: 'alpha', sort: 'updated' }),
-      ),
+      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ query: 'alpha' }),
     )
   })
 
-  it('reloads with the favorite filter when the toggle changes', async () => {
+  it('sorts the rows by title and back when the Title column header is clicked', async () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
-    itemsMock.listItems.mockClear()
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Favorites only' }))
+    const titleHeader = screen.getByRole('columnheader', { name: /Title/ })
+
+    fireEvent.click(titleHeader)
+    expect(itemTitles()).toEqual(['Alpha note', 'Beta source'])
+
+    fireEvent.click(titleHeader)
+    expect(itemTitles()).toEqual(['Beta source', 'Alpha note'])
+
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows ten rows per page and moves to the next page', async () => {
+    itemsMock.listItems.mockResolvedValue(PAGED_ITEMS)
+    renderItemsPage()
+    await screen.findByText('Paged item 12')
+
+    expect(screen.getAllByRole('rowheader')).toHaveLength(10)
+    expect(screen.getByText('Showing 1 to 10 of 12 items')).toBeInTheDocument()
+    expect(screen.queryByText('Paged item 02')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    expect(await screen.findByText('Paged item 02')).toBeInTheDocument()
+    expect(screen.getByText('Showing 11 to 12 of 12 items')).toBeInTheDocument()
+    expect(screen.getAllByRole('rowheader')).toHaveLength(2)
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(1)
+  })
+
+  it('filters by kind from the Filters menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    await openFiltersMenu()
+    await chooseFilterItem('Kind', 'Notes')
 
     await waitFor(() =>
-      expect(itemsMock.listItems).toHaveBeenCalledWith(
-        expect.objectContaining({ favorite: true }),
-      ),
+      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ kind: 'note' }),
     )
   })
 
-  it('reloads with the chosen sort', async () => {
+  it('filters by collection from the Filters menu', async () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
-    itemsMock.listItems.mockClear()
 
-    await chooseSelectOption(/Sort by/, 'Created')
+    await openFiltersMenu()
+    await chooseFilterItem('Collection', 'Collection One')
 
     await waitFor(() =>
-      expect(itemsMock.listItems).toHaveBeenLastCalledWith(
-        expect.objectContaining({ sort: 'created' }),
-      ),
+      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ collectionId: 'collection-1' }),
     )
   })
 
-  it('switches between list and grid view through aria-pressed', async () => {
+  it('filters by tag from the Filters menu', async () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    const listButton = screen.getByRole('button', { name: 'List view' })
-    const gridButton = screen.getByRole('button', { name: 'Grid view' })
-
-    expect(listButton).toHaveAttribute('aria-pressed', 'true')
-    expect(gridButton).toHaveAttribute('aria-pressed', 'false')
-
-    fireEvent.click(gridButton)
-
-    expect(gridButton).toHaveAttribute('aria-pressed', 'true')
-    expect(listButton).toHaveAttribute('aria-pressed', 'false')
-  })
-
-  it('reloads with every combined filter', async () => {
-    renderItemsPage()
-    await screen.findByText('Alpha note')
-
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search items' }), {
-      target: { value: 'alpha' },
-    })
-    await chooseSelectOption(/Kind/, 'Notes')
-    await chooseSelectOption(/Collection/, 'Collection One')
-    await chooseSelectOption(/Tag/, 'alpha')
-    fireEvent.click(screen.getByRole('switch', { name: 'Favorites only' }))
+    await openFiltersMenu()
+    await chooseFilterItem('Tag', 'alpha')
 
     await waitFor(() =>
-      expect(itemsMock.listItems).toHaveBeenLastCalledWith({
-        kind: 'note',
-        collectionId: 'collection-1',
-        tagId: 'tag-1',
-        favorite: true,
-        query: 'alpha',
-        sort: 'updated',
-      }),
+      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ tagId: 'tag-1' }),
+    )
+  })
+
+  it('filters to favorites only from the Filters menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    await openFiltersMenu()
+    await chooseFilterItem('Favorites', 'Favorites only')
+
+    await waitFor(() =>
+      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ favorite: true }),
+    )
+  })
+
+  it('clears every filter from the Filters menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    await openFiltersMenu()
+    await chooseFilterItem('Kind', 'Notes')
+    await waitFor(() =>
+      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ kind: 'note' }),
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole('menuitem', { name: 'Kind' })).not.toBeInTheDocument(),
+    )
+    await openFiltersMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear filters' }))
+
+    await waitFor(() => expect(itemsMock.listItems).toHaveBeenLastCalledWith({}))
+  })
+
+  it('moves a row to Trash from its action menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Alpha note' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }))
+
+    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['note-1']))
+  })
+
+  it('toggles a row favorite from its action menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Alpha note' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Add to favorites' }))
+
+    await waitFor(() =>
+      expect(itemsMock.setItemsFavorite).toHaveBeenCalledWith(['note-1'], true),
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Beta source' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove favorite' }))
+
+    await waitFor(() =>
+      expect(itemsMock.setItemsFavorite).toHaveBeenCalledWith(['source-1'], false),
+    )
+  })
+
+  it('creates a note from the Quick Add menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quick Add' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
+
+    await waitFor(() =>
+      expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
     )
   })
 
@@ -338,7 +471,7 @@ describe('ItemsPage', () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha note' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
     expect(screen.getByText('1 selected')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }))
@@ -351,7 +484,7 @@ describe('ItemsPage', () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha note' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
     expect(screen.getByText('1 selected')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark favorite' }))
@@ -366,7 +499,7 @@ describe('ItemsPage', () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha note' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Move to collection' }))
 
     const dialog = await screen.findByRole('dialog')
@@ -385,7 +518,7 @@ describe('ItemsPage', () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Alpha note' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Trash' }))
 
     const dialog = await screen.findByRole('dialog')
@@ -399,7 +532,7 @@ describe('ItemsPage', () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    fireEvent.click(screen.getByRole('button', { name: /Alpha note/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Alpha note' }))
 
     expect(await screen.findByRole('heading', { name: 'Item details' })).toBeInTheDocument()
     expect(itemsMock.loadItem).toHaveBeenCalledWith('note-1')

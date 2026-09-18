@@ -27,7 +27,7 @@ const DEFAULT_DISTANCE = 140
 const DEFAULT_DISABLEMAGNIFICATION = false
 
 const dockVariants = cva(
-  "supports-backdrop-blur:bg-white/10 supports-backdrop-blur:dark:bg-black/10 mx-auto mt-8 flex h-[58px] w-max items-center justify-center gap-2 rounded-2xl border p-2 backdrop-blur-md"
+  "group relative mx-auto mt-8 flex h-[58px] w-max items-stretch justify-center"
 )
 
 const Dock = React.forwardRef<HTMLDivElement, DockProps>(
@@ -71,13 +71,26 @@ const Dock = React.forwardRef<HTMLDivElement, DockProps>(
         onMouseMove={(e) => mouseX.set(e.pageX)}
         onMouseLeave={() => mouseX.set(Infinity)}
         {...props}
-        className={cn(dockVariants({ className }), {
-          "items-start": direction === "top",
-          "items-center": direction === "middle",
-          "items-end": direction === "bottom",
-        })}
+        className={cn(dockVariants({ className }))}
       >
-        {renderChildren()}
+        {/* The glass bar hugs the icons at rest. Hovering, or focusing an icon with
+            the keyboard, grows it upward for the labels and lifts the content so
+            the labels keep equal top/bottom padding; hover also widens the gaps
+            between the icons. The root keeps its height so the page above never
+            reflows. */}
+        <div className="absolute inset-x-0 bottom-0 h-[58px] rounded-2xl border backdrop-blur-md transition-all duration-300 ease-out group-hover:h-[72px] group-hover:backdrop-blur-xl supports-backdrop-blur:bg-white/10 supports-backdrop-blur:dark:bg-black/10 supports-backdrop-blur:group-hover:bg-white/20 supports-backdrop-blur:dark:group-hover:bg-black/20 group-has-[:focus-visible]:h-[72px] group-has-[:focus-visible]:backdrop-blur-xl supports-backdrop-blur:group-has-[:focus-visible]:bg-white/20 supports-backdrop-blur:dark:group-has-[:focus-visible]:bg-black/20" />
+        <div
+          className={cn(
+            "relative flex justify-center gap-4 p-2 transition-[gap,padding-bottom] duration-300 ease-out group-hover:gap-8 group-hover:pb-3.5 group-has-[:focus-visible]:pb-3.5",
+            {
+              "items-start": direction === "top",
+              "items-center": direction === "middle",
+              "items-end": direction === "bottom",
+            }
+          )}
+        >
+          {renderChildren()}
+        </div>
       </motion.div>
     )
   }
@@ -95,6 +108,7 @@ export interface DockIconProps extends Omit<
   distance?: number
   mouseX?: MotionValue<number>
   className?: string
+  label?: string
   children?: React.ReactNode
   props?: PropsWithChildren
 }
@@ -106,6 +120,7 @@ const DockIcon = ({
   distance = DEFAULT_DISTANCE,
   mouseX,
   className,
+  label,
   children,
   ...props
 }: DockIconProps) => {
@@ -132,19 +147,32 @@ const DockIcon = ({
     damping: 12,
   })
 
+  // The motion box only reserves space; scaling the content is what makes the
+  // item nearest the cursor read larger than its neighbours.
+  const contentScale = useTransform(scaleSize, (value: number) => value / size)
+
   return (
-    <motion.div
-      ref={ref}
-      style={{ width: scaleSize, height: scaleSize, padding }}
-      className={cn(
-        "flex aspect-square cursor-pointer items-center justify-center rounded-full",
-        disableMagnification && "hover:bg-muted-foreground transition-colors",
-        className
-      )}
-      {...props}
-    >
-      <div>{children}</div>
-    </motion.div>
+    <div className="flex flex-col items-center justify-end gap-1 self-stretch">
+      <motion.div
+        ref={ref}
+        style={{ width: scaleSize, height: scaleSize, padding }}
+        className={cn(
+          "flex aspect-square shrink-0 cursor-pointer items-center justify-center rounded-full",
+          disableMagnification && "hover:bg-muted-foreground transition-colors",
+          className
+        )}
+        {...props}
+      >
+        <motion.div className="flex items-center justify-center" style={{ scale: contentScale }}>
+          {children}
+        </motion.div>
+      </motion.div>
+      {label ? (
+        <span className="-mt-3.5 h-2.5 max-w-16 shrink-0 translate-y-1 select-none truncate text-[10px] leading-none text-muted opacity-0 transition-all duration-300 ease-out group-hover:mt-0 group-hover:translate-y-0 group-hover:opacity-100 group-has-[:focus-visible]:mt-0 group-has-[:focus-visible]:translate-y-0 group-has-[:focus-visible]:opacity-100">
+          {label}
+        </span>
+      ) : null}
+    </div>
   )
 }
 

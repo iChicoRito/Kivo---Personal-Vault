@@ -1,0 +1,151 @@
+import { useState } from 'react'
+import { Button, Dropdown, Label, Typography } from '@heroui/react'
+import { HugeiconsIcon } from '@hugeicons/react'
+import {
+  FileImportIcon,
+  Folder01Icon,
+  Link01Icon,
+  Note01Icon,
+  PlusSignIcon,
+} from '@hugeicons/core-free-icons'
+import { useNavigate } from 'react-router-dom'
+
+import { importFile, saveItem } from '../../data/items'
+import { pickFile } from '../../data/files'
+import SaveSourceDialog from '../sources/SaveSourceDialog'
+import QuickAddDialog from './QuickAddDialog'
+
+type QuickAddMenuProps = {
+  onAdded?: () => void
+}
+
+const NOTE_ERROR = 'Kivo could not create a note. Try again.'
+const IMPORT_ERROR = 'Kivo could not import that file. Try again.'
+
+export function QuickAddMenu({ onAdded }: QuickAddMenuProps) {
+  const navigate = useNavigate()
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [sourceOpen, setSourceOpen] = useState(false)
+  const [collectionOpen, setCollectionOpen] = useState(false)
+
+  async function handleNewNote() {
+    setError(null)
+    setBusy(true)
+
+    try {
+      const note = await saveItem({ kind: 'note', title: 'Untitled note' })
+      onAdded?.()
+      navigate(`/notes/${note.id}`)
+    } catch {
+      setError(NOTE_ERROR)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleImport() {
+    setError(null)
+
+    let path: string | null
+
+    try {
+      path = await pickFile()
+    } catch {
+      setError(IMPORT_ERROR)
+      return
+    }
+
+    if (!path) return
+
+    setBusy(true)
+
+    try {
+      await importFile(path)
+      onAdded?.()
+      navigate('/files')
+    } catch {
+      setError(IMPORT_ERROR)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function handleAction(key: string) {
+    if (key === 'note') {
+      void handleNewNote()
+      return
+    }
+
+    if (key === 'source') {
+      setError(null)
+      setSourceOpen(true)
+      return
+    }
+
+    if (key === 'file') {
+      void handleImport()
+      return
+    }
+
+    if (key === 'collection') {
+      setError(null)
+      setCollectionOpen(true)
+    }
+  }
+
+  return (
+    <div className="grid justify-items-end gap-2">
+      <Dropdown>
+        <Button aria-label="Quick Add" isDisabled={busy} variant="primary">
+          <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={16} />
+          Quick Add
+        </Button>
+        <Dropdown.Popover>
+          <Dropdown.Menu onAction={(key) => handleAction(String(key))}>
+            <Dropdown.Item id="note" textValue="New note">
+              <HugeiconsIcon aria-hidden="true" icon={Note01Icon} size={16} />
+              <Label>New note</Label>
+            </Dropdown.Item>
+            <Dropdown.Item id="source" textValue="New source">
+              <HugeiconsIcon aria-hidden="true" icon={Link01Icon} size={16} />
+              <Label>New source</Label>
+            </Dropdown.Item>
+            <Dropdown.Item id="file" textValue="Import file">
+              <HugeiconsIcon aria-hidden="true" icon={FileImportIcon} size={16} />
+              <Label>Import file</Label>
+            </Dropdown.Item>
+            <Dropdown.Item id="collection" textValue="New collection">
+              <HugeiconsIcon aria-hidden="true" icon={Folder01Icon} size={16} />
+              <Label>New collection</Label>
+            </Dropdown.Item>
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
+
+      {error ? (
+        <Typography className="font-semibold text-danger" role="alert" type="body">
+          {error}
+        </Typography>
+      ) : null}
+
+      <SaveSourceDialog
+        itemId={null}
+        open={sourceOpen}
+        onClose={() => setSourceOpen(false)}
+        onSaved={() => {
+          setSourceOpen(false)
+          onAdded?.()
+        }}
+      />
+
+      <QuickAddDialog
+        initialMode="collection"
+        open={collectionOpen}
+        onClose={() => setCollectionOpen(false)}
+      />
+    </div>
+  )
+}
+
+export default QuickAddMenu

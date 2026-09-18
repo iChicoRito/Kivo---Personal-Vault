@@ -129,23 +129,15 @@ describe('AppShell', () => {
     }
   })
 
-  it('labels a dock icon with a tooltip', async () => {
+  it('renders a label under every dock icon for the hover reveal', () => {
     renderShell()
 
-    const notesLink = within(dock()).getByRole('link', { name: 'Notes', exact: true })
-    const trigger = notesLink.parentElement
+    const nav = dock()
 
-    // The dock must not gain a second tab stop per destination.
-    expect(trigger).toHaveAttribute('tabindex', '-1')
+    for (const label of destinationLabels) {
+      expect(within(nav).getByText(label, { exact: true })).toBeInTheDocument()
+    }
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
-
-    // jsdom cannot drive React Aria's pointer hover, so open the tooltip the
-    // other way the library supports: by focusing its trigger.
-    await act(async () => {
-      trigger?.focus()
-    })
-
-    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('Notes'))
   })
 
   it('toggles the theme from the navbar control', async () => {

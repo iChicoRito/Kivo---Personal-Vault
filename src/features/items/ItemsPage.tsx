@@ -1,23 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
   Card,
-  EmptyState,
   Input,
   Label,
-  ListBox,
   Modal,
-  Select,
   Spinner,
-  Switch,
   TextField,
   Typography,
+  type SortDescriptor,
 } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
-import { ItemList } from '../../components/items/ItemList'
+import { FilterMenu, type KindFilter } from '../../components/items/FilterMenu'
+import { ItemTable } from '../../components/items/ItemTable'
 import { listCollections, type Collection } from '../../data/collections'
 import {
   listItems,
@@ -25,35 +23,16 @@ import {
   setItemsFavorite,
   trashItems,
   type ItemFilter,
-  type ItemKind,
-  type ItemSort,
   type ItemSummary,
 } from '../../data/items'
 import { listTags, type Tag } from '../../data/tags'
+import { QuickAddMenu } from '../quick-add/QuickAddMenu'
 import { ItemDetailsDialog } from './ItemDetailsDialog'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type KindFilter = 'all' | ItemKind
-type ViewMode = 'list' | 'grid'
 
+const PAGE_SIZE = 10
 const panelLabelClass = 'uppercase'
-
-const KIND_OPTIONS: { key: KindFilter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'note', label: 'Notes' },
-  { key: 'source', label: 'Sources' },
-  { key: 'file', label: 'Files' },
-]
-
-const SORT_OPTIONS: { key: ItemSort; label: string }[] = [
-  { key: 'title', label: 'Title' },
-  { key: 'created', label: 'Created' },
-  { key: 'updated', label: 'Updated' },
-  { key: 'kind', label: 'Kind' },
-]
-
-const ALL_COLLECTIONS = 'kivo-all-collections'
-const ALL_TAGS = 'kivo-all-tags'
 
 function buildFilter(
   kind: KindFilter,
@@ -61,9 +40,8 @@ function buildFilter(
   tagId: string | null,
   favorite: boolean,
   query: string,
-  sort: ItemSort,
 ): ItemFilter {
-  const filter: ItemFilter = { sort }
+  const filter: ItemFilter = {}
 
   if (kind !== 'all') filter.kind = kind
   if (collectionId) filter.collectionId = collectionId
@@ -74,6 +52,22 @@ function buildFilter(
   if (trimmedQuery) filter.query = trimmedQuery
 
   return filter
+}
+
+function sortItems(items: ItemSummary[], descriptor: SortDescriptor): ItemSummary[] {
+  const direction = descriptor.direction === 'descending' ? -1 : 1
+  const column = String(descriptor.column)
+
+  return [...items].sort((first, second) => {
+    let result: number
+
+    if (column === 'title') result = first.title.localeCompare(second.title)
+    else if (column === 'kind') result = first.kind.localeCompare(second.kind)
+    else if (column === 'updated') result = first.updatedAt.localeCompare(second.updatedAt)
+    else result = 0
+
+    return result * direction
+  })
 }
 
 export function ItemsPage() {
@@ -89,12 +83,17 @@ export function ItemsPage() {
   const [collectionId, setCollectionId] = useState<string | null>(null)
   const [tagId, setTagId] = useState<string | null>(null)
   const [favorite, setFavorite] = useState(false)
-  const [sort, setSort] = useState<ItemSort>('updated')
-  const [view, setView] = useState<ViewMode>('list')
+  const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
+    column: 'updated',
+    direction: 'descending',
+  })
+  const [page, setPage] = useState(1)
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [moveIds, setMoveIds] = useState<string[]>([])
   const [moveOpen, setMoveOpen] = useState(false)
   const [targetCollectionId, setTargetCollectionId] = useState<string | null>(null)
+  const [trashIds, setTrashIds] = useState<string[]>([])
   const [trashOpen, setTrashOpen] = useState(false)
   const [openItemId, setOpenItemId] = useState<string | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
@@ -119,7 +118,7 @@ export function ItemsPage() {
     let active = true
     setLoadState('loading')
 
-    listItems(buildFilter(kind, collectionId, tagId, favorite, query, sort))
+    listItems(buildFilter(kind, collectionId, tagId, favorite, query))
       .then((loaded) => {
         if (!active) return
         setItems(loaded)
@@ -132,17 +131,25 @@ export function ItemsPage() {
     return () => {
       active = false
     }
-  }, [attempt, kind, collectionId, tagId, favorite, query, sort])
+  }, [attempt, kind, collectionId, tagId, favorite, query])
+
+  useEffect(() => {
+    setPage(1)
+  }, [kind, collectionId, tagId, favorite, query, sortDescriptor])
+
+  const sortedItems = useMemo(() => sortItems(items, sortDescriptor), [items, sortDescriptor])
+  const totalPages = Math.max(1, Math.ceil(sortedItems.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedItems = useMemo(
+    () => sortedItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [sortedItems, currentPage],
+  )
+  const hasActiveFilters =
+    kind !== 'all' || collectionId !== null || tagId !== null || favorite || query.trim() !== ''
 
   function reload() {
     setSelectedIds([])
     setAttempt((value) => value + 1)
-  }
-
-  function handleToggleSelect(id: string) {
-    setSelectedIds((current) =>
-      current.includes(id) ? current.filter((selected) => selected !== id) : [...current, id],
-    )
   }
 
   async function runBatch(action: () => Promise<void>) {
@@ -162,10 +169,29 @@ export function ItemsPage() {
     })
   }
 
+  async function handleRowFavorite(id: string, nextFavorite: boolean) {
+    await runBatch(async () => {
+      await setItemsFavorite([id], nextFavorite)
+      reload()
+    })
+  }
+
+  function openMove(ids: string[]) {
+    setMoveIds(ids)
+    setTargetCollectionId(null)
+    setMoveOpen(true)
+  }
+
+  function openTrash(ids: string[]) {
+    setTrashIds(ids)
+    setTrashOpen(true)
+  }
+
   async function handleMove() {
     await runBatch(async () => {
-      await moveItemsToCollection(selectedIds, targetCollectionId)
+      await moveItemsToCollection(moveIds, targetCollectionId)
       setMoveOpen(false)
+      setMoveIds([])
       setTargetCollectionId(null)
       reload()
     })
@@ -173,8 +199,9 @@ export function ItemsPage() {
 
   async function handleTrash() {
     await runBatch(async () => {
-      await trashItems(selectedIds)
+      await trashItems(trashIds)
       setTrashOpen(false)
+      setTrashIds([])
       reload()
     })
   }
@@ -187,142 +214,35 @@ export function ItemsPage() {
         titleId="items-title"
       />
 
-      <Card aria-label="Item filters">
-        <Card.Content className="grid gap-4">
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(12rem,1fr))]">
-            <TextField value={query} onChange={setQuery}>
-              <Label>Search items</Label>
-              <Input fullWidth placeholder="Search by title" variant="secondary" />
-            </TextField>
+      <div className="flex flex-wrap items-end gap-3">
+        <TextField className="w-full max-w-sm" value={query} onChange={setQuery}>
+          <Label>Search items</Label>
+          <Input fullWidth placeholder="Search by title" variant="secondary" />
+        </TextField>
 
-            <Select
-              selectedKey={kind}
-              variant="secondary"
-              onSelectionChange={(key) => setKind(String(key) as KindFilter)}
-            >
-              <Label>Kind</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {KIND_OPTIONS.map((option) => (
-                    <ListBox.Item key={option.key} id={option.key} textValue={option.label}>
-                      {option.label}
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
+        <FilterMenu
+          collectionId={collectionId}
+          collections={collections}
+          favoritesOnly={favorite}
+          kind={kind}
+          tagId={tagId}
+          tags={tags}
+          onClear={() => {
+            setKind('all')
+            setCollectionId(null)
+            setTagId(null)
+            setFavorite(false)
+          }}
+          onCollectionChange={setCollectionId}
+          onFavoritesChange={setFavorite}
+          onKindChange={setKind}
+          onTagChange={setTagId}
+        />
 
-            <Select
-              selectedKey={collectionId ?? ALL_COLLECTIONS}
-              variant="secondary"
-              onSelectionChange={(key) =>
-                setCollectionId(key === null || key === ALL_COLLECTIONS ? null : String(key))
-              }
-            >
-              <Label>Collection</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  <ListBox.Item id={ALL_COLLECTIONS} textValue="All collections">
-                    All collections
-                  </ListBox.Item>
-                  {collections.map((collection) => (
-                    <ListBox.Item
-                      key={collection.id}
-                      id={collection.id}
-                      textValue={collection.name}
-                    >
-                      {collection.name}
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-
-            <Select
-              selectedKey={tagId ?? ALL_TAGS}
-              variant="secondary"
-              onSelectionChange={(key) =>
-                setTagId(key === null || key === ALL_TAGS ? null : String(key))
-              }
-            >
-              <Label>Tag</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  <ListBox.Item id={ALL_TAGS} textValue="All tags">
-                    All tags
-                  </ListBox.Item>
-                  {tags.map((tag) => (
-                    <ListBox.Item key={tag.id} id={tag.id} textValue={tag.name}>
-                      {tag.name}
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-
-            <Select
-              selectedKey={sort}
-              variant="secondary"
-              onSelectionChange={(key) => setSort(String(key) as ItemSort)}
-            >
-              <Label>Sort by</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {SORT_OPTIONS.map((option) => (
-                    <ListBox.Item key={option.key} id={option.key} textValue={option.label}>
-                      {option.label}
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <Switch isSelected={favorite} onChange={setFavorite}>
-              <Switch.Content>
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-                Favorites only
-              </Switch.Content>
-            </Switch>
-
-            <div className="flex items-center gap-2">
-              <Button
-                aria-pressed={view === 'list'}
-                variant={view === 'list' ? 'primary' : 'secondary'}
-                onPress={() => setView('list')}
-              >
-                List view
-              </Button>
-              <Button
-                aria-pressed={view === 'grid'}
-                variant={view === 'grid' ? 'primary' : 'secondary'}
-                onPress={() => setView('grid')}
-              >
-                Grid view
-              </Button>
-            </div>
-          </div>
-        </Card.Content>
-      </Card>
+        <div className="ms-auto">
+          <QuickAddMenu onAdded={() => setAttempt((value) => value + 1)} />
+        </div>
+      </div>
 
       {selectedIds.length > 0 ? (
         <Card aria-label="Batch actions">
@@ -330,7 +250,7 @@ export function ItemsPage() {
             <Typography type="body" weight="bold">
               {selectedIds.length} selected
             </Typography>
-            <Button variant="secondary" onPress={() => setMoveOpen(true)}>
+            <Button variant="secondary" onPress={() => openMove(selectedIds)}>
               Move to collection
             </Button>
             <Button variant="secondary" onPress={() => void handleFavorite(true)}>
@@ -339,7 +259,7 @@ export function ItemsPage() {
             <Button variant="secondary" onPress={() => void handleFavorite(false)}>
               Remove favorite
             </Button>
-            <Button variant="danger" onPress={() => setTrashOpen(true)}>
+            <Button variant="danger" onPress={() => openTrash(selectedIds)}>
               Trash
             </Button>
             <Button variant="secondary" onPress={() => setSelectedIds([])}>
@@ -403,35 +323,39 @@ export function ItemsPage() {
         </Alert>
       ) : null}
 
-      {loadState === 'ready' && items.length === 0 ? (
-        <EmptyState aria-labelledby="items-empty-title" className="grid justify-items-start gap-3">
-          <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-            EMPTY STATE
-          </Typography>
-          <Typography id="items-empty-title" type="h2">
-            No items yet.
-          </Typography>
-          <Typography color="muted" type="body">
-            Saved notes, sources, files, and other items will appear here.
-          </Typography>
-        </EmptyState>
-      ) : null}
-
-      {loadState === 'ready' && items.length > 0 ? (
-        <ItemList
-          items={items}
+      {loadState === 'ready' ? (
+        <ItemTable
+          emptyMessage={
+            hasActiveFilters
+              ? 'No items match your search or filters.'
+              : 'No items yet. Save a note, source, or file to see it here.'
+          }
+          items={pagedItems}
+          page={currentPage}
+          pageSize={PAGE_SIZE}
           selectable
           selectedIds={selectedIds}
-          view={view}
+          sortDescriptor={sortDescriptor}
+          totalItems={sortedItems.length}
+          onMove={(id) => openMove([id])}
           onOpen={setOpenItemId}
-          onToggleSelect={handleToggleSelect}
+          onPageChange={setPage}
+          onSelectionChange={setSelectedIds}
+          onSortChange={setSortDescriptor}
+          onToggleFavorite={(id, next) => {
+            void handleRowFavorite(id, next)
+          }}
+          onTrash={(id) => openTrash([id])}
         />
       ) : null}
 
       <Modal
         isOpen={moveOpen}
         onOpenChange={(isOpen) => {
-          if (!isOpen) setMoveOpen(false)
+          if (!isOpen) {
+            setMoveOpen(false)
+            setMoveIds([])
+          }
         }}
       >
         <Modal.Backdrop>
@@ -460,11 +384,18 @@ export function ItemsPage() {
 
       <ConfirmDialog
         confirmLabel="Move to trash"
-        description="The selected items leave every list. You can restore them in a later version."
+        description={
+          trashIds.length === 1
+            ? 'This item leaves every list. You can restore it in a later version.'
+            : 'The selected items leave every list. You can restore them in a later version.'
+        }
         open={trashOpen}
-        title="Move selected items to Trash?"
+        title={trashIds.length === 1 ? 'Move this item to Trash?' : 'Move selected items to Trash?'}
         tone="danger"
-        onCancel={() => setTrashOpen(false)}
+        onCancel={() => {
+          setTrashOpen(false)
+          setTrashIds([])
+        }}
         onConfirm={() => void handleTrash()}
       />
 

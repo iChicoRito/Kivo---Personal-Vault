@@ -64,10 +64,11 @@
   }
 
   /* With the sidebar gone the page area is the whole window, so the content
-     wrapper spans it and only keeps breathing room at the edges. */
+     wrapper spans it and only keeps breathing room at the edges. The inline
+     padding grows with the window so wide pages read a little narrower. */
   #kivo-content {
     padding-block: clamp(1.25rem, 2.5vw, 2.5rem);
-    padding-inline: 1.5rem;
+    padding-inline: clamp(1.5rem, 3vw, 3rem);
   }
 
   [data-density="compact"] #kivo-content {
@@ -80,21 +81,25 @@
       padding-inline: 1rem;
     }
   }
+}
 
-  /*
-   * Dock tooltips. A floating position is sampled once when the bubble opens, which
-   * happens while magnification is still shifting the icons, so the bubble can sit
-   * off-centre. Every icon carries its own anchor name instead, and the bubble asks
-   * that anchor for its centre; Chromium (the app's WebView) resolves it live as the
-   * dock springs. Browsers without anchor positioning keep the sampled position.
-   */
-  .kivo-dock-hover {
-    anchor-name: var(--kivo-dock-tip);
+/*
+ * Dock emphasis. While the dock bar is hovered the rest of the screen goes out
+ * of focus, so the dock reads as the active surface. CSS keeps the pointer
+ * tracking out of React; the rest state declares blur(0) so the filter
+ * transition has both ends. The navbar and main areas are the only non-dock
+ * regions of the workspace grid.
+ */
+@layer components {
+  #kivo-navbar,
+  #kivo-main {
+    filter: blur(0px);
+    transition: filter 300ms ease-out;
   }
 
-  .kivo-dock-tip {
-    left: anchor(var(--kivo-dock-tip) center) !important;
-    translate: -50% 0;
+  #kivo-shell:has(.kivo-dock:hover) #kivo-navbar,
+  #kivo-shell:has(.kivo-dock:hover) #kivo-main {
+    filter: blur(8px);
   }
 }
 
@@ -111,6 +116,26 @@
     box-shadow: none;
     outline: 1px solid var(--border);
     outline-offset: 0;
+  }
+}
+
+/*
+ * Row action menus in the items table. The trigger is a quiet ghost icon button,
+ * but HeroUI still paints the accent focus ring on it and on the menu items,
+ * which reads as a primary halo in a dense table. Both mark focus the way hover
+ * is marked instead: a soft surface, plus a hairline on the trigger.
+ */
+@layer utilities {
+  .kivo-row-actions-trigger:is(:focus-visible, [data-focus-visible="true"]) {
+    --button-bg: var(--default);
+    box-shadow: none;
+    outline: 1px solid var(--border);
+    outline-offset: 0;
+  }
+
+  .kivo-row-actions-menu .menu-item:is(:focus-visible, [data-focus-visible="true"]) {
+    box-shadow: none;
+    background-color: var(--default);
   }
 }
 
