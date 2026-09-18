@@ -41,7 +41,7 @@ const {
   emptyDescription: notesEmptyDescription,
 } = notesModule
 
-const panelLabelClass = 'uppercase tracking-[0.14em]'
+const panelLabelClass = 'uppercase'
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
@@ -157,7 +157,6 @@ export function NotesPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <PageHeader
           description={notesDescription}
-          eyebrow="KIVO"
           title={notesTitle}
           titleId="notes-title"
         />

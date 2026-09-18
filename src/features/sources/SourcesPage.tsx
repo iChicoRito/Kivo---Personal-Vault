@@ -33,7 +33,7 @@ const {
   emptyDescription: sourcesEmptyDescription,
 } = sourcesModule
 
-const panelLabelClass = 'uppercase tracking-[0.14em]'
+const panelLabelClass = 'uppercase'
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
@@ -145,7 +145,6 @@ export function SourcesPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <PageHeader
           description={sourcesDescription}
-          eyebrow="KIVO"
           title={sourcesTitle}
           titleId="sources-title"
         />

@@ -145,7 +145,7 @@ const stateLabels: Record<ModuleState, string> = {
   error: 'ERROR',
 }
 
-const panelLabelClass = 'uppercase tracking-[0.14em]'
+const panelLabelClass = 'uppercase'
 
 export default function ModulePage({ module, state = 'empty', onRetry }: ModulePageProps) {
   const titleId = `${module.path}-title`
@@ -155,7 +155,6 @@ export default function ModulePage({ module, state = 'empty', onRetry }: ModuleP
     <section aria-labelledby={titleId} className="grid gap-8">
       <PageHeader
         description={module.description}
-        eyebrow="KIVO"
         title={module.title}
         titleId={titleId}
       />

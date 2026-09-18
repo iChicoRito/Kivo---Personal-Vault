@@ -20,7 +20,6 @@ export function NotFoundPage() {
     <section aria-labelledby="not-found-title" className="grid gap-8">
       <PageHeader
         description="This Kivo destination does not exist."
-        eyebrow="KIVO"
         title="Not Found"
         titleId="not-found-title"
       />

@@ -36,7 +36,7 @@ type LoadState = 'loading' | 'ready' | 'error'
 type KindFilter = 'all' | ItemKind
 type ViewMode = 'list' | 'grid'
 
-const panelLabelClass = 'uppercase tracking-[0.14em]'
+const panelLabelClass = 'uppercase'
 
 const KIND_OPTIONS: { key: KindFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -183,7 +183,6 @@ export function ItemsPage() {
     <section aria-labelledby="items-title" className="grid gap-5">
       <PageHeader
         description="Browse saved items from one place."
-        eyebrow="KIVO"
         title="All Items"
         titleId="items-title"
       />

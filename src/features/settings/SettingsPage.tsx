@@ -34,7 +34,7 @@ import AppLockSettings from '../security/AppLockSettings'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-const stateLabelClass = 'uppercase tracking-[0.14em]'
+const stateLabelClass = 'uppercase'
 
 type Choice<Value extends string> = { value: Value; label: string }
 
@@ -278,7 +278,6 @@ export default function SettingsPage() {
   const heading = (
     <PageHeader
       description="Manage Kivo presentation and local app preferences."
-      eyebrow="KIVO"
       title="Settings"
       titleId="settings-title"
     />

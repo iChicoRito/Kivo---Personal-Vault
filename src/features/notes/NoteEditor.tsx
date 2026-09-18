@@ -243,14 +243,14 @@ export function NoteEditor() {
   if (loadState === 'loading') {
     return (
       <section aria-labelledby="note-editor-title" className="grid gap-8">
-        <PageHeader eyebrow="KIVO" title="Note" titleId="note-editor-title" />
+        <PageHeader title="Note" titleId="note-editor-title" />
         <Card aria-live="polite" role="status">
           <Card.Content className="grid gap-3">
             <div className="flex items-center gap-3">
               <span aria-hidden="true">
                 <Spinner size="sm" />
               </span>
-              <Typography className="uppercase tracking-[0.14em]" color="muted" type="body-xs" weight="bold">
+              <Typography className="uppercase" color="muted" type="body-xs" weight="bold">
                 LOADING
               </Typography>
             </div>
@@ -267,7 +267,7 @@ export function NoteEditor() {
   if (loadState === 'missing' || !item) {
     return (
       <section aria-labelledby="note-editor-title" className="grid gap-8">
-        <PageHeader eyebrow="KIVO" title="Note not found" titleId="note-editor-title" />
+        <PageHeader title="Note not found" titleId="note-editor-title" />
         <Alert role="alert" status="danger">
           <Alert.Content className="grid gap-3">
             <Typography type="body">
@@ -285,7 +285,7 @@ export function NoteEditor() {
   return (
     <section aria-labelledby="note-editor-title" className="grid gap-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <PageHeader eyebrow="KIVO" title={title.trim() || UNTITLED} titleId="note-editor-title" />
+        <PageHeader title={title.trim() || UNTITLED} titleId="note-editor-title" />
         <div className="flex flex-wrap items-center gap-3">
           <Typography aria-live="polite" color="muted" type="body-xs">
             {STATUS_TEXT[saveStatus]}

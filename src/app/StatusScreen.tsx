@@ -41,7 +41,7 @@ export function StatusScreen(props: StatusScreenProps) {
       >
         <div className="mx-auto flex min-h-[calc(100vh-6rem)] max-w-3xl flex-col justify-center gap-5">
           <Typography
-            className="uppercase tracking-[0.18em]"
+            className="uppercase"
             color="muted"
             type="body-xs"
             weight="medium"
@@ -97,7 +97,7 @@ function DatabaseErrorScreen({ error, onRetry }: { error: unknown; onRetry: () =
     >
       <div className="mx-auto flex min-h-[calc(100vh-6rem)] max-w-3xl flex-col justify-center gap-5">
         <Typography
-          className="uppercase tracking-[0.18em]"
+          className="uppercase"
           color="muted"
           type="body-xs"
           weight="medium"

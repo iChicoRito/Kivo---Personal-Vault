@@ -21,7 +21,7 @@ import { deleteTag, listTags, saveTag, type Tag } from '../../data/tags'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-const stateLabelClass = 'uppercase tracking-[0.14em]'
+const stateLabelClass = 'uppercase'
 
 const NAME_REQUIRED_ERROR = 'Tag name is required.'
 const SAVE_ERROR = 'Kivo could not save this tag. Try again.'
@@ -135,7 +135,6 @@ export function TagsPage() {
   const heading = (
     <PageHeader
       description="Use tags to describe saved items."
-      eyebrow="KIVO"
       title="Tags"
       titleId="tags-title"
     />

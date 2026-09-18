@@ -64,7 +64,6 @@ export default function UnlockPage({ onUnlocked }: UnlockPageProps) {
       <div className="mx-auto grid max-w-xl gap-8">
         <PageHeader
           description="Enter your Master Password to open Kivo on this device."
-          eyebrow="KIVO"
           title="Unlock your vault"
           titleId="unlock-title"
         />

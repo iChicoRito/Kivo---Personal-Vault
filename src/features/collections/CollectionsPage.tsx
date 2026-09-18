@@ -31,7 +31,7 @@ import { listItems, type ItemSummary } from '../../data/items'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-const stateLabelClass = 'uppercase tracking-[0.14em]'
+const stateLabelClass = 'uppercase'
 const NO_ICON = 'kivo-no-icon'
 
 const ICON_OPTIONS = [
@@ -165,7 +165,6 @@ export function CollectionsPage() {
   const heading = (
     <PageHeader
       description="Organize items into named collections."
-      eyebrow="KIVO"
       title="Collections"
       titleId="collections-title"
     />

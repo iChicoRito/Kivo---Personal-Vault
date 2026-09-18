@@ -27,7 +27,7 @@ import { openItemFile, pickFile, revealItemFile } from '../../data/files'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-const stateLabelClass = 'uppercase tracking-[0.14em]'
+const stateLabelClass = 'uppercase'
 
 const MISSING_FILE_MESSAGE =
   'This file is missing from this device. Import it again to restore access.'
@@ -234,7 +234,6 @@ export function FilesPage() {
   const heading = (
     <PageHeader
       description="Keep local files within reach."
-      eyebrow="KIVO"
       title="Files"
       titleId="files-title"
     />

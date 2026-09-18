@@ -43,7 +43,7 @@ const KIND_LABELS: Record<ItemKind, string> = {
   file: 'File',
 }
 
-const panelLabelClass = 'uppercase tracking-[0.14em]'
+const panelLabelClass = 'uppercase'
 const SAVE_ERROR = 'Kivo could not save this change. Your saved details are unchanged.'
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {

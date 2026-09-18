@@ -304,7 +304,7 @@ export default function AppLockSettings() {
               </form>
 
               <div className="flex flex-col gap-3 border-t border-border pt-6">
-                <Typography className="uppercase tracking-[0.11em]" color="muted" type="body-xs" weight="bold">
+                <Typography className="uppercase" color="muted" type="body-xs" weight="bold">
                   Remove app lock
                 </Typography>
                 <Typography color="muted" type="body">
