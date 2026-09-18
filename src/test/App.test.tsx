@@ -1,0 +1,240 @@
+import '@testing-library/jest-dom/vitest'
+
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const boot = vi.hoisted(() => ({
+  initializeDatabase: vi.fn(),
+  loadBootState: vi.fn(),
+  completeSetup: vi.fn(),
+  hashPassword: vi.fn(),
+  verifyPassword: vi.fn(),
+  readAppLockVerifier: vi.fn(),
+  setAppLock: vi.fn(),
+  removeAppLock: vi.fn(),
+  hasAppLock: vi.fn(),
+}))
+
+const settings = vi.hoisted(() => ({
+  loadPreferences: vi.fn(),
+  savePreferences: vi.fn(),
+}))
+
+vi.mock('../data/database', () => ({
+  initializeDatabase: boot.initializeDatabase,
+}))
+
+vi.mock('../data/settings', () => settings)
+
+vi.mock('../data/setup', () => ({
+  loadBootState: boot.loadBootState,
+  completeSetup: boot.completeSetup,
+}))
+
+vi.mock('../data/security', () => ({
+  hashPassword: boot.hashPassword,
+  verifyPassword: boot.verifyPassword,
+  readAppLockVerifier: boot.readAppLockVerifier,
+  setAppLock: boot.setAppLock,
+  removeAppLock: boot.removeAppLock,
+  hasAppLock: boot.hasAppLock,
+}))
+
+import App from '../App'
+
+const VERIFIER = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA'
+
+function resetBoot() {
+  for (const mock of Object.values(boot)) mock.mockReset()
+
+  settings.loadPreferences.mockReset()
+  settings.savePreferences.mockReset()
+  settings.loadPreferences.mockResolvedValue({
+    theme: 'system',
+    density: 'comfortable',
+    startAtLogin: false,
+  })
+  settings.savePreferences.mockResolvedValue(undefined)
+}
+
+function typeInto(input: HTMLElement, value: string) {
+  fireEvent.change(input, { target: { value } })
+}
+
+async function finishOnboarding() {
+  fireEvent.click(screen.getByRole('button', { name: 'Get Started' }))
+  typeInto(screen.getByLabelText('Your name'), 'Ada')
+  fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Create Password' }))
+
+  await screen.findByRole('heading', { name: 'Congrats! Your vault has been created' })
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: "Let's Go!" }))
+  })
+}
+
+describe('App root', () => {
+  beforeEach(resetBoot)
+
+  it('renders the app landmark and initializes local startup', () => {
+    boot.initializeDatabase.mockReturnValue(new Promise(() => undefined))
+
+    render(<App />)
+
+    expect(screen.getByRole('main', { name: 'Kivo application' })).toBeInTheDocument()
+    expect(boot.initializeDatabase).toHaveBeenCalledTimes(1)
+    expect(boot.loadBootState).not.toHaveBeenCalled()
+  })
+
+  it('shows a loading status while local startup is pending', () => {
+    boot.initializeDatabase.mockReturnValue(new Promise(() => undefined))
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Opening Kivo', exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Opening Kivo')
+  })
+
+  it('shows retryable diagnostics when local startup fails', async () => {
+    boot.initializeDatabase.mockRejectedValue(new Error('SQLite startup failed'))
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Kivo could not start', exact: true }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
+    expect(screen.getByText('SQLite startup failed', { exact: true })).toBeInTheDocument()
+  })
+
+  it('retries startup and recovers to the ready shell', async () => {
+    const startupError = new Error('SQLite startup failed')
+    boot.initializeDatabase.mockRejectedValueOnce(startupError).mockResolvedValueOnce({})
+    boot.loadBootState.mockResolvedValue('ready')
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry', exact: true }))
+
+    await waitFor(() => expect(boot.initializeDatabase).toHaveBeenCalledTimes(2))
+    expect(boot.loadBootState).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry', exact: true })).not.toBeInTheDocument()
+  })
+
+  it('routes a fresh local database to onboarding without the shell', async () => {
+    boot.initializeDatabase.mockResolvedValue({})
+    boot.loadBootState.mockResolvedValue('onboarding')
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Everything important, in one place.',
+        exact: true,
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('main', { name: 'Kivo application' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('opens the shell after onboarding completes', async () => {
+    boot.initializeDatabase.mockResolvedValue({})
+    boot.loadBootState.mockResolvedValue('onboarding')
+    boot.completeSetup.mockResolvedValue(undefined)
+
+    render(<App />)
+
+    await screen.findByRole('heading', {
+      name: 'Everything important, in one place.',
+      exact: true,
+    })
+
+    await finishOnboarding()
+
+    expect(await screen.findByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Dashboard', exact: true }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('main', { name: 'Kivo application' })).toBeInTheDocument()
+  })
+
+  it('routes completed setup without a lock straight to the application shell', async () => {
+    boot.initializeDatabase.mockResolvedValue({})
+    boot.loadBootState.mockResolvedValue('ready')
+
+    render(<App />)
+
+    expect(await screen.findByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Dashboard', exact: true }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('main', { name: 'Kivo application' })).toBeInTheDocument()
+  })
+
+  it('applies saved preferences to the document at startup instead of defaults', async () => {
+    boot.initializeDatabase.mockResolvedValue({})
+    boot.loadBootState.mockResolvedValue('ready')
+    settings.loadPreferences.mockResolvedValue({
+      theme: 'dark',
+      density: 'compact',
+      startAtLogin: false,
+    })
+
+    render(<App />)
+
+    await screen.findByRole('navigation', { name: 'Primary navigation' })
+
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'))
+    expect(document.documentElement.dataset.density).toBe('compact')
+  })
+
+  it('shows the unlock page without the shell when a verifier exists', async () => {
+    boot.initializeDatabase.mockResolvedValue({})
+    boot.loadBootState.mockResolvedValue('locked')
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Unlock your vault', exact: true }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('main', { name: 'Kivo application' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+
+  it('reveals the shell only after the password verifies', async () => {
+    boot.initializeDatabase.mockResolvedValue({})
+    boot.loadBootState.mockResolvedValue('locked')
+    boot.readAppLockVerifier.mockResolvedValue(VERIFIER)
+    boot.verifyPassword.mockResolvedValue(true)
+
+    render(<App />)
+
+    const passwordField = await screen.findByLabelText('Master Password')
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+
+    typeInto(passwordField, 'hunter two')
+    fireEvent.submit(passwordField.closest('form')!)
+
+    expect(await screen.findByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
+    expect(boot.verifyPassword).toHaveBeenCalledWith('hunter two', VERIFIER)
+  })
+
+  it('keeps the unlock page when the password is rejected', async () => {
+    boot.initializeDatabase.mockResolvedValue({})
+    boot.loadBootState.mockResolvedValue('locked')
+    boot.readAppLockVerifier.mockResolvedValue(VERIFIER)
+    boot.verifyPassword.mockResolvedValue(false)
+
+    render(<App />)
+
+    const passwordField = await screen.findByLabelText('Master Password')
+    typeInto(passwordField, 'wrong password')
+    fireEvent.submit(passwordField.closest('form')!)
+
+    expect(await screen.findByText('That password did not match. Try again.')).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+  })
+})

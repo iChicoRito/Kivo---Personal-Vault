@@ -1,0 +1,22 @@
+[package]
+name = "kivo"
+version = "0.1.0"
+description = "Kivo desktop archive"
+authors = ["Kivo"]
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "kivo_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+argon2 = "0.6"
+rusqlite = { version = "0.40", default-features = false, features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-autostart = "2"

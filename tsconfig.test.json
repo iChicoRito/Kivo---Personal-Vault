@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@testing-library/react": ["./test-types/testing-library-react.d.ts"]
+    }
+  },
+  "include": ["src", "test-types", "vite.config.ts"],
+  "exclude": []
+}

@@ -1,0 +1,210 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+/*
+ * The dock ships `supports-backdrop-blur:` classes, a variant shadcn projects define for it.
+ * Tailwind v4 does not ship the variant, so without this the dock's translucent layers never
+ * render. Defining it here keeps the component's own class list effective.
+ */
+@custom-variant supports-backdrop-blur {
+  @supports (backdrop-filter: blur(0)) {
+    @slot;
+  }
+}
+
+/*
+ * Appearance comes from HeroUI's own default theme: no Kivo palette is applied
+ * for now. `src/app/preferences.tsx` writes the resolved light/dark value to
+ * `data-theme`, which is the selector HeroUI's theme blocks already use.
+ */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    min-width: 320px;
+    min-height: 100%;
+    margin: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--background);
+    color: var(--foreground);
+  }
+}
+
+/*
+ * App frame geometry only: the workspace column that holds the navbar, the
+ * scrolling page area, and the dock pinned to the bottom. Everything inside the
+ * frame comes from HeroUI components and their tokens.
+ */
+@layer components {
+  #kivo-shell {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  #kivo-workspace {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100%;
+    min-height: 0;
+  }
+
+  /* The navbar and the dock stay in place; only the page area scrolls. */
+  #kivo-main {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* With the sidebar gone the page area is the whole window, so the content
+     wrapper spans it and only keeps breathing room at the edges. */
+  #kivo-content {
+    padding-block: clamp(1.25rem, 2.5vw, 2.5rem);
+    padding-inline: 1.5rem;
+  }
+
+  [data-density="compact"] #kivo-content {
+    padding-block: 1rem;
+  }
+
+  @media (max-width: 52.5rem) {
+    #kivo-content {
+      padding-block: 1.5rem;
+      padding-inline: 1rem;
+    }
+  }
+
+  /*
+   * Dock tooltips. A floating position is sampled once when the bubble opens, which
+   * happens while magnification is still shifting the icons, so the bubble can sit
+   * off-centre. Every icon carries its own anchor name instead, and the bubble asks
+   * that anchor for its centre; Chromium (the app's WebView) resolves it live as the
+   * dock springs. Browsers without anchor positioning keep the sampled position.
+   */
+  .kivo-dock-hover {
+    anchor-name: var(--kivo-dock-tip);
+  }
+
+  .kivo-dock-tip {
+    left: anchor(var(--kivo-dock-tip) center) !important;
+    translate: -50% 0;
+  }
+}
+
+/*
+ * Navbar chrome controls. HeroUI paints its accent focus ring on focus, which on
+ * the bare navbar reads as a stray blue circle around the icon. The control marks
+ * focus the way it marks hover instead: a soft surface plus a hairline, visible on
+ * both themes without the halo. The rule sits in the utilities layer because
+ * HeroUI paints the control backgrounds there.
+ */
+@layer utilities {
+  #kivo-navbar .kivo-theme-toggler:is(:focus-visible, [data-focus-visible="true"]) {
+    --button-bg: var(--default);
+    box-shadow: none;
+    outline: 1px solid var(--border);
+    outline-offset: 0;
+  }
+}
+
+/*
+ * Theme reveal. The incoming palette is wiped in by growing a clip circle on
+ * its snapshot, from the point the user pressed out past the furthest corner.
+ * The three values are written by `preferences.tsx` before the transition
+ * starts; the defaults keep a circle on screen if a swap ever runs without
+ * them. The outgoing snapshot sits underneath with no animation, and the
+ * incoming one carries the reveal -- which is also what gives the transition
+ * its duration, so the wipe cannot collapse into an instant swap.
+ *
+ * `view-transition-name` has to be re-declared here: HeroUI's base layer opts the
+ * root element out with `:root { view-transition-name: none }`, which leaves the
+ * transition with nothing to snapshot and no wipe to show.
+ */
+:root {
+  view-transition-name: root;
+  --kivo-reveal-x: 50vw;
+  --kivo-reveal-y: 50vh;
+  --kivo-reveal-radius: 150vmax;
+}
+
+@keyframes kivo-theme-reveal {
+  from {
+    clip-path: circle(0px at var(--kivo-reveal-x) var(--kivo-reveal-y));
+  }
+
+  to {
+    clip-path: circle(var(--kivo-reveal-radius) at var(--kivo-reveal-x) var(--kivo-reveal-y));
+  }
+}
+
+::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  animation: kivo-theme-reveal 500ms var(--ease-smooth) both;
+  mix-blend-mode: normal;
+  z-index: 2;
+}
+
+/*
+ * MagicUI toggler. The component animates the incoming snapshot itself, from the
+ * button outwards, so while one of its transitions is running the attributes it
+ * sets stand the Kivo reveal down, pin the collapsed clip, and keep the group's
+ * fade the length of the clip animation. Theme changes from anywhere else -- the
+ * Settings radios -- keep the Kivo reveal above.
+ */
+html[data-magicui-theme-vt="active"]::view-transition-group(root) {
+  animation-duration: var(--magicui-theme-toggle-vt-duration);
+}
+
+html[data-magicui-theme-vt="active"]::view-transition-new(root) {
+  animation: none;
+  clip-path: var(--magicui-theme-vt-clip-from);
+}
+
+/*
+ * Fallback swap, for browsers without view transitions. Flipping `data-theme`
+ * repaints every themed surface at once, which lands as a hard cut, so the
+ * colours are interpolated across the swap instead. The provider only adds the
+ * class when it is actually taking this path, which keeps hovers and the rail
+ * motion on their own timings. Gating on `no-preference` is what lets the
+ * reduced-motion escape hatch below win, since these `!important` declarations
+ * outrank its plain `*` rule.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .kivo-theme-transition,
+  .kivo-theme-transition *,
+  .kivo-theme-transition *::before,
+  .kivo-theme-transition *::after {
+    transition:
+      background-color 300ms var(--ease-smooth),
+      border-color 300ms var(--ease-smooth),
+      color 300ms var(--ease-smooth),
+      box-shadow 300ms var(--ease-smooth),
+      fill 300ms var(--ease-smooth),
+      stroke 300ms var(--ease-smooth) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+}

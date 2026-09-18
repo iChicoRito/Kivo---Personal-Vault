@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.local
+.commandcode/
+tasks/
+obsidian/system-analyzer/
+
+src-tauri/target/
+src-tauri/gen/

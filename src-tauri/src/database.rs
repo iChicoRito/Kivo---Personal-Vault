@@ -1,0 +1,1237 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use argon2::password_hash::phc::PasswordHash;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use tauri::State;
+
+const PHASE_ONE_MIGRATION: &str = include_str!("../migrations/0001_phase_one.sql");
+const PHASE_TWO_MIGRATION: &str =
+    include_str!("../migrations/0002_drop_unused_preference_columns.sql");
+const PHASE_TWO_SCHEMA_MIGRATION: &str = include_str!("../migrations/0003_phase_two.sql");
+
+struct Migration {
+    version: i64,
+    sql: &'static str,
+}
+
+// Ordered by version. Each entry is applied only while the database's
+// `user_version` is lower than the entry's version.
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: PHASE_ONE_MIGRATION,
+    },
+    Migration {
+        version: 2,
+        sql: PHASE_TWO_MIGRATION,
+    },
+    Migration {
+        version: 3,
+        sql: PHASE_TWO_SCHEMA_MIGRATION,
+    },
+];
+
+pub struct DatabaseState {
+    connection: Mutex<Option<Connection>>,
+    path: PathBuf,
+    files_dir: PathBuf,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupInput {
+    pub owner_name: String,
+    pub vault_name: String,
+    pub starter_collections: Vec<String>,
+    pub password_verifier: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub owner_name: String,
+    pub vault_name: String,
+    pub setup_completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileInput {
+    pub owner_name: String,
+    pub vault_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preferences {
+    pub theme: String,
+    pub density: String,
+    pub start_at_login: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BootState {
+    Onboarding,
+    Ready,
+    Locked,
+}
+
+impl DatabaseState {
+    pub fn new(path: PathBuf, files_dir: PathBuf) -> Self {
+        Self {
+            connection: Mutex::new(None),
+            path,
+            files_dir,
+        }
+    }
+
+    pub fn initialize(&self) -> Result<(), String> {
+        let mut stored_connection = self.lock_connection()?;
+
+        if stored_connection.is_some() {
+            return Ok(());
+        }
+
+        if let Some(parent) = self
+            .path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("Could not create local database directory: {error}"))?;
+        }
+
+        fs::create_dir_all(&self.files_dir)
+            .map_err(|error| format!("Could not create managed files directory: {error}"))?;
+
+        let mut connection = Connection::open(&self.path)
+            .map_err(|error| format!("Could not open local database: {error}"))?;
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(|error| format!("Could not enable foreign keys: {error}"))?;
+        apply_migrations(&mut connection)
+            .map_err(|error| format!("Could not migrate local database: {error}"))?;
+
+        *stored_connection = Some(connection);
+        Ok(())
+    }
+
+    fn lock_connection(&self) -> Result<std::sync::MutexGuard<'_, Option<Connection>>, String> {
+        self.connection
+            .lock()
+            .map_err(|_| "Local database lock is poisoned".to_string())
+    }
+
+    pub(crate) fn require_connection(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<Connection>>, String> {
+        let connection = self.lock_connection()?;
+        if connection.is_none() {
+            return Err("Local database is not initialized".to_string());
+        }
+        Ok(connection)
+    }
+
+    pub(crate) fn files_dir(&self) -> &Path {
+        &self.files_dir
+    }
+
+    fn boot_state(&self) -> Result<BootState, String> {
+        let connection = self.require_connection()?;
+        read_boot_state(connection.as_ref().expect("checked above"))
+            .map_err(|error| format!("Could not read local startup state: {error}"))
+    }
+
+    fn complete_setup(&self, input: SetupInput) -> Result<(), String> {
+        validate_setup(&input)?;
+
+        let mut connection = self.require_connection()?;
+        write_setup(connection.as_mut().expect("checked above"), &input)
+            .map_err(|error| format!("Could not complete setup: {error}"))
+    }
+
+    fn read_profile(&self) -> Result<Profile, String> {
+        let connection = self.require_connection()?;
+        read_profile(connection.as_ref().expect("checked above"))
+            .map_err(|error| format!("Could not read the profile: {error}"))
+    }
+
+    fn save_profile(&self, profile: &ProfileInput) -> Result<(), String> {
+        if profile.owner_name.trim().is_empty() {
+            return Err("Owner name is required".to_string());
+        }
+
+        let mut connection = self.require_connection()?;
+        write_profile(connection.as_mut().expect("checked above"), profile)
+            .map_err(|error| format!("Could not save the profile: {error}"))
+    }
+
+    fn read_preferences(&self) -> Result<Preferences, String> {
+        let connection = self.require_connection()?;
+        read_preferences(connection.as_ref().expect("checked above"))
+            .map_err(|error| format!("Could not read preferences: {error}"))
+    }
+
+    fn save_preferences(&self, preferences: &Preferences) -> Result<(), String> {
+        validate_preferences(preferences)?;
+
+        let mut connection = self.require_connection()?;
+        write_preferences(connection.as_mut().expect("checked above"), preferences)
+            .map_err(|error| format!("Could not save preferences: {error}"))
+    }
+
+    fn set_password_verifier(&self, verifier: &str) -> Result<(), String> {
+        let verifier = validate_verifier(verifier)?;
+
+        let mut connection = self.require_connection()?;
+        write_password_verifier(connection.as_mut().expect("checked above"), verifier)
+            .map_err(|error| format!("Could not save app lock: {error}"))
+    }
+
+    fn remove_password_verifier(&self) -> Result<(), String> {
+        let mut connection = self.require_connection()?;
+        clear_password_verifier(connection.as_mut().expect("checked above"))
+            .map_err(|error| format!("Could not remove app lock: {error}"))
+    }
+
+    fn password_verifier(&self) -> Result<Option<String>, String> {
+        let connection = self.require_connection()?;
+        read_password_verifier(connection.as_ref().expect("checked above"))
+            .map_err(|error| format!("Could not read app lock: {error}"))
+    }
+
+    fn has_password_verifier(&self) -> Result<bool, String> {
+        let connection = self.require_connection()?;
+        has_stored_password_lock(connection.as_ref().expect("checked above"))
+            .map_err(|error| format!("Could not read app lock: {error}"))
+    }
+}
+
+fn validate_setup(input: &SetupInput) -> Result<(), String> {
+    if input.owner_name.trim().is_empty() {
+        return Err("Owner name is required".to_string());
+    }
+
+    let mut seen = std::collections::HashSet::new();
+
+    for name in &input.starter_collections {
+        let trimmed = name.trim();
+
+        if trimmed.is_empty() {
+            return Err("Collection names cannot be empty".to_string());
+        }
+
+        // Mirrors SQLite's default case-sensitive UNIQUE comparison for this column.
+        if !seen.insert(trimmed) {
+            return Err("Collection names must not repeat".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_preferences(preferences: &Preferences) -> Result<(), String> {
+    let valid = matches!(preferences.theme.as_str(), "light" | "dark" | "system")
+        && matches!(preferences.density.as_str(), "comfortable" | "compact");
+
+    if valid {
+        Ok(())
+    } else {
+        Err("Preferences contain an unsupported value".to_string())
+    }
+}
+
+fn validate_verifier(verifier: &str) -> Result<&str, String> {
+    let trimmed = verifier.trim();
+
+    if trimmed.is_empty() {
+        return Err("Password verifier is required".to_string());
+    }
+
+    if !trimmed.starts_with("$argon2id$") {
+        return Err("Password verifier is not supported".to_string());
+    }
+
+    PasswordHash::new(trimmed).map_err(|_| "Password verifier is not valid".to_string())?;
+
+    Ok(trimmed)
+}
+
+pub fn apply_migrations(connection: &mut Connection) -> rusqlite::Result<()> {
+    let current_version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+    for migration in MIGRATIONS {
+        if migration.version <= current_version {
+            continue;
+        }
+
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(migration.sql)?;
+        // Rust is authoritative for the bookkeeping so the gate cannot drift from the SQL.
+        transaction.pragma_update(None, "user_version", migration.version)?;
+        transaction.commit()?;
+    }
+
+    Ok(())
+}
+
+pub fn read_boot_state(connection: &Connection) -> rusqlite::Result<BootState> {
+    let setup_completed_at: Option<String> = connection
+        .query_row(
+            "SELECT setup_completed_at FROM profile WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    if setup_completed_at.is_none() {
+        return Ok(BootState::Onboarding);
+    }
+
+    if has_stored_password_lock(connection)? {
+        Ok(BootState::Locked)
+    } else {
+        Ok(BootState::Ready)
+    }
+}
+
+/// A lock exists only when the stored value is a parseable Argon2 PHC verifier.
+/// A corrupted or foreign value can never verify, so it is never trusted as a
+/// lock. Boot classification and the settings UI both read this one answer so
+/// they cannot disagree.
+pub fn has_stored_password_lock(connection: &Connection) -> rusqlite::Result<bool> {
+    match read_password_verifier(connection)? {
+        Some(verifier) => Ok(validate_verifier(&verifier).is_ok()),
+        None => Ok(false),
+    }
+}
+
+fn resolve_vault_name(owner_name: &str, vault_name: &str) -> String {
+    let vault_name = vault_name.trim();
+
+    if vault_name.is_empty() {
+        format!("{}'s Vault", owner_name.trim())
+    } else {
+        vault_name.to_string()
+    }
+}
+
+pub fn write_setup(connection: &mut Connection, input: &SetupInput) -> rusqlite::Result<()> {
+    let owner_name = input.owner_name.trim();
+    let vault_name = resolve_vault_name(owner_name, &input.vault_name);
+
+    let transaction = connection.transaction()?;
+
+    transaction.execute(
+        "INSERT INTO profile (id, owner_name, vault_name, setup_completed_at)
+         VALUES (1, ?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        params![owner_name, vault_name],
+    )?;
+
+    transaction.execute(
+        "INSERT INTO preferences (id, theme, density, start_at_login)
+         VALUES (1, 'dark', 'comfortable', 0)",
+        [],
+    )?;
+
+    for (sort_order, collection_name) in input.starter_collections.iter().enumerate() {
+        let sort_order =
+            i64::try_from(sort_order).expect("collection count fits in SQLite integer");
+        transaction.execute(
+            "INSERT INTO collections (id, name, sort_order, created_at)
+             VALUES (lower(hex(randomblob(16))), ?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            params![collection_name.trim(), sort_order],
+        )?;
+    }
+
+    transaction.execute(
+        "INSERT INTO security (id, password_verifier, updated_at)
+         VALUES (1, ?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        params![input.password_verifier.as_deref()],
+    )?;
+
+    transaction.commit()
+}
+
+pub fn read_profile(connection: &Connection) -> rusqlite::Result<Profile> {
+    connection.query_row(
+        "SELECT owner_name, vault_name, setup_completed_at FROM profile WHERE id = 1",
+        [],
+        |row| {
+            Ok(Profile {
+                owner_name: row.get(0)?,
+                vault_name: row.get(1)?,
+                setup_completed_at: row.get(2)?,
+            })
+        },
+    )
+}
+
+pub fn write_profile(connection: &mut Connection, profile: &ProfileInput) -> rusqlite::Result<()> {
+    let owner_name = profile.owner_name.trim();
+    let vault_name = resolve_vault_name(owner_name, &profile.vault_name);
+
+    let transaction = connection.transaction()?;
+    let updated = transaction.execute(
+        "UPDATE profile SET owner_name = ?1, vault_name = ?2 WHERE id = 1",
+        params![owner_name, vault_name],
+    )?;
+
+    if updated == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+
+    transaction.commit()
+}
+
+pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences> {
+    connection.query_row(
+        "SELECT theme, density, start_at_login FROM preferences WHERE id = 1",
+        [],
+        |row| {
+            Ok(Preferences {
+                theme: row.get(0)?,
+                density: row.get(1)?,
+                start_at_login: row.get::<_, i64>(2)? != 0,
+            })
+        },
+    )
+}
+
+pub fn write_preferences(
+    connection: &mut Connection,
+    preferences: &Preferences,
+) -> rusqlite::Result<()> {
+    let transaction = connection.transaction()?;
+    let updated = transaction.execute(
+        "UPDATE preferences
+         SET theme = ?1, density = ?2, start_at_login = ?3
+         WHERE id = 1",
+        params![
+            preferences.theme,
+            preferences.density,
+            i64::from(preferences.start_at_login),
+        ],
+    )?;
+
+    if updated == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+
+    transaction.commit()
+}
+
+pub fn write_password_verifier(
+    connection: &mut Connection,
+    verifier: &str,
+) -> rusqlite::Result<()> {
+    let transaction = connection.transaction()?;
+    transaction.execute(
+        "INSERT INTO security (id, password_verifier, updated_at)
+         VALUES (1, ?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT(id) DO UPDATE SET
+           password_verifier = excluded.password_verifier,
+           updated_at = excluded.updated_at",
+        params![verifier],
+    )?;
+
+    transaction.commit()
+}
+
+pub fn clear_password_verifier(connection: &mut Connection) -> rusqlite::Result<()> {
+    let transaction = connection.transaction()?;
+    transaction.execute(
+        "UPDATE security
+         SET password_verifier = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = 1",
+        [],
+    )?;
+
+    transaction.commit()
+}
+
+pub fn read_password_verifier(connection: &Connection) -> rusqlite::Result<Option<String>> {
+    connection
+        .query_row(
+            "SELECT password_verifier FROM security WHERE id = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+}
+
+#[tauri::command]
+pub fn initialize_database(state: State<'_, DatabaseState>) -> Result<(), String> {
+    state.initialize()
+}
+
+#[tauri::command]
+pub fn load_boot_state(state: State<'_, DatabaseState>) -> Result<BootState, String> {
+    state.boot_state()
+}
+
+#[tauri::command]
+pub fn complete_setup(input: SetupInput, state: State<'_, DatabaseState>) -> Result<(), String> {
+    state.complete_setup(input)
+}
+
+#[tauri::command]
+pub fn load_profile(state: State<'_, DatabaseState>) -> Result<Profile, String> {
+    state.read_profile()
+}
+
+#[tauri::command]
+pub fn save_profile(profile: ProfileInput, state: State<'_, DatabaseState>) -> Result<(), String> {
+    state.save_profile(&profile)
+}
+
+#[tauri::command]
+pub fn load_preferences(state: State<'_, DatabaseState>) -> Result<Preferences, String> {
+    state.read_preferences()
+}
+
+#[tauri::command]
+pub fn save_preferences(
+    preferences: Preferences,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    state.save_preferences(&preferences)
+}
+
+#[tauri::command]
+pub fn set_password_verifier(
+    verifier: String,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    state.set_password_verifier(&verifier)
+}
+
+#[tauri::command]
+pub fn remove_password_verifier(state: State<'_, DatabaseState>) -> Result<(), String> {
+    state.remove_password_verifier()
+}
+
+#[tauri::command]
+pub fn load_password_verifier(state: State<'_, DatabaseState>) -> Result<Option<String>, String> {
+    state.password_verifier()
+}
+
+// The settings UI asks this instead of treating any stored value as a lock, so a
+// corrupted or foreign verifier cannot show controls that can never succeed.
+#[tauri::command]
+pub fn has_password_verifier(state: State<'_, DatabaseState>) -> Result<bool, String> {
+    state.has_password_verifier()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    const VERIFIER: &str =
+        "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAA";
+
+    struct TempWorkspace {
+        root: PathBuf,
+    }
+
+    impl TempWorkspace {
+        fn new(label: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock is after the Unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir()
+                .join(format!("kivo-test-{label}-{}-{unique}", std::process::id()));
+
+            fs::create_dir_all(&root).expect("create temp workspace");
+
+            Self { root }
+        }
+
+        fn database_path(&self) -> PathBuf {
+            self.root.join("kivo.db")
+        }
+
+        fn files_dir(&self) -> PathBuf {
+            self.root.join("files")
+        }
+
+        fn state(&self) -> DatabaseState {
+            DatabaseState::new(self.database_path(), self.files_dir())
+        }
+    }
+
+    impl Drop for TempWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn migrated_memory_database() -> Connection {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+        apply_migrations(&mut connection).expect("apply migration");
+        connection
+    }
+
+    fn setup_input(collections: &[&str], verifier: Option<&str>) -> SetupInput {
+        SetupInput {
+            owner_name: "  Ada  ".to_string(),
+            vault_name: "   ".to_string(),
+            starter_collections: collections.iter().map(|name| name.to_string()).collect(),
+            password_verifier: verifier.map(|value| value.to_string()),
+        }
+    }
+
+    fn table_exists(connection: &Connection, table: &str) -> bool {
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count table")
+            == 1
+    }
+
+    fn read_user_version(connection: &Connection) -> i64 {
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user version")
+    }
+
+    fn row_count(connection: &Connection, table: &str) -> i64 {
+        connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("count rows")
+    }
+
+    #[test]
+    fn migration_applies_and_is_idempotent() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        apply_migrations(&mut connection).expect("first migration");
+        apply_migrations(&mut connection).expect("second migration");
+
+        assert_eq!(read_user_version(&connection), 3);
+
+        for table in [
+            "profile",
+            "preferences",
+            "collections",
+            "security",
+            "items",
+            "files",
+            "tags",
+            "item_tags",
+            "activity",
+            "index_state",
+        ] {
+            assert!(table_exists(&connection, table), "missing table {table}");
+        }
+
+        assert!(
+            !table_exists(&connection, "starter_collections"),
+            "the onboarding table is replaced by collections"
+        );
+    }
+
+    #[test]
+    fn migration_gate_skips_a_database_already_at_the_current_version() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        apply_migrations(&mut connection).expect("first migration");
+        assert_eq!(read_user_version(&connection), 3);
+
+        // Dropping a table gives the test a way to detect whether the migration ran again.
+        connection
+            .execute_batch("DROP TABLE preferences;")
+            .expect("drop table to detect re-application");
+
+        apply_migrations(&mut connection).expect("gate skips the applied migration");
+
+        assert!(
+            !table_exists(&connection, "preferences"),
+            "an up-to-date database must not re-run its migration"
+        );
+        assert_eq!(read_user_version(&connection), 3);
+    }
+
+    #[test]
+    fn migration_two_drops_removed_preference_columns_and_keeps_values() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        // Stage a phase-one database the way it shipped, with its removed columns
+        // and a stored palette, then let the gate upgrade it.
+        connection
+            .execute_batch(PHASE_ONE_MIGRATION)
+            .expect("apply phase one");
+        connection
+            .execute(
+                "INSERT INTO preferences
+                   (id, theme, density, sidebar_mode, content_width, start_at_login)
+                 VALUES (1, 'light', 'compact', 'collapsed', 'wide', 1)",
+                [],
+            )
+            .expect("seed phase one preferences");
+
+        apply_migrations(&mut connection).expect("upgrade database");
+
+        assert_eq!(read_user_version(&connection), 3);
+        assert_eq!(
+            read_preferences(&connection).expect("read preferences"),
+            Preferences {
+                theme: "light".to_string(),
+                density: "compact".to_string(),
+                start_at_login: true,
+            }
+        );
+
+        let removed_columns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('preferences')
+                 WHERE name IN ('sidebar_mode', 'content_width')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect columns");
+        assert_eq!(removed_columns, 0, "removed preference columns are dropped");
+    }
+
+    #[test]
+    fn migration_three_moves_starter_collections_into_collections() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        // Stage a version-two database the way it shipped, with onboarding rows,
+        // then let the gate upgrade it.
+        connection
+            .execute_batch(PHASE_ONE_MIGRATION)
+            .expect("apply phase one");
+        connection
+            .execute_batch(PHASE_TWO_MIGRATION)
+            .expect("apply phase two");
+        connection
+            .execute(
+                "INSERT INTO profile (id, owner_name, vault_name, setup_completed_at)
+                 VALUES (1, 'Ada', 'Ada''s Vault', '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("seed profile");
+        connection
+            .execute(
+                "INSERT INTO preferences (id, theme, density, start_at_login)
+                 VALUES (1, 'light', 'compact', 1)",
+                [],
+            )
+            .expect("seed preferences");
+        connection
+            .execute(
+                "INSERT INTO starter_collections (name, sort_order) VALUES ('Projects', 0)",
+                [],
+            )
+            .expect("seed first collection");
+        connection
+            .execute(
+                "INSERT INTO starter_collections (name, sort_order) VALUES ('Recipes', 1)",
+                [],
+            )
+            .expect("seed second collection");
+        connection
+            .pragma_update(None, "user_version", 2)
+            .expect("set version two");
+
+        apply_migrations(&mut connection).expect("upgrade database");
+
+        assert_eq!(read_user_version(&connection), 3);
+        assert!(
+            !table_exists(&connection, "starter_collections"),
+            "the onboarding table is dropped after the copy"
+        );
+
+        let collections: Vec<(String, i64)> = {
+            let mut statement = connection
+                .prepare("SELECT name, sort_order FROM collections ORDER BY sort_order")
+                .expect("prepare collection read");
+            let rows = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("query collections");
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .expect("collect collections")
+        };
+        assert_eq!(
+            collections,
+            vec![("Projects".to_string(), 0), ("Recipes".to_string(), 1)]
+        );
+
+        let profile = read_profile(&connection).expect("read profile");
+        assert_eq!(profile.owner_name, "Ada");
+        assert_eq!(profile.vault_name, "Ada's Vault");
+        assert_eq!(
+            read_preferences(&connection).expect("read preferences"),
+            Preferences {
+                theme: "light".to_string(),
+                density: "compact".to_string(),
+                start_at_login: true,
+            }
+        );
+    }
+
+    #[test]
+    fn fresh_database_reads_onboarding() {
+        let connection = migrated_memory_database();
+
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Onboarding
+        );
+    }
+
+    #[test]
+    fn completed_setup_without_verifier_reads_ready() {
+        let mut connection = migrated_memory_database();
+
+        write_setup(&mut connection, &setup_input(&["Projects"], None)).expect("write setup");
+
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Ready
+        );
+    }
+
+    #[test]
+    fn completed_setup_with_verifier_reads_locked() {
+        let mut connection = migrated_memory_database();
+
+        write_setup(&mut connection, &setup_input(&["Projects"], Some(VERIFIER)))
+            .expect("write setup");
+
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Locked
+        );
+    }
+
+    #[test]
+    fn corrupted_password_verifier_does_not_lock_the_app() {
+        for corrupted in [
+            "not-a-phc-string",
+            "$pbkdf2-sha256$i=600000,l=32$c2FsdA$aGFzaA",
+            "$argon2id$not-really-a-phc",
+        ] {
+            let mut connection = migrated_memory_database();
+            write_setup(&mut connection, &setup_input(&[], Some(corrupted))).expect("write setup");
+
+            assert_eq!(
+                read_boot_state(&connection).expect("read boot state"),
+                BootState::Ready,
+                "corrupted verifier {corrupted} must not trap the user"
+            );
+
+            // The lock-state answer must agree with boot classification.
+            assert!(
+                !has_stored_password_lock(&connection).expect("read lock state"),
+                "corrupted verifier {corrupted} must not report a lock"
+            );
+
+            // The stored value is left untouched so the user can still replace or clear it.
+            assert_eq!(
+                read_password_verifier(&connection)
+                    .expect("read verifier")
+                    .as_deref(),
+                Some(corrupted)
+            );
+        }
+    }
+
+    #[test]
+    fn valid_password_verifier_reports_the_lock_present() {
+        let mut connection = migrated_memory_database();
+        write_setup(&mut connection, &setup_input(&[], Some(VERIFIER))).expect("write setup");
+
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Locked
+        );
+        assert!(has_stored_password_lock(&connection).expect("read lock state"));
+    }
+
+    #[test]
+    fn database_state_reports_a_corrupted_verifier_as_no_lock_and_stays_unlocked() {
+        let workspace = TempWorkspace::new("corrupted-lock-state");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+        state
+            .complete_setup(setup_input(&[], None))
+            .expect("complete setup");
+
+        // Simulate tampering by writing past set_password_verifier validation.
+        {
+            let connection = state.lock_connection().expect("lock connection");
+            connection
+                .as_ref()
+                .expect("connection is initialized")
+                .execute(
+                    "UPDATE security SET password_verifier = 'not-a-phc-string' WHERE id = 1",
+                    [],
+                )
+                .expect("corrupt stored verifier");
+        }
+
+        assert!(!state
+            .has_password_verifier()
+            .expect("read lock-state command answer"));
+        assert_eq!(
+            state.boot_state().expect("read boot state"),
+            BootState::Ready
+        );
+        assert_eq!(
+            state.password_verifier().expect("read verifier").as_deref(),
+            Some("not-a-phc-string")
+        );
+    }
+
+    #[test]
+    fn complete_setup_writes_every_table_and_a_completion_timestamp() {
+        let workspace = TempWorkspace::new("complete-setup");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+
+        state
+            .complete_setup(setup_input(&["Projects", "Recipes"], Some(VERIFIER)))
+            .expect("complete setup");
+
+        let connection = Connection::open(workspace.database_path()).expect("reopen database");
+
+        let profile = read_profile(&connection).expect("read profile");
+        assert_eq!(profile.owner_name, "Ada");
+        assert_eq!(profile.vault_name, "Ada's Vault");
+        assert!(
+            profile.setup_completed_at.is_some(),
+            "completion timestamp is set"
+        );
+
+        assert_eq!(
+            read_preferences(&connection).expect("read preferences"),
+            Preferences {
+                theme: "dark".to_string(),
+                density: "comfortable".to_string(),
+                start_at_login: false,
+            }
+        );
+
+        let collections: Vec<(String, i64)> = {
+            let mut statement = connection
+                .prepare("SELECT name, sort_order FROM collections ORDER BY sort_order")
+                .expect("prepare collection read");
+            let rows = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("query collections");
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .expect("collect collections")
+        };
+        assert_eq!(
+            collections,
+            vec![("Projects".to_string(), 0), ("Recipes".to_string(), 1)]
+        );
+
+        let verifier: Option<String> = connection
+            .query_row(
+                "SELECT password_verifier FROM security WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read security row");
+        assert_eq!(verifier.as_deref(), Some(VERIFIER));
+    }
+
+    #[test]
+    fn failing_complete_setup_rolls_back_and_leaves_setup_incomplete() {
+        let workspace = TempWorkspace::new("rollback");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+
+        {
+            let connection = state.lock_connection().expect("lock connection");
+            connection
+                .as_ref()
+                .expect("connection is initialized")
+                .execute(
+                    "INSERT INTO collections (id, name, sort_order, created_at)
+                     VALUES ('existing', 'Recipes', 0, '2026-01-01T00:00:00.000Z')",
+                    [],
+                )
+                .expect("seed conflicting collection");
+        }
+
+        let result = state.complete_setup(setup_input(&["Recipes"], Some(VERIFIER)));
+        assert!(result.is_err(), "duplicate collection must fail setup");
+
+        let connection = Connection::open(workspace.database_path()).expect("reopen database");
+
+        let setup_completed_at: Option<String> = connection
+            .query_row(
+                "SELECT (SELECT setup_completed_at FROM profile WHERE id = 1)",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read completion timestamp");
+        assert!(setup_completed_at.is_none());
+
+        assert_eq!(row_count(&connection, "profile"), 0);
+        assert_eq!(row_count(&connection, "preferences"), 0);
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Onboarding
+        );
+    }
+
+    #[test]
+    fn complete_setup_rejects_blank_names_and_keeps_the_database_untouched() {
+        let workspace = TempWorkspace::new("validation");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+
+        let mut blank_owner = setup_input(&[], None);
+        blank_owner.owner_name = "   ".to_string();
+        assert!(state.complete_setup(blank_owner).is_err());
+
+        let blank_collection = setup_input(&["   "], None);
+        assert!(state.complete_setup(blank_collection).is_err());
+
+        let connection = Connection::open(workspace.database_path()).expect("reopen database");
+        assert_eq!(row_count(&connection, "profile"), 0);
+    }
+
+    #[test]
+    fn validate_setup_rejects_duplicate_collection_names_without_sql_error_text() {
+        let duplicate = setup_input(&["Projects", "  Projects  "], None);
+        let error = validate_setup(&duplicate).expect_err("duplicate names are rejected");
+
+        assert!(
+            !error.to_uppercase().contains("UNIQUE"),
+            "leaked SQL: {error}"
+        );
+        assert!(
+            !error.to_uppercase().contains("CONSTRAINT"),
+            "leaked SQL: {error}"
+        );
+
+        // SQLite's default UNIQUE comparison is case sensitive, so these are distinct.
+        let case_distinct = setup_input(&["Drafts", "drafts"], None);
+        assert!(validate_setup(&case_distinct).is_ok());
+    }
+
+    #[test]
+    fn complete_setup_rejects_duplicate_collection_names_before_writing() {
+        let workspace = TempWorkspace::new("duplicate-collections");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+
+        let error = state
+            .complete_setup(setup_input(&["Projects", " Projects "], None))
+            .expect_err("duplicate collection names must fail setup");
+
+        assert!(
+            !error.to_uppercase().contains("UNIQUE"),
+            "leaked SQL: {error}"
+        );
+        assert!(
+            !error.to_uppercase().contains("CONSTRAINT"),
+            "leaked SQL: {error}"
+        );
+
+        let connection = Connection::open(workspace.database_path()).expect("reopen database");
+        assert_eq!(row_count(&connection, "profile"), 0);
+    }
+
+    #[test]
+    fn save_profile_falls_back_to_a_generated_vault_name() {
+        let mut connection = migrated_memory_database();
+        write_setup(&mut connection, &setup_input(&[], None)).expect("write setup");
+
+        write_profile(
+            &mut connection,
+            &ProfileInput {
+                owner_name: "  Ada  ".to_string(),
+                vault_name: "   ".to_string(),
+            },
+        )
+        .expect("save profile with a blank vault name");
+
+        let profile = read_profile(&connection).expect("read profile");
+        assert_eq!(profile.owner_name, "Ada");
+        assert_eq!(profile.vault_name, "Ada's Vault");
+    }
+
+    #[test]
+    fn save_profile_still_rejects_a_blank_owner_name() {
+        let workspace = TempWorkspace::new("blank-owner");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+        state
+            .complete_setup(setup_input(&[], None))
+            .expect("complete setup");
+
+        let error = state
+            .save_profile(&ProfileInput {
+                owner_name: "   ".to_string(),
+                vault_name: "Any Vault".to_string(),
+            })
+            .expect_err("blank owner name must be rejected");
+
+        assert!(
+            error.contains("Owner name is required"),
+            "unexpected: {error}"
+        );
+    }
+
+    #[test]
+    fn set_password_verifier_stores_and_overwrites_the_stored_verifier() {
+        let mut connection = migrated_memory_database();
+        write_setup(&mut connection, &setup_input(&[], None)).expect("write setup");
+
+        write_password_verifier(&mut connection, VERIFIER).expect("set verifier");
+        assert_eq!(
+            read_password_verifier(&connection)
+                .expect("read verifier")
+                .as_deref(),
+            Some(VERIFIER)
+        );
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Locked
+        );
+
+        let replacement = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdAyb3RoZXI$aGFzaA";
+        write_password_verifier(&mut connection, replacement).expect("overwrite verifier");
+
+        assert_eq!(
+            read_password_verifier(&connection)
+                .expect("read verifier")
+                .as_deref(),
+            Some(replacement)
+        );
+    }
+
+    #[test]
+    fn remove_password_verifier_clears_the_stored_verifier() {
+        let mut connection = migrated_memory_database();
+        write_setup(&mut connection, &setup_input(&[], Some(VERIFIER))).expect("write setup");
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Locked
+        );
+
+        clear_password_verifier(&mut connection).expect("clear verifier");
+
+        assert_eq!(
+            read_password_verifier(&connection).expect("read verifier"),
+            None
+        );
+        assert_eq!(
+            read_boot_state(&connection).expect("read boot state"),
+            BootState::Ready
+        );
+    }
+
+    #[test]
+    fn validate_verifier_accepts_argon2id_and_rejects_blank_or_foreign_values() {
+        let valid = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAA";
+
+        assert_eq!(validate_verifier(valid), Ok(valid));
+        assert_eq!(validate_verifier(&format!("  {valid}  ")), Ok(valid));
+
+        assert!(validate_verifier("").is_err());
+        assert!(validate_verifier("   ").is_err());
+        assert!(validate_verifier("not-a-phc-string").is_err());
+        assert!(validate_verifier("$pbkdf2-sha256$i=600000,l=32$c2FsdA$aGFzaA").is_err());
+        assert!(validate_verifier("$argon2id$not-really-a-phc").is_err());
+        assert!(validate_verifier("$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA").is_err());
+    }
+
+    #[test]
+    fn validate_verifier_accepts_a_freshly_hashed_argon2id_password() {
+        let verifier = crate::security::hash_password("correct horse battery staple".to_string())
+            .expect("hash password");
+
+        assert_eq!(validate_verifier(&verifier), Ok(verifier.as_str()));
+    }
+
+    #[test]
+    fn database_state_sets_and_removes_the_verifier_for_boot_states() {
+        let valid = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAA";
+        let workspace = TempWorkspace::new("verifier-state");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+        state
+            .complete_setup(setup_input(&[], None))
+            .expect("complete setup");
+
+        state.set_password_verifier(valid).expect("set verifier");
+
+        {
+            let connection = Connection::open(workspace.database_path()).expect("reopen database");
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT password_verifier FROM security WHERE id = 1",
+                        [],
+                        |row| { row.get::<_, Option<String>>(0) }
+                    )
+                    .expect("read verifier")
+                    .as_deref(),
+                Some(valid)
+            );
+        }
+
+        assert_eq!(
+            state.boot_state().expect("read boot state"),
+            BootState::Locked
+        );
+
+        state.remove_password_verifier().expect("remove verifier");
+
+        assert_eq!(state.password_verifier().expect("read verifier"), None);
+        assert_eq!(
+            state.boot_state().expect("read boot state"),
+            BootState::Ready
+        );
+    }
+
+    #[test]
+    fn set_password_verifier_rejects_invalid_input_without_writing() {
+        let workspace = TempWorkspace::new("verifier-validation");
+        let state = workspace.state();
+        state.initialize().expect("initialize database");
+        state
+            .complete_setup(setup_input(&[], None))
+            .expect("complete setup");
+
+        for invalid in [
+            "",
+            "   ",
+            "not-a-phc-string",
+            "$pbkdf2-sha256$i=1$c2FsdA$aGFzaA",
+        ] {
+            let error = state
+                .set_password_verifier(invalid)
+                .expect_err("invalid verifier must be rejected");
+
+            assert!(
+                !error.contains("argon2id$v="),
+                "error must not echo the verifier"
+            );
+        }
+
+        assert!(state.password_verifier().expect("read verifier").is_none());
+    }
+}
