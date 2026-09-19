@@ -20,11 +20,47 @@ const settings = vi.hoisted(() => ({
   savePreferences: vi.fn(),
 }))
 
+const itemsData = vi.hoisted(() => ({
+  listItems: vi.fn(),
+  loadItem: vi.fn(),
+  saveItem: vi.fn(),
+  setItemPinned: vi.fn(),
+  setItemsFavorite: vi.fn(),
+  moveItemsToCollection: vi.fn(),
+  trashItems: vi.fn(),
+  restoreItems: vi.fn(),
+  deleteItemsPermanently: vi.fn(),
+  importFile: vi.fn(),
+  setItemTags: vi.fn(),
+}))
+
+const collectionsData = vi.hoisted(() => ({
+  listCollections: vi.fn(),
+  saveCollection: vi.fn(),
+  deleteCollection: vi.fn(),
+}))
+
+const dashboardData = vi.hoisted(() => ({
+  loadVaultSummary: vi.fn(),
+}))
+
+const activityData = vi.hoisted(() => ({
+  listRecentItems: vi.fn(),
+  listActivity: vi.fn(),
+  listIndexState: vi.fn(),
+  markItemOpened: vi.fn(),
+}))
+
 vi.mock('../data/database', () => ({
   initializeDatabase: boot.initializeDatabase,
 }))
 
 vi.mock('../data/settings', () => settings)
+
+vi.mock('../data/items', () => itemsData)
+vi.mock('../data/collections', () => collectionsData)
+vi.mock('../data/dashboard', () => dashboardData)
+vi.mock('../data/activity', () => activityData)
 
 vi.mock('../data/setup', () => ({
   loadBootState: boot.loadBootState,
@@ -44,8 +80,37 @@ import App from '../App'
 
 const VERIFIER = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA'
 
+const EMPTY_SUMMARY = {
+  itemCount: 0,
+  noteCount: 0,
+  sourceCount: 0,
+  fileCount: 0,
+  favoriteCount: 0,
+  collectionCount: 0,
+  tagCount: 0,
+  trashCount: 0,
+  fileBytes: 0,
+  databaseBytes: 0,
+}
+
 function resetBoot() {
   for (const mock of Object.values(boot)) mock.mockReset()
+
+  for (const mock of [
+    ...Object.values(itemsData),
+    ...Object.values(collectionsData),
+    ...Object.values(dashboardData),
+    ...Object.values(activityData),
+  ]) {
+    mock.mockReset()
+  }
+
+  itemsData.listItems.mockResolvedValue([])
+  itemsData.loadItem.mockResolvedValue(undefined)
+  collectionsData.listCollections.mockResolvedValue([])
+  dashboardData.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
+  activityData.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
+  activityData.markItemOpened.mockResolvedValue(undefined)
 
   settings.loadPreferences.mockReset()
   settings.savePreferences.mockReset()

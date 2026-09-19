@@ -36,7 +36,7 @@ export type ItemSummary = Pick<
   | 'fileMissing'
   | 'isPinned'
   | 'file'
->
+> & { deletedAt?: string | null }
 
 export type ItemSort = 'title' | 'created' | 'updated' | 'kind'
 
@@ -47,6 +47,7 @@ export type ItemFilter = {
   favorite?: boolean
   query?: string
   sort?: ItemSort
+  trashed?: boolean
 }
 
 export type ItemInput = {
@@ -90,6 +91,14 @@ export async function moveItemsToCollection(
 
 export async function trashItems(ids: string[]): Promise<void> {
   return invoke<void>('trash_items', { ids })
+}
+
+export async function restoreItems(ids: string[]): Promise<void> {
+  return invoke<void>('restore_items', { ids })
+}
+
+export async function deleteItemsPermanently(ids: string[]): Promise<void> {
+  return invoke<void>('delete_items_permanently', { ids })
 }
 
 export async function importFile(sourcePath: string): Promise<VaultItem> {

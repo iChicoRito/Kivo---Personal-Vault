@@ -3,10 +3,12 @@ import '@testing-library/jest-dom/vitest'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  deleteItemsPermanently,
   importFile,
   listItems,
   loadItem,
   moveItemsToCollection,
+  restoreItems,
   saveItem,
   setItemPinned,
   setItemTags,
@@ -215,6 +217,31 @@ describe('items data contract', () => {
 
     await expect(trashItems(ids)).resolves.toBeUndefined()
     expect(getTauriInvoke()).toHaveBeenCalledWith('trash_items', { ids })
+  })
+
+  it('restores items with restore_items and { ids }', async () => {
+    const ids = [NOTE.id, FILE_ITEM.id]
+
+    getTauriInvoke().mockResolvedValue(undefined)
+
+    await expect(restoreItems(ids)).resolves.toBeUndefined()
+    expect(getTauriInvoke()).toHaveBeenCalledWith('restore_items', { ids })
+  })
+
+  it('deletes items permanently with delete_items_permanently and { ids }', async () => {
+    const ids = [NOTE.id, FILE_ITEM.id]
+
+    getTauriInvoke().mockResolvedValue(undefined)
+
+    await expect(deleteItemsPermanently(ids)).resolves.toBeUndefined()
+    expect(getTauriInvoke()).toHaveBeenCalledWith('delete_items_permanently', { ids })
+  })
+
+  it('passes a trashed filter through list_items', async () => {
+    getTauriInvoke().mockResolvedValue([])
+
+    await expect(listItems({ trashed: true })).resolves.toEqual([])
+    expect(getTauriInvoke()).toHaveBeenCalledWith('list_items', { filter: { trashed: true } })
   })
 
   it('imports a file through import_file with { sourcePath }', async () => {

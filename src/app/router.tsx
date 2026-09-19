@@ -2,7 +2,6 @@ import { Link, Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from './AppShell'
 import PageHeader, { textLinkClass } from './PageHeader'
 import DashboardPage from '../features/dashboard/DashboardPage'
-import ModulePage, { moduleRoutes } from '../features/modules/ModulePage'
 import SettingsPage from '../features/settings/SettingsPage'
 import { ItemsPage } from '../features/items/ItemsPage'
 import { NotesPage } from '../features/notes/NotesPage'
@@ -11,9 +10,10 @@ import { SourcesPage } from '../features/sources/SourcesPage'
 import { FilesPage } from '../features/files/FilesPage'
 import { CollectionsPage } from '../features/collections/CollectionsPage'
 import { TagsPage } from '../features/tags/TagsPage'
-
-// Favorites, Recent, and Trash keep the shared placeholder shell until Phase 4.
-const placeholderPaths = new Set(['favorites', 'recent', 'trash'])
+import { SearchPage } from '../features/search/SearchPage'
+import { FavoritesPage } from '../features/favorites/FavoritesPage'
+import { RecentPage } from '../features/recent/RecentPage'
+import { TrashPage } from '../features/trash/TrashPage'
 
 export function NotFoundPage() {
   return (
@@ -44,11 +44,10 @@ export function AppRoutes() {
         <Route path="files" element={<FilesPage />} />
         <Route path="collections" element={<CollectionsPage />} />
         <Route path="tags" element={<TagsPage />} />
-        {moduleRoutes
-          .filter((module) => placeholderPaths.has(module.path))
-          .map((module) => (
-            <Route key={module.path} path={module.path} element={<ModulePage module={module} />} />
-          ))}
+        <Route path="search" element={<SearchPage />} />
+        <Route path="favorites" element={<FavoritesPage />} />
+        <Route path="recent" element={<RecentPage />} />
+        <Route path="trash" element={<TrashPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

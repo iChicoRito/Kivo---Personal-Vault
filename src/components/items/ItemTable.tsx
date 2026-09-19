@@ -13,6 +13,7 @@ import {
 } from '@heroui/react'
 import {
   Delete02Icon,
+  DeletePutBackIcon,
   EyeIcon,
   FolderOpenIcon,
   InboxIcon,
@@ -39,6 +40,8 @@ export type ItemTableProps = {
   onToggleFavorite?: (id: string, next: boolean) => void
   onMove?: (id: string) => void
   onTrash?: (id: string) => void
+  onRestore?: (id: string) => void
+  onDeletePermanently?: (id: string) => void
   emptyMessage?: string
 }
 
@@ -74,6 +77,8 @@ export function ItemTable({
   onToggleFavorite,
   onMove,
   onTrash,
+  onRestore,
+  onDeletePermanently,
   emptyMessage = 'No items yet.',
 }: ItemTableProps) {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
@@ -95,6 +100,8 @@ export function ItemTable({
     else if (key === 'favorite') onToggleFavorite?.(item.id, !item.isFavorite)
     else if (key === 'move') onMove?.(item.id)
     else if (key === 'trash') onTrash?.(item.id)
+    else if (key === 'restore') onRestore?.(item.id)
+    else if (key === 'delete-permanently') onDeletePermanently?.(item.id)
   }
 
   return (
@@ -215,7 +222,14 @@ export function ItemTable({
                 </Table.Cell>
                 <Table.Cell>
                   <Typography color="muted" type="body-xs">
-                    <time dateTime={item.updatedAt}>{formatUpdatedAt(item.updatedAt)}</time>
+                    {item.deletedAt ? (
+                      <>
+                        Deleted{' '}
+                        <time dateTime={item.deletedAt}>{formatUpdatedAt(item.deletedAt)}</time>
+                      </>
+                    ) : (
+                      <time dateTime={item.updatedAt}>{formatUpdatedAt(item.updatedAt)}</time>
+                    )}
                   </Typography>
                 </Table.Cell>
                 <Table.Cell>
@@ -234,38 +248,69 @@ export function ItemTable({
                         className="kivo-row-actions-menu"
                         onAction={(key) => handleRowAction(item, String(key))}
                       >
-                        <Dropdown.Item id="open" textValue="Open details">
-                          <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
-                          <Label>Open details</Label>
-                        </Dropdown.Item>
-                        <Dropdown.Item
-                          id="favorite"
-                          textValue={item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
-                        >
-                          <HugeiconsIcon
-                            aria-hidden="true"
-                            icon={item.isFavorite ? StarOffIcon : StarIcon}
-                            size={16}
-                          />
-                          <Label>{item.isFavorite ? 'Remove favorite' : 'Add to favorites'}</Label>
-                        </Dropdown.Item>
-                        <Dropdown.Item id="move" textValue="Move to collection">
-                          <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
-                          <Label>Move to collection</Label>
-                        </Dropdown.Item>
+                        {onOpen ? (
+                          <Dropdown.Item id="open" textValue="Open details">
+                            <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
+                            <Label>Open details</Label>
+                          </Dropdown.Item>
+                        ) : null}
+                        {onToggleFavorite ? (
+                          <Dropdown.Item
+                            id="favorite"
+                            textValue={item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
+                          >
+                            <HugeiconsIcon
+                              aria-hidden="true"
+                              icon={item.isFavorite ? StarOffIcon : StarIcon}
+                              size={16}
+                            />
+                            <Label>
+                              {item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
+                            </Label>
+                          </Dropdown.Item>
+                        ) : null}
+                        {onMove ? (
+                          <Dropdown.Item id="move" textValue="Move to collection">
+                            <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
+                            <Label>Move to collection</Label>
+                          </Dropdown.Item>
+                        ) : null}
+                        {onRestore ? (
+                          <Dropdown.Item id="restore" textValue="Restore">
+                            <HugeiconsIcon aria-hidden="true" icon={DeletePutBackIcon} size={16} />
+                            <Label>Restore</Label>
+                          </Dropdown.Item>
+                        ) : null}
                         <Dropdown.Section
                           aria-label="Danger zone"
                           className="mt-1 border-t border-separator pt-1"
                         >
-                          <Dropdown.Item id="trash" textValue="Move to trash" variant="danger">
-                            <HugeiconsIcon
-                              aria-hidden="true"
-                              className="text-danger"
-                              icon={Delete02Icon}
-                              size={16}
-                            />
-                            <Label>Move to trash</Label>
-                          </Dropdown.Item>
+                          {onTrash ? (
+                            <Dropdown.Item id="trash" textValue="Move to trash" variant="danger">
+                              <HugeiconsIcon
+                                aria-hidden="true"
+                                className="text-danger"
+                                icon={Delete02Icon}
+                                size={16}
+                              />
+                              <Label>Move to trash</Label>
+                            </Dropdown.Item>
+                          ) : null}
+                          {onDeletePermanently ? (
+                            <Dropdown.Item
+                              id="delete-permanently"
+                              textValue="Delete permanently"
+                              variant="danger"
+                            >
+                              <HugeiconsIcon
+                                aria-hidden="true"
+                                className="text-danger"
+                                icon={Delete02Icon}
+                                size={16}
+                              />
+                              <Label>Delete permanently</Label>
+                            </Dropdown.Item>
+                          ) : null}
                         </Dropdown.Section>
                       </Dropdown.Menu>
                     </Dropdown.Popover>

@@ -11,6 +11,7 @@ import { setMediaQueryMatches } from './setup'
 
 const destinationLabels = [
   'Dashboard',
+  'Search',
   'All Items',
   'Notes',
   'Sources',
@@ -25,6 +26,7 @@ const destinationLabels = [
 
 const hrefByLabel: Record<string, string> = {
   Dashboard: '/dashboard',
+  Search: '/search',
   'All Items': '/items',
   Notes: '/notes',
   Sources: '/sources',
@@ -37,7 +39,7 @@ const hrefByLabel: Record<string, string> = {
   Settings: '/settings',
 }
 
-const deferredControls = ['Search', 'Quick Add', 'Command Palette', 'Vault Lock']
+const deferredControls = ['Quick Add', 'Command Palette', 'Vault Lock']
 
 function RouteMarker() {
   const { pathname } = useLocation()

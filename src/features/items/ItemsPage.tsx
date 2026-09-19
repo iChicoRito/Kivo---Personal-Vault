@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -71,6 +72,7 @@ function sortItems(items: ItemSummary[], descriptor: SortDescriptor): ItemSummar
 }
 
 export function ItemsPage() {
+  const [searchParams] = useSearchParams()
   const [items, setItems] = useState<ItemSummary[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [attempt, setAttempt] = useState(0)
@@ -80,7 +82,9 @@ export function ItemsPage() {
 
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<KindFilter>('all')
-  const [collectionId, setCollectionId] = useState<string | null>(null)
+  const [collectionId, setCollectionId] = useState<string | null>(() =>
+    searchParams.get('collection'),
+  )
   const [tagId, setTagId] = useState<string | null>(null)
   const [favorite, setFavorite] = useState(false)
   const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
@@ -113,6 +117,10 @@ export function ItemsPage() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    setCollectionId(searchParams.get('collection'))
+  }, [searchParams])
 
   useEffect(() => {
     let active = true
@@ -386,8 +394,8 @@ export function ItemsPage() {
         confirmLabel="Move to trash"
         description={
           trashIds.length === 1
-            ? 'This item leaves every list. You can restore it in a later version.'
-            : 'The selected items leave every list. You can restore them in a later version.'
+            ? 'This item leaves every list. You can restore it from Trash.'
+            : 'The selected items leave every list. You can restore them from Trash.'
         }
         open={trashOpen}
         title={trashIds.length === 1 ? 'Move this item to Trash?' : 'Move selected items to Trash?'}

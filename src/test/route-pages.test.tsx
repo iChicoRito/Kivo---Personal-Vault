@@ -12,6 +12,8 @@ const itemsMock = vi.hoisted(() => ({
   setItemsFavorite: vi.fn(),
   moveItemsToCollection: vi.fn(),
   trashItems: vi.fn(),
+  restoreItems: vi.fn(),
+  deleteItemsPermanently: vi.fn(),
   importFile: vi.fn(),
   setItemTags: vi.fn(),
 }))
@@ -35,10 +37,23 @@ const tagsMock = vi.hoisted(() => ({
   deleteTag: vi.fn(),
 }))
 
+const activityMock = vi.hoisted(() => ({
+  listRecentItems: vi.fn(),
+  listActivity: vi.fn(),
+  listIndexState: vi.fn(),
+  markItemOpened: vi.fn(),
+}))
+
+const dashboardMock = vi.hoisted(() => ({
+  loadVaultSummary: vi.fn(),
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
+vi.mock('../data/activity', () => activityMock)
+vi.mock('../data/dashboard', () => dashboardMock)
 
 import { AppRoutes } from '../app/router'
 import { navigationGroups } from '../app/navigation'
@@ -47,35 +62,34 @@ import ModulePage, { moduleRoutes } from '../features/modules/ModulePage'
 // Documented dock destinations, independent of the dashboard component.
 const dockDestinations = navigationGroups.flatMap((group) => group.links)
 
-// Real Phase 3 pages own these routes; each keeps its own title.
-const REAL_DESTINATIONS = [
+const EMPTY_SUMMARY = {
+  itemCount: 0,
+  noteCount: 0,
+  sourceCount: 0,
+  fileCount: 0,
+  favoriteCount: 0,
+  collectionCount: 0,
+  tagCount: 0,
+  trashCount: 0,
+  fileBytes: 0,
+  databaseBytes: 0,
+}
+
+// Real pages own these routes; each keeps its own title.
+const REAL_DESTINATIONS: Array<{ path: string; title: string; description?: string }> = [
   { path: '/items', title: 'All Items' },
   { path: '/notes', title: 'Notes' },
   { path: '/sources', title: 'Sources' },
   { path: '/files', title: 'Files' },
   { path: '/collections', title: 'Collections' },
   { path: '/tags', title: 'Tags' },
-]
-
-// Favorites, Recent, and Trash keep the shared placeholder shell until Phase 4.
-const PLACEHOLDER_DESTINATIONS = [
-  {
-    path: '/favorites',
-    title: 'Favorites',
-    description: 'Keep priority items easy to find.',
-    emptyTitle: 'No favorites yet.',
-  },
-  {
-    path: '/recent',
-    title: 'Recent',
-    description: 'Return to items opened lately.',
-    emptyTitle: 'Nothing recent yet.',
-  },
+  { path: '/search', title: 'Search', description: 'Find anything in your vault.' },
+  { path: '/favorites', title: 'Favorites', description: 'Keep priority items easy to find.' },
+  { path: '/recent', title: 'Recent', description: 'Return to items opened lately.' },
   {
     path: '/trash',
     title: 'Trash',
     description: 'Review deleted items before permanent removal.',
-    emptyTitle: 'Trash is empty.',
   },
 ]
 
@@ -94,33 +108,28 @@ beforeEach(() => {
   collectionsMock.listCollections.mockResolvedValue([])
   tagsMock.listTags.mockResolvedValue([])
   filesMock.pickFile.mockResolvedValue(null)
+  activityMock.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
+  activityMock.markItemOpened.mockResolvedValue(undefined)
+  dashboardMock.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
 })
 
 describe('documented destinations', () => {
   it.each(REAL_DESTINATIONS)(
     'opens $path with its own title',
-    async ({ path, title }) => {
-      renderRoute(path)
-
-      expect(
-        await screen.findByRole('heading', { level: 1, name: title, exact: true }),
-      ).toBeInTheDocument()
-    },
-  )
-
-  it.each(PLACEHOLDER_DESTINATIONS)(
-    'opens $path with its own title and description',
     async ({ path, title, description }) => {
       renderRoute(path)
 
       expect(
         await screen.findByRole('heading', { level: 1, name: title, exact: true }),
       ).toBeInTheDocument()
-      expect(screen.getByText(description)).toBeInTheDocument()
+
+      if (description) {
+        expect(screen.getByText(description)).toBeInTheDocument()
+      }
     },
   )
 
-  it('opens Dashboard with its title and the navigation dock', async () => {
+  it('opens Dashboard with its title, empty state, and the navigation dock', async () => {
     renderRoute('/dashboard')
 
     expect(
@@ -128,7 +137,13 @@ describe('documented destinations', () => {
     ).toBeInTheDocument()
 
     const main = screen.getByRole('main')
-    expect(within(main).queryAllByRole('heading')).toHaveLength(1)
+    expect(
+      await within(main).findByRole('heading', {
+        level: 2,
+        name: 'Your vault is looking a little empty.',
+        exact: true,
+      }),
+    ).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
     expect(within(main).queryByRole('status')).not.toBeInTheDocument()
     expect(within(main).queryByRole('alert')).not.toBeInTheDocument()
@@ -143,21 +158,7 @@ describe('documented destinations', () => {
   })
 })
 
-describe('placeholder module route shells', () => {
-  it.each(PLACEHOLDER_DESTINATIONS)(
-    'shows the $path empty state without active unavailable controls',
-    async ({ path, emptyTitle }) => {
-      renderRoute(path)
-
-      const main = screen.getByRole('main')
-      expect(
-        await within(main).findByRole('heading', { level: 2, name: emptyTitle, exact: true }),
-      ).toBeInTheDocument()
-      expect(within(main).getByText('EMPTY STATE')).toBeInTheDocument()
-      expect(within(main).queryByRole('button')).not.toBeInTheDocument()
-    },
-  )
-
+describe('module route metadata', () => {
   it('no longer exposes a settings module route', () => {
     expect(moduleRoutes.map((route) => route.path)).not.toContain('settings')
   })
@@ -177,19 +178,6 @@ describe('placeholder module route shells', () => {
       expect(new Set(values).size, field).toBe(moduleRoutes.length)
     }
   })
-
-  it.each(PLACEHOLDER_DESTINATIONS)(
-    'offers a live Dashboard next step on $path',
-    async ({ path, emptyTitle }) => {
-      renderRoute(path)
-
-      const main = screen.getByRole('main')
-      await within(main).findByRole('heading', { level: 2, name: emptyTitle, exact: true })
-
-      const link = within(main).getByRole('link', { name: 'Return to Dashboard' })
-      expect(link).toHaveAttribute('href', '/dashboard')
-    },
-  )
 })
 
 describe('ModulePage states', () => {
@@ -233,7 +221,7 @@ describe('Primary dock navigation', () => {
     const dock = await screen.findByRole('navigation', { name: 'Primary navigation' })
     const links = within(dock).getAllByRole('link')
 
-    expect(dockDestinations).toHaveLength(11)
+    expect(dockDestinations).toHaveLength(12)
     expect(links).toHaveLength(dockDestinations.length)
 
     for (const destination of dockDestinations) {

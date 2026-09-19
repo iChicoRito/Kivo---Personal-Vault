@@ -47,6 +47,7 @@ pub struct ItemSummary {
     pub is_pinned: bool,
     pub collection_id: Option<String>,
     pub updated_at: String,
+    pub deleted_at: Option<String>,
     pub file: Option<FileDetails>,
     pub file_missing: bool,
 }
@@ -87,6 +88,29 @@ pub struct IndexState {
     pub indexed_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentItems {
+    pub opened: Vec<ItemSummary>,
+    pub modified: Vec<ItemSummary>,
+    pub created: Vec<ItemSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultSummary {
+    pub item_count: i64,
+    pub note_count: i64,
+    pub source_count: i64,
+    pub file_count: i64,
+    pub favorite_count: i64,
+    pub collection_count: i64,
+    pub tag_count: i64,
+    pub trash_count: i64,
+    pub file_bytes: i64,
+    pub database_bytes: i64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemInput {
@@ -112,6 +136,8 @@ pub struct ItemFilter {
     pub favorite: Option<bool>,
     pub query: Option<String>,
     pub sort: Option<String>,
+    #[serde(default)]
+    pub trashed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -285,17 +311,61 @@ fn read_item(
     }))
 }
 
+// Shared by list_items and list_recent_items so a summary keeps the same file
+// and file_missing answers everywhere. The column order is load-bearing.
+const ITEM_SUMMARY_COLUMNS: &str = "i.id, i.kind, i.title, i.is_favorite, i.is_pinned,
+            i.collection_id, i.updated_at, i.deleted_at,
+            f.stored_name, f.original_name, f.byte_size, f.imported_at";
+
+fn map_summary_row(row: &rusqlite::Row<'_>, files_dir: &Path) -> rusqlite::Result<ItemSummary> {
+    let kind: String = row.get(1)?;
+    let stored_name: Option<String> = row.get(8)?;
+    let file_missing = kind == "file"
+        && stored_name
+            .as_deref()
+            .map(|name| !files_dir.join(name).is_file())
+            .unwrap_or(false);
+
+    let original_name: Option<String> = row.get(9)?;
+    let byte_size: Option<i64> = row.get(10)?;
+    let imported_at: Option<String> = row.get(11)?;
+
+    let file = match (original_name, byte_size, imported_at) {
+        (Some(original_name), Some(byte_size), Some(imported_at)) => Some(FileDetails {
+            original_name,
+            byte_size,
+            imported_at,
+        }),
+        _ => None,
+    };
+
+    Ok(ItemSummary {
+        id: row.get(0)?,
+        kind,
+        title: row.get(2)?,
+        is_favorite: row.get::<_, i64>(3)? != 0,
+        is_pinned: row.get::<_, i64>(4)? != 0,
+        collection_id: row.get(5)?,
+        updated_at: row.get(6)?,
+        deleted_at: row.get(7)?,
+        file,
+        file_missing,
+    })
+}
+
 fn read_item_summaries(
     connection: &Connection,
     files_dir: &Path,
     filter: Option<&ItemFilter>,
 ) -> rusqlite::Result<Vec<ItemSummary>> {
-    let mut sql = String::from(
-        "SELECT i.id, i.kind, i.title, i.is_favorite, i.is_pinned, i.collection_id,
-                i.updated_at, f.stored_name, f.original_name, f.byte_size, f.imported_at
+    // Trashed listings flip the scope and always order by the deletion stamp.
+    let trashed = filter.and_then(|filter| filter.trashed) == Some(true);
+    let mut sql = format!(
+        "SELECT {ITEM_SUMMARY_COLUMNS}
          FROM items i
          LEFT JOIN files f ON f.item_id = i.id
-         WHERE i.deleted_at IS NULL",
+         WHERE i.deleted_at IS {}",
+        if trashed { "NOT NULL" } else { "NULL" }
     );
     let mut values: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -339,20 +409,28 @@ fn read_item_summaries(
                     OR i.description LIKE ? ESCAPE '\\'
                     OR i.content LIKE ? ESCAPE '\\'
                     OR i.url LIKE ? ESCAPE '\\'
-                    OR f.original_name LIKE ? ESCAPE '\\')",
+                    OR f.original_name LIKE ? ESCAPE '\\'
+                    OR EXISTS (SELECT 1 FROM item_tags it JOIN tags t ON t.id = it.tag_id
+                               WHERE it.item_id = i.id AND t.name LIKE ? ESCAPE '\\')
+                    OR EXISTS (SELECT 1 FROM collections c
+                               WHERE c.id = i.collection_id AND c.name LIKE ? ESCAPE '\\'))",
             );
 
-            for _ in 0..5 {
+            for _ in 0..7 {
                 values.push(rusqlite::types::Value::Text(pattern.clone()));
             }
         }
     }
 
-    let order = match filter.and_then(|filter| filter.sort.as_deref()) {
-        Some("title") => "i.title COLLATE NOCASE ASC, i.updated_at DESC",
-        Some("created") => "i.created_at DESC, i.updated_at DESC",
-        Some("kind") => "i.kind ASC, i.updated_at DESC",
-        _ => "i.updated_at DESC, i.title COLLATE NOCASE ASC",
+    let order = if trashed {
+        "i.deleted_at DESC"
+    } else {
+        match filter.and_then(|filter| filter.sort.as_deref()) {
+            Some("title") => "i.title COLLATE NOCASE ASC, i.updated_at DESC",
+            Some("created") => "i.created_at DESC, i.updated_at DESC",
+            Some("kind") => "i.kind ASC, i.updated_at DESC",
+            _ => "i.updated_at DESC, i.title COLLATE NOCASE ASC",
+        }
     };
 
     sql.push_str(" ORDER BY ");
@@ -360,66 +438,50 @@ fn read_item_summaries(
 
     let mut statement = connection.prepare(&sql)?;
 
-    let rows = statement.query_map(rusqlite::params_from_iter(values.iter()), |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)? != 0,
-            row.get::<_, i64>(4)? != 0,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, String>(6)?,
-            row.get::<_, Option<String>>(7)?,
-            row.get::<_, Option<String>>(8)?,
-            row.get::<_, Option<i64>>(9)?,
-            row.get::<_, Option<String>>(10)?,
-        ))
-    })?;
+    let summaries = statement
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            map_summary_row(row, files_dir)
+        })?
+        .collect::<rusqlite::Result<Vec<ItemSummary>>>()?;
 
-    let mut summaries = Vec::new();
+    Ok(summaries)
+}
 
-    for row in rows {
-        let (
-            id,
-            kind,
-            title,
-            is_favorite,
-            is_pinned,
-            collection_id,
-            updated_at,
-            stored_name,
-            original_name,
-            byte_size,
-            imported_at,
-        ) = row?;
+// One Recent group: live items whose newest matching activity row decides the
+// order. The action list binds twice, once for the filter and once for the sort.
+fn read_recent_group(
+    connection: &Connection,
+    files_dir: &Path,
+    actions: &[&str],
+) -> rusqlite::Result<Vec<ItemSummary>> {
+    let placeholders = vec!["?"; actions.len()].join(", ");
+    let sql = format!(
+        "SELECT {ITEM_SUMMARY_COLUMNS}
+         FROM items i
+         LEFT JOIN files f ON f.item_id = i.id
+         WHERE i.deleted_at IS NULL
+           AND EXISTS (SELECT 1 FROM activity a
+                       WHERE a.item_id = i.id AND a.action IN ({placeholders}))
+         ORDER BY (SELECT MAX(a.id) FROM activity a
+                   WHERE a.item_id = i.id AND a.action IN ({placeholders})) DESC
+         LIMIT 50"
+    );
 
-        let file_missing = kind == "file"
-            && stored_name
-                .as_deref()
-                .map(|name| !files_dir.join(name).is_file())
-                .unwrap_or(false);
+    let mut values: Vec<rusqlite::types::Value> = Vec::new();
 
-        let file = match (original_name, byte_size, imported_at) {
-            (Some(original_name), Some(byte_size), Some(imported_at)) => Some(FileDetails {
-                original_name,
-                byte_size,
-                imported_at,
-            }),
-            _ => None,
-        };
-
-        summaries.push(ItemSummary {
-            id,
-            kind,
-            title,
-            is_favorite,
-            is_pinned,
-            collection_id,
-            updated_at,
-            file,
-            file_missing,
-        });
+    for _ in 0..2 {
+        for action in actions {
+            values.push(rusqlite::types::Value::Text((*action).to_string()));
+        }
     }
+
+    let mut statement = connection.prepare(&sql)?;
+
+    let summaries = statement
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            map_summary_row(row, files_dir)
+        })?
+        .collect::<rusqlite::Result<Vec<ItemSummary>>>()?;
 
     Ok(summaries)
 }
@@ -933,6 +995,131 @@ fn write_trashed_items(connection: &mut Connection, ids: &[String]) -> Result<()
         .map_err(|error| format!("Could not move the items to Trash: {error}"))
 }
 
+fn write_restored_items(connection: &mut Connection, ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not restore the items: {error}"))?;
+
+    for id in ids {
+        let updated = transaction
+            .execute(
+                "UPDATE items SET deleted_at = NULL
+                 WHERE id = ?1 AND deleted_at IS NOT NULL",
+                params![id],
+            )
+            .map_err(|error| format!("Could not restore the items: {error}"))?;
+
+        if updated == 0 {
+            continue;
+        }
+
+        transaction
+            .execute(
+                "INSERT INTO activity (item_id, action, created_at)
+                 VALUES (?1, 'restored', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                params![id],
+            )
+            .map_err(|error| format!("Could not restore the items: {error}"))?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not restore the items: {error}"))
+}
+
+// Reads the managed names first, deletes the rows (files, item_tags, and
+// index_state cascade), then removes the bytes best effort. An id that is not
+// trashed is ignored, so a live item can never be destroyed through this path.
+fn remove_items_permanently(
+    connection: &mut Connection,
+    files_dir: &Path,
+    ids: &[String],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut stored_names: Vec<String> = Vec::new();
+
+    {
+        let mut statement = connection
+            .prepare(
+                "SELECT f.stored_name
+                 FROM files f
+                 JOIN items i ON i.id = f.item_id
+                 WHERE i.id = ?1 AND i.deleted_at IS NOT NULL",
+            )
+            .map_err(|error| format!("Could not delete the items: {error}"))?;
+
+        for id in ids {
+            let stored_name = statement
+                .query_row(params![id], |row| row.get::<_, String>(0))
+                .optional()
+                .map_err(|error| format!("Could not delete the items: {error}"))?;
+
+            if let Some(stored_name) = stored_name {
+                stored_names.push(stored_name);
+            }
+        }
+    }
+
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not delete the items: {error}"))?;
+
+    for id in ids {
+        transaction
+            .execute(
+                "DELETE FROM items WHERE id = ?1 AND deleted_at IS NOT NULL",
+                params![id],
+            )
+            .map_err(|error| format!("Could not delete the items: {error}"))?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not delete the items: {error}"))?;
+
+    for stored_name in stored_names {
+        let _ = fs::remove_file(files_dir.join(stored_name));
+    }
+
+    Ok(())
+}
+
+// A missing or trashed id records nothing, so Recent never lists it.
+fn write_item_opened(connection: &mut Connection, id: &str) -> Result<(), String> {
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not mark the item as opened: {error}"))?;
+
+    let live: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM items WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Could not mark the item as opened: {error}"))?;
+
+    if live > 0 {
+        transaction
+            .execute(
+                "INSERT INTO activity (item_id, action, created_at)
+                 VALUES (?1, 'opened', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                params![id],
+            )
+            .map_err(|error| format!("Could not mark the item as opened: {error}"))?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not mark the item as opened: {error}"))
+}
+
 fn write_collection(
     connection: &mut Connection,
     input: &CollectionInput,
@@ -1333,6 +1520,117 @@ fn trash_items_with_state(state: &DatabaseState, ids: &[String]) -> Result<(), S
     write_trashed_items(connection.as_mut().expect("checked above"), ids)
 }
 
+fn restore_items_with_state(state: &DatabaseState, ids: &[String]) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    write_restored_items(connection.as_mut().expect("checked above"), ids)
+}
+
+fn delete_items_permanently_with_state(
+    state: &DatabaseState,
+    ids: &[String],
+) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    remove_items_permanently(
+        connection.as_mut().expect("checked above"),
+        state.files_dir(),
+        ids,
+    )
+}
+
+fn mark_item_opened_with_state(state: &DatabaseState, id: &str) -> Result<(), String> {
+    let mut connection = state.require_connection()?;
+
+    write_item_opened(connection.as_mut().expect("checked above"), id)
+}
+
+fn list_recent_items_with_state(state: &DatabaseState) -> Result<RecentItems, String> {
+    let connection = state.require_connection()?;
+    let connection = connection.as_ref().expect("checked above");
+    let files_dir = state.files_dir();
+
+    Ok(RecentItems {
+        opened: read_recent_group(connection, files_dir, &["opened"])
+            .map_err(|error| format!("Could not list the recent items: {error}"))?,
+        modified: read_recent_group(connection, files_dir, &["updated"])
+            .map_err(|error| format!("Could not list the recent items: {error}"))?,
+        created: read_recent_group(connection, files_dir, &["created", "imported"])
+            .map_err(|error| format!("Could not list the recent items: {error}"))?,
+    })
+}
+
+fn load_vault_summary_with_state(state: &DatabaseState) -> Result<VaultSummary, String> {
+    let connection = state.require_connection()?;
+    let connection = connection.as_ref().expect("checked above");
+
+    let (
+        item_count,
+        note_count,
+        source_count,
+        file_count,
+        favorite_count,
+        collection_count,
+        tag_count,
+        trash_count,
+        file_bytes,
+    ): (i64, i64, i64, i64, i64, i64, i64, i64, i64) = connection
+        .query_row(
+            "SELECT
+               (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL),
+               (SELECT COUNT(*) FROM items WHERE kind = 'note' AND deleted_at IS NULL),
+               (SELECT COUNT(*) FROM items WHERE kind = 'source' AND deleted_at IS NULL),
+               (SELECT COUNT(*) FROM items WHERE kind = 'file' AND deleted_at IS NULL),
+               (SELECT COUNT(*) FROM items WHERE is_favorite = 1 AND deleted_at IS NULL),
+               (SELECT COUNT(*) FROM collections),
+               (SELECT COUNT(*) FROM tags),
+               (SELECT COUNT(*) FROM items WHERE deleted_at IS NOT NULL),
+               (SELECT COALESCE(SUM(byte_size), 0) FROM files)",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))
+            },
+        )
+        .map_err(|error| format!("Could not read the vault summary: {error}"))?;
+
+    let page_count: i64 = connection
+        .query_row("PRAGMA page_count", [], |row| row.get(0))
+        .map_err(|error| format!("Could not read the vault summary: {error}"))?;
+    let page_size: i64 = connection
+        .query_row("PRAGMA page_size", [], |row| row.get(0))
+        .map_err(|error| format!("Could not read the vault summary: {error}"))?;
+
+    Ok(VaultSummary {
+        item_count,
+        note_count,
+        source_count,
+        file_count,
+        favorite_count,
+        collection_count,
+        tag_count,
+        trash_count,
+        file_bytes,
+        database_bytes: page_count * page_size,
+    })
+}
+
+// Best effort: the open already succeeded, so a failed mark never fails the open.
+fn record_item_opened(state: &DatabaseState, id: &str) {
+    if let Ok(mut connection) = state.require_connection() {
+        let _ = write_item_opened(connection.as_mut().expect("checked above"), id);
+    }
+}
+
 fn save_collection_with_state(
     state: &DatabaseState,
     input: &CollectionInput,
@@ -1571,6 +1869,34 @@ pub fn trash_items(ids: Vec<String>, state: State<'_, DatabaseState>) -> Result<
 }
 
 #[tauri::command]
+pub fn restore_items(ids: Vec<String>, state: State<'_, DatabaseState>) -> Result<(), String> {
+    restore_items_with_state(state.inner(), &ids)
+}
+
+#[tauri::command]
+pub fn delete_items_permanently(
+    ids: Vec<String>,
+    state: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    delete_items_permanently_with_state(state.inner(), &ids)
+}
+
+#[tauri::command]
+pub fn mark_item_opened(id: String, state: State<'_, DatabaseState>) -> Result<(), String> {
+    mark_item_opened_with_state(state.inner(), &id)
+}
+
+#[tauri::command]
+pub fn list_recent_items(state: State<'_, DatabaseState>) -> Result<RecentItems, String> {
+    list_recent_items_with_state(state.inner())
+}
+
+#[tauri::command]
+pub fn load_vault_summary(state: State<'_, DatabaseState>) -> Result<VaultSummary, String> {
+    load_vault_summary_with_state(state.inner())
+}
+
+#[tauri::command]
 pub fn save_collection(
     input: CollectionInput,
     state: State<'_, DatabaseState>,
@@ -1617,7 +1943,11 @@ pub fn open_item_file(
 
     app.opener()
         .open_path(path.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|error| format!("Could not open the file: {error}"))
+        .map_err(|error| format!("Could not open the file: {error}"))?;
+
+    record_item_opened(state.inner(), &id);
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1643,7 +1973,11 @@ pub fn open_source_url(
 
     app.opener()
         .open_url(url, None::<&str>)
-        .map_err(|error| format!("Could not open the address: {error}"))
+        .map_err(|error| format!("Could not open the address: {error}"))?;
+
+    record_item_opened(state.inner(), &id);
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -3025,5 +3359,304 @@ mod tests {
         )
         .expect_err("file creation rejected");
         assert_eq!(error, "File items are created by import");
+    }
+
+    #[test]
+    fn trashed_filter_returns_only_trashed_rows_newest_deleted_first() {
+        let vault = TempVault::new("trashed-filter");
+        let state = vault.state();
+
+        let keep = save_item_with_state(&state, &note_input("Keep", "body")).expect("save keep");
+        let old = save_item_with_state(&state, &note_input("Old", "body")).expect("save old");
+        let new = save_item_with_state(&state, &note_input("New", "body")).expect("save new");
+
+        trash_items_with_state(&state, &[old.id.clone(), new.id.clone()]).expect("trash two");
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_ref().expect("connection is initialized");
+
+            for (id, stamp) in [
+                (&old.id, "2020-01-01T00:00:00.000Z"),
+                (&new.id, "2021-01-01T00:00:00.000Z"),
+            ] {
+                connection
+                    .execute(
+                        "UPDATE items SET deleted_at = ?2 WHERE id = ?1",
+                        params![id, stamp],
+                    )
+                    .expect("stamp deleted_at");
+            }
+        }
+
+        let filter = ItemFilter {
+            trashed: Some(true),
+            ..ItemFilter::default()
+        };
+        let trashed = list_items_with_state(&state, Some(&filter)).expect("list trashed");
+        assert_eq!(titles(&trashed), vec!["New", "Old"]);
+        assert!(trashed.iter().all(|summary| summary.deleted_at.is_some()));
+        assert!(!trashed.iter().any(|summary| summary.id == keep.id));
+
+        // A sort value never overrides the deletion order for a trashed listing.
+        let filter = ItemFilter {
+            trashed: Some(true),
+            sort: Some("title".to_string()),
+            ..ItemFilter::default()
+        };
+        let sorted = list_items_with_state(&state, Some(&filter)).expect("trashed with sort");
+        assert_eq!(titles(&sorted), vec!["New", "Old"]);
+
+        let live = list_items_with_state(&state, None).expect("list live");
+        assert_eq!(titles(&live), vec!["Keep"]);
+        assert!(live[0].deleted_at.is_none());
+    }
+
+    #[test]
+    fn restore_clears_deleted_at_and_writes_one_activity_row() {
+        let vault = TempVault::new("restore");
+        let state = vault.state();
+
+        let item = save_item_with_state(&state, &note_input("Restore me", "body")).expect("save");
+        trash_items_with_state(&state, std::slice::from_ref(&item.id)).expect("trash");
+
+        restore_items_with_state(&state, std::slice::from_ref(&item.id)).expect("restore");
+        let loaded = load_item_with_state(&state, &item.id).expect("load restored");
+        assert!(loaded.deleted_at.is_none());
+
+        // A live item and an empty list never add another restored row.
+        restore_items_with_state(&state, std::slice::from_ref(&item.id)).expect("restore again");
+        restore_items_with_state(&state, &[]).expect("restore nothing");
+
+        let connection = state.require_connection().expect("lock connection");
+        let restored: i64 = connection
+            .as_ref()
+            .expect("connection is initialized")
+            .query_row(
+                "SELECT COUNT(*) FROM activity WHERE item_id = ?1 AND action = 'restored'",
+                params![item.id],
+                |row| row.get(0),
+            )
+            .expect("count restored activity");
+        assert_eq!(restored, 1);
+    }
+
+    #[test]
+    fn delete_items_permanently_removes_trashed_rows_and_bytes_only() {
+        let vault = TempVault::new("permanent-delete");
+        let state = vault.state();
+
+        let doomed_source = vault.root.join("doomed.txt");
+        fs::write(&doomed_source, b"doomed bytes").expect("write doomed source");
+        let doomed = import_file_with_state(&state, &doomed_source.to_string_lossy())
+            .expect("import doomed");
+        let doomed_name = stored_name(&state, &doomed.id);
+
+        let kept_source = vault.root.join("kept.txt");
+        fs::write(&kept_source, b"kept bytes").expect("write kept source");
+        let kept =
+            import_file_with_state(&state, &kept_source.to_string_lossy()).expect("import kept");
+        let kept_name = stored_name(&state, &kept.id);
+
+        let note = save_item_with_state(&state, &note_input("Note", "body")).expect("save note");
+
+        trash_items_with_state(&state, &[doomed.id.clone(), note.id.clone()]).expect("trash two");
+
+        delete_items_permanently_with_state(
+            &state,
+            &[doomed.id.clone(), note.id.clone(), kept.id.clone()],
+        )
+        .expect("delete permanently");
+
+        assert!(!state.files_dir().join(&doomed_name).exists());
+        assert!(state.files_dir().join(&kept_name).is_file());
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_ref().expect("connection is initialized");
+
+            let rows = |id: &str| -> i64 {
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM items WHERE id = ?1",
+                        params![id],
+                        |row| row.get(0),
+                    )
+                    .expect("count items")
+            };
+
+            assert_eq!(rows(&doomed.id), 0);
+            assert_eq!(rows(&note.id), 0);
+            assert_eq!(rows(&kept.id), 1, "a live id is ignored");
+
+            let file_rows: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM files WHERE item_id = ?1",
+                    params![doomed.id],
+                    |row| row.get(0),
+                )
+                .expect("count file rows");
+            assert_eq!(file_rows, 0, "the file row cascades with the item");
+        }
+
+        delete_items_permanently_with_state(&state, &[]).expect("delete nothing");
+    }
+
+    #[test]
+    fn mark_item_opened_writes_for_live_items_only() {
+        let vault = TempVault::new("mark-opened");
+        let state = vault.state();
+
+        let live = save_item_with_state(&state, &note_input("Live", "body")).expect("save live");
+        let gone = save_item_with_state(&state, &note_input("Gone", "body")).expect("save gone");
+        trash_items_with_state(&state, std::slice::from_ref(&gone.id)).expect("trash gone");
+
+        mark_item_opened_with_state(&state, &live.id).expect("mark live");
+        mark_item_opened_with_state(&state, &gone.id).expect("mark trashed");
+        mark_item_opened_with_state(&state, "missing").expect("mark missing");
+
+        let connection = state.require_connection().expect("lock connection");
+        let connection = connection.as_ref().expect("connection is initialized");
+
+        let opened = |id: &str| -> i64 {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM activity WHERE item_id = ?1 AND action = 'opened'",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .expect("count opened activity")
+        };
+
+        assert_eq!(opened(&live.id), 1);
+        assert_eq!(opened(&gone.id), 0);
+        assert_eq!(opened("missing"), 0);
+    }
+
+    #[test]
+    fn list_recent_items_groups_live_items_only() {
+        let vault = TempVault::new("recent-items");
+        let state = vault.state();
+
+        let opened =
+            save_item_with_state(&state, &note_input("Opened", "body")).expect("save opened");
+        let updated =
+            save_item_with_state(&state, &note_input("Updated", "body")).expect("save updated");
+        let created =
+            save_item_with_state(&state, &note_input("Created", "body")).expect("save created");
+        let trashed =
+            save_item_with_state(&state, &note_input("Trashed", "body")).expect("save trashed");
+
+        let mut change = note_input("Updated", "changed body");
+        change.id = Some(updated.id.clone());
+        save_item_with_state(&state, &change).expect("update item");
+        mark_item_opened_with_state(&state, &opened.id).expect("mark opened");
+
+        trash_items_with_state(&state, std::slice::from_ref(&trashed.id)).expect("trash item");
+
+        let recent = list_recent_items_with_state(&state).expect("list recent");
+
+        let ids = |group: &[ItemSummary]| -> Vec<String> {
+            group.iter().map(|summary| summary.id.clone()).collect()
+        };
+
+        let opened_ids = ids(&recent.opened);
+        assert!(opened_ids.contains(&opened.id));
+        assert!(!opened_ids.contains(&updated.id));
+
+        let modified_ids = ids(&recent.modified);
+        assert!(modified_ids.contains(&updated.id));
+        assert!(!modified_ids.contains(&opened.id));
+
+        let created_ids = ids(&recent.created);
+        assert!(created_ids.contains(&opened.id));
+        assert!(created_ids.contains(&updated.id));
+        assert!(created_ids.contains(&created.id));
+        assert!(!created_ids.contains(&trashed.id));
+
+        for group in [&recent.opened, &recent.modified, &recent.created] {
+            assert!(group.iter().all(|summary| summary.id != trashed.id));
+        }
+    }
+
+    #[test]
+    fn search_matches_tag_names_and_collection_names() {
+        let vault = TempVault::new("search-names");
+        let state = vault.state();
+        seed_collection(&state, "col-recipes", "Recipes", 0);
+
+        let mut in_collection = note_input("Plain title", "body");
+        in_collection.collection_id = Some("col-recipes".to_string());
+        let collection_item =
+            save_item_with_state(&state, &in_collection).expect("save collection item");
+
+        let tagged = save_item_with_state(&state, &note_input("Another title", "body"))
+            .expect("save tagged");
+        set_item_tags_with_state(&state, &tagged.id, &["Gardening".to_string()]).expect("set tag");
+
+        let filter = ItemFilter {
+            query: Some("Recipes".to_string()),
+            ..ItemFilter::default()
+        };
+        let by_collection = list_items_with_state(&state, Some(&filter)).expect("collection query");
+        assert_eq!(by_collection.len(), 1);
+        assert_eq!(by_collection[0].id, collection_item.id);
+
+        let filter = ItemFilter {
+            query: Some("Gardening".to_string()),
+            ..ItemFilter::default()
+        };
+        let by_tag = list_items_with_state(&state, Some(&filter)).expect("tag query");
+        assert_eq!(by_tag.len(), 1);
+        assert_eq!(by_tag[0].id, tagged.id);
+    }
+
+    #[test]
+    fn load_vault_summary_counts_and_sizes_known_rows() {
+        let vault = TempVault::new("vault-summary");
+        let state = vault.state();
+        seed_collection(&state, "col-sum", "Summary", 0);
+
+        let mut favorite = note_input("Favorite note", "body");
+        favorite.is_favorite = Some(true);
+        save_item_with_state(&state, &favorite).expect("save favorite note");
+
+        let source = save_item_with_state(&state, &source_input("Site", "https://example.com"))
+            .expect("save source");
+
+        let first_source = vault.root.join("first.bin");
+        fs::write(&first_source, b"12345").expect("write first file");
+        let _first_file =
+            import_file_with_state(&state, &first_source.to_string_lossy()).expect("import first");
+
+        let second_source = vault.root.join("second.bin");
+        fs::write(&second_source, b"1234567890").expect("write second file");
+        let second_file = import_file_with_state(&state, &second_source.to_string_lossy())
+            .expect("import second");
+
+        set_item_tags_with_state(&state, &source.id, &["News".to_string()]).expect("tag source");
+
+        // Trash one source and one file so live counts and disk bytes diverge.
+        trash_items_with_state(&state, &[source.id.clone(), second_file.id.clone()])
+            .expect("trash two");
+
+        let summary = load_vault_summary_with_state(&state).expect("load summary");
+
+        assert_eq!(summary.collection_count, 1);
+        assert_eq!(summary.tag_count, 1);
+        assert_eq!(summary.trash_count, 2);
+        assert_eq!(
+            summary.item_count, 2,
+            "the favorite note and first file stay live"
+        );
+        assert_eq!(summary.note_count, 1);
+        assert_eq!(summary.source_count, 0, "the only source is trashed");
+        assert_eq!(summary.file_count, 1, "the only live file remains");
+        assert_eq!(summary.favorite_count, 1);
+        assert_eq!(
+            summary.file_bytes, 15,
+            "trashed file bytes still occupy disk"
+        );
+        assert!(summary.database_bytes > 0);
     }
 }

@@ -40,6 +40,17 @@ const tagsMock = vi.hoisted(() => ({
   deleteTag: vi.fn(),
 }))
 
+const activityMock = vi.hoisted(() => ({
+  listRecentItems: vi.fn(),
+  listActivity: vi.fn(),
+  listIndexState: vi.fn(),
+  markItemOpened: vi.fn(),
+}))
+
+const dashboardMock = vi.hoisted(() => ({
+  loadVaultSummary: vi.fn(),
+}))
+
 const navigateMock = vi.hoisted(() => vi.fn())
 const sourceDialogMock = vi.hoisted(() =>
   vi.fn((_props: { open: boolean; itemId: string | null }) => null),
@@ -49,6 +60,8 @@ vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
+vi.mock('../data/activity', () => activityMock)
+vi.mock('../data/dashboard', () => dashboardMock)
 vi.mock('../features/sources/SaveSourceDialog', () => ({ default: sourceDialogMock }))
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -162,6 +175,20 @@ beforeEach(() => {
   tagsMock.listTags.mockResolvedValue([])
   tagsMock.saveTag.mockResolvedValue({ ...TAG })
   tagsMock.deleteTag.mockResolvedValue(undefined)
+  activityMock.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
+  activityMock.markItemOpened.mockResolvedValue(undefined)
+  dashboardMock.loadVaultSummary.mockResolvedValue({
+    itemCount: 0,
+    noteCount: 0,
+    sourceCount: 0,
+    fileCount: 0,
+    favoriteCount: 0,
+    collectionCount: 0,
+    tagCount: 0,
+    trashCount: 0,
+    fileBytes: 0,
+    databaseBytes: 0,
+  })
 })
 
 describe('FilesPage', () => {

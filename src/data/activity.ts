@@ -1,4 +1,5 @@
 import { invoke } from './runtime'
+import type { ItemSummary } from './items'
 
 export type ActivityEntry = {
   id: number
@@ -19,4 +20,18 @@ export async function listActivity(): Promise<ActivityEntry[]> {
 
 export async function listIndexState(): Promise<IndexState[]> {
   return invoke<IndexState[]>('list_index_state')
+}
+
+export type RecentItems = {
+  opened: ItemSummary[]
+  modified: ItemSummary[]
+  created: ItemSummary[]
+}
+
+export async function markItemOpened(id: string): Promise<void> {
+  return invoke<void>('mark_item_opened', { id })
+}
+
+export async function listRecentItems(): Promise<RecentItems> {
+  return invoke<RecentItems>('list_recent_items')
 }
