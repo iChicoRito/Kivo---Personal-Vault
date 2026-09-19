@@ -4,7 +4,6 @@ import {
   Button,
   Card,
   Chip,
-  Dropdown,
   EmptyState,
   Input,
   Label,
@@ -12,9 +11,17 @@ import {
   TextField,
   Typography,
 } from '@heroui/react'
+import {
+  Delete02Icon,
+  PinIcon,
+  PinOffIcon,
+  StarIcon,
+  StarOffIcon,
+} from '@hugeicons/core-free-icons'
 import { useNavigate } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
+import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import { ConfirmDialog } from '../../components/items/dialogs'
 import {
   listItems,
@@ -42,17 +49,6 @@ const {
 } = notesModule
 
 const panelLabelClass = 'uppercase'
-
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-})
-
-function formatUpdatedAt(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date)
-}
 
 function sortPinnedFirst(items: ItemSummary[]) {
   return [...items].sort((a, b) => Number(b.isPinned) - Number(a.isPinned))
@@ -228,53 +224,86 @@ export function NotesPage() {
 
       {loadState === 'ready' && items.length > 0 ? (
         <ul className="grid gap-2">
-          {items.map((item) => (
-            <li key={item.id} className="min-w-0">
-              <div className="flex items-start gap-3 rounded-lg border border-default p-3">
-                <button
-                  className="grid min-w-0 flex-1 gap-1 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                  type="button"
-                  onClick={() => navigate(`/notes/${item.id}`)}
-                >
-                  <span className="flex flex-wrap items-center gap-2">
-                    {item.isPinned ? (
-                      <Chip color="accent" size="sm" variant="soft">
-                        Pinned
+          {items.map((item) => {
+            const status =
+              item.isPinned && item.isFavorite
+                ? 'pinned-favorite'
+                : item.isPinned
+                  ? 'pinned'
+                  : item.isFavorite
+                    ? 'favorite'
+                    : 'plain'
+
+            const statusColor: 'accent' | 'default' | 'success' | 'warning' =
+              status === 'pinned-favorite'
+                ? 'success'
+                : status === 'pinned'
+                  ? 'accent'
+                  : status === 'favorite'
+                    ? 'warning'
+                    : 'default'
+
+            const barClass =
+              status === 'pinned-favorite'
+                ? 'bg-success'
+                : status === 'pinned'
+                  ? 'bg-accent'
+                  : status === 'favorite'
+                    ? 'bg-warning'
+                    : 'bg-foreground'
+
+            const actions: ItemCardAction[] = [
+              {
+                id: 'favorite',
+                label: item.isFavorite ? 'Remove favorite' : 'Add to favorites',
+                icon: item.isFavorite ? StarOffIcon : StarIcon,
+              },
+              {
+                id: 'pin',
+                label: item.isPinned ? 'Unpin' : 'Pin',
+                icon: item.isPinned ? PinOffIcon : PinIcon,
+              },
+              { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
+            ]
+
+            return (
+              <li key={item.id} className="min-w-0">
+                <ItemCard
+                  actions={actions}
+                  chips={
+                    status === 'plain' ? (
+                      <Chip size="sm" variant="soft">
+                        Notes
                       </Chip>
-                    ) : null}
-                    {item.isFavorite ? (
-                      <Chip color="warning" size="sm" variant="soft">
-                        Favorite
-                      </Chip>
-                    ) : null}
-                  </span>
-
-                  <Typography className="truncate font-semibold" type="body">
-                    {item.title}
-                  </Typography>
-
-                  <Typography color="muted" type="body-xs">
-                    Updated <time dateTime={item.updatedAt}>{formatUpdatedAt(item.updatedAt)}</time>
-                  </Typography>
-                </button>
-
-                <Dropdown>
-                  <Dropdown.Trigger aria-label={`Actions for ${item.title}`}>
-                    Actions
-                  </Dropdown.Trigger>
-                  <Dropdown.Popover>
-                    <Dropdown.Menu onAction={(key) => handleMenuAction(item, String(key))}>
-                      <Dropdown.Item id="favorite">
-                        {item.isFavorite ? 'Remove favorite' : 'Favorite'}
-                      </Dropdown.Item>
-                      <Dropdown.Item id="pin">{item.isPinned ? 'Unpin' : 'Pin'}</Dropdown.Item>
-                      <Dropdown.Item id="trash">Trash</Dropdown.Item>
-                    </Dropdown.Menu>
-                  </Dropdown.Popover>
-                </Dropdown>
-              </div>
-            </li>
-          ))}
+                    ) : (
+                      <>
+                        {item.isPinned ? (
+                          <Chip color={statusColor} size="sm" variant="soft">
+                            Pinned
+                          </Chip>
+                        ) : null}
+                        {item.isFavorite ? (
+                          <Chip color={statusColor} size="sm" variant="soft">
+                            Favorite
+                          </Chip>
+                        ) : null}
+                      </>
+                    )
+                  }
+                  leading={
+                    <span
+                      aria-hidden="true"
+                      className={`w-1 self-stretch rounded-full ${barClass}`}
+                      data-note-status={status}
+                    />
+                  }
+                  title={item.title}
+                  onAction={(key) => handleMenuAction(item, key)}
+                  onOpen={() => navigate(`/notes/${item.id}`)}
+                />
+              </li>
+            )
+          })}
         </ul>
       ) : null}
 

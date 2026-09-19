@@ -3,6 +3,8 @@ import {
   Alert,
   Button,
   Card,
+  Chip,
+  EmptyState,
   FieldError,
   Input,
   Label,
@@ -10,10 +12,12 @@ import {
   TextField,
   Typography,
 } from '@heroui/react'
+import { Delete02Icon, EyeIcon, FolderOpenIcon, NoteEditIcon } from '@hugeicons/core-free-icons'
 
 import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
-import { ItemList } from '../../components/items/ItemList'
+import { FileTypeIcon } from '../../components/items/FileTypeIcon'
+import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import {
   importFile,
   listItems,
@@ -29,27 +33,12 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 const stateLabelClass = 'uppercase'
 
-const MISSING_FILE_MESSAGE =
-  'This file is missing from this device. Import it again to restore access.'
 const IMPORT_ERROR = 'Kivo could not import that file. Try again.'
 const OPEN_ERROR = 'Kivo could not open this file. It may be missing from this device.'
 const REVEAL_ERROR = 'Kivo could not reveal this file. It may be missing from this device.'
 const RENAME_ERROR = 'Kivo could not rename this file. Try again.'
 const MOVE_ERROR = 'Kivo could not move this file. Try again.'
 const TRASH_ERROR = 'Kivo could not move this file to Trash. Try again.'
-
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-})
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return 'Unknown'
-
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? 'Unknown' : dateFormatter.format(date)
-}
 
 function formatSize(bytes: number | null | undefined) {
   if (typeof bytes !== 'number' || bytes < 0) return 'Unknown'
@@ -66,24 +55,6 @@ function formatSize(bytes: number | null | undefined) {
 
   const rounded = size >= 10 ? Math.round(size) : Math.round(size * 10) / 10
   return `${rounded} ${units[unit]}`
-}
-
-const IMAGE_FILE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
-
-function formatFileType(originalName: string | null | undefined) {
-  if (!originalName) return 'File'
-
-  const separator = originalName.lastIndexOf('.')
-  if (separator <= 0 || separator === originalName.length - 1) return 'File'
-
-  const extension = originalName.slice(separator + 1).toLowerCase()
-
-  if (extension === 'pdf') return 'PDF file'
-  if (extension === 'txt') return 'Text file'
-  if (IMAGE_FILE_EXTENSIONS.has(extension)) return 'Image file'
-  if (extension === 'zip') return 'Archive file'
-
-  return 'File'
 }
 
 type RenameState = { id: string; title: string } | null
@@ -163,6 +134,16 @@ export function FilesPage() {
     } catch {
       setActionError(REVEAL_ERROR)
     }
+  }
+
+  function handleFileAction(file: ItemSummary, key: string) {
+    if (key === 'open') void handleOpen(file.id)
+    else if (key === 'reveal') void handleReveal(file.id)
+    else if (key === 'rename') openRename(file)
+    else if (key === 'move') {
+      setMoveError(null)
+      setMoveTarget({ id: file.id, collectionId: file.collectionId })
+    } else if (key === 'trash') setTrashTarget(file.id)
   }
 
   function openRename(file: ItemSummary) {
@@ -305,95 +286,54 @@ export function FilesPage() {
       ) : null}
 
       {files.length === 0 ? (
-        <ItemList
-          emptyDescription="Files added to this device will appear here."
-          emptyTitle="No files yet."
-          items={files}
-          view="list"
-        />
+        <EmptyState className="grid justify-items-start gap-3">
+          <Typography type="h2">No files yet.</Typography>
+          <Typography color="muted" type="body">
+            Files added to this device will appear here.
+          </Typography>
+        </EmptyState>
       ) : (
-        <ul className="grid gap-3">
-          {files.map((file) => (
-            <li key={file.id} className="grid gap-2">
-              <ItemList
-                items={[file]}
-                onOpen={(id) => void handleOpen(id)}
-                view="list"
-              />
-              <dl className="grid gap-1">
-                <div className="flex flex-wrap justify-between gap-2">
-                  <dt className="text-muted">Original name</dt>
-                  <dd className="m-0 font-semibold">{file.file?.originalName ?? file.title}</dd>
-                </div>
-                <div className="flex flex-wrap justify-between gap-2">
-                  <dt className="text-muted">Size</dt>
-                  <dd className="m-0 font-semibold">{formatSize(file.file?.byteSize)}</dd>
-                </div>
-                <div className="flex flex-wrap justify-between gap-2">
-                  <dt className="text-muted">Imported</dt>
-                  <dd className="m-0 font-semibold">{formatDate(file.file?.importedAt)}</dd>
-                </div>
-                <div className="flex flex-wrap justify-between gap-2">
-                  <dt className="text-muted">Type</dt>
-                  <dd className="m-0 font-semibold">{formatFileType(file.file?.originalName)}</dd>
-                </div>
-              </dl>
+        <ul className="grid gap-2">
+          {files.map((file) => {
+            const actions: ItemCardAction[] = [
+              { id: 'open', label: 'Open', icon: EyeIcon, isDisabled: file.fileMissing },
+              { id: 'reveal', label: 'Reveal', icon: FolderOpenIcon, isDisabled: file.fileMissing },
+              { id: 'rename', label: 'Rename', icon: NoteEditIcon },
+              { id: 'move', label: 'Move to collection', icon: FolderOpenIcon },
+              { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
+            ]
 
-              {file.fileMissing ? (
-                <Typography className="font-semibold text-danger" type="body-xs">
-                  {MISSING_FILE_MESSAGE}
-                </Typography>
-              ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  aria-label={`Open ${file.title}`}
-                  isDisabled={file.fileMissing}
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => void handleOpen(file.id)}
-                >
-                  Open
-                </Button>
-                <Button
-                  aria-label={`Reveal ${file.title}`}
-                  isDisabled={file.fileMissing}
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => void handleReveal(file.id)}
-                >
-                  Reveal
-                </Button>
-                <Button
-                  aria-label={`Rename ${file.title}`}
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => openRename(file)}
-                >
-                  Rename
-                </Button>
-                <Button
-                  aria-label={`Move ${file.title} to collection`}
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => {
-                    setMoveError(null)
-                    setMoveTarget({ id: file.id, collectionId: file.collectionId })
+            return (
+              <li key={file.id} className="min-w-0">
+                <ItemCard
+                  actions={actions}
+                  chips={
+                    file.fileMissing ? (
+                      <Chip color="danger" size="sm" variant="soft">
+                        File is missing
+                      </Chip>
+                    ) : undefined
+                  }
+                  isOpenDisabled={file.fileMissing}
+                  leading={
+                    <span className="grid size-11 place-items-center rounded-xl bg-default">
+                      <FileTypeIcon name={file.file?.originalName ?? file.title} size={22} />
+                    </span>
+                  }
+                  subtitle={
+                    <Typography color="muted" type="body-xs">
+                      {formatSize(file.file?.byteSize)}
+                    </Typography>
+                  }
+                  title={file.title}
+                  onAction={(key) => handleFileAction(file, key)}
+                  onOpen={() => {
+                    void handleOpen(file.id)
                   }}
-                >
-                  Move to collection
-                </Button>
-                <Button
-                  aria-label={`Move ${file.title} to Trash`}
-                  size="sm"
-                  variant="danger"
-                  onPress={() => setTrashTarget(file.id)}
-                >
-                  Trash
-                </Button>
-              </div>
-            </li>
-          ))}
+                />
+              </li>
+            )
+          })}
         </ul>
       )}
 

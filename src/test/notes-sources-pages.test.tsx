@@ -212,6 +212,28 @@ describe('NotesPage', () => {
     expect(within(rows[1]).getByText('Plain note')).toBeInTheDocument()
   })
 
+  it('shows a status bar and chips for each note state', async () => {
+    itemsMock.listItems.mockResolvedValue([
+      noteSummary({ id: 'n1', title: 'Plain note' }),
+      noteSummary({ id: 'n2', title: 'Pinned note', isPinned: true }),
+      noteSummary({ id: 'n3', title: 'Favorite note', isFavorite: true }),
+      noteSummary({ id: 'n4', title: 'Both note', isPinned: true, isFavorite: true }),
+    ])
+
+    const view = renderNotes()
+    await screen.findByText('Plain note')
+
+    expect(view.container.querySelectorAll('[data-note-status="plain"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-note-status="pinned"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-note-status="favorite"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-note-status="pinned-favorite"]')).toHaveLength(1)
+
+    const list = screen.getByRole('list')
+    expect(within(list).getByText('Notes')).toBeInTheDocument()
+    expect(within(list).getAllByText('Pinned')).toHaveLength(2)
+    expect(within(list).getAllByText('Favorite')).toHaveLength(2)
+  })
+
   it('creates a new note and opens its editor', async () => {
     itemsMock.saveItem.mockResolvedValue(noteItem({ id: 'new1', title: 'Untitled note' }))
 
@@ -242,7 +264,7 @@ describe('NotesPage', () => {
     renderNotes()
     await screen.findByText('Alpha')
     await openRowMenu('Alpha')
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Trash' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
 
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))

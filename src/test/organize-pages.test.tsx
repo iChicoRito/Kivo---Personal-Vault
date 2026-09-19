@@ -198,7 +198,7 @@ describe('FilesPage', () => {
 
     renderInRouter(<FilesPage />)
     await screen.findByRole('heading', { level: 1, name: 'Files', exact: true })
-    await screen.findByRole('button', { name: 'Open Budget 2026.pdf' })
+    await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Import file' }))
 
@@ -221,16 +221,18 @@ describe('FilesPage', () => {
     expect(itemsMock.importFile).not.toHaveBeenCalled()
   })
 
-  it('opens and reveals a file through the file commands', async () => {
+  it('opens and reveals a file through the row menu', async () => {
     itemsMock.listItems.mockResolvedValue([FILE])
 
     renderInRouter(<FilesPage />)
-    await screen.findByRole('button', { name: 'Open Budget 2026.pdf' })
+    await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Budget 2026.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Open' }))
     await waitFor(() => expect(filesMock.openItemFile).toHaveBeenCalledWith(FILE.id))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reveal Budget 2026.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal' }))
     await waitFor(() => expect(filesMock.revealItemFile).toHaveBeenCalledWith(FILE.id))
   })
 
@@ -238,9 +240,10 @@ describe('FilesPage', () => {
     itemsMock.listItems.mockResolvedValue([FILE])
 
     renderInRouter(<FilesPage />)
-    await screen.findByRole('button', { name: 'Rename Budget 2026.pdf' })
+    await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rename Budget 2026.pdf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
 
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'File title' }), {
@@ -266,9 +269,10 @@ describe('FilesPage', () => {
     collectionsMock.listCollections.mockResolvedValue([{ ...COLLECTION }])
 
     renderInRouter(<FilesPage />)
-    await screen.findByRole('button', { name: 'Move Budget 2026.pdf to collection' })
+    await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move Budget 2026.pdf to collection' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to collection' }))
 
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
@@ -282,9 +286,10 @@ describe('FilesPage', () => {
     itemsMock.listItems.mockResolvedValue([FILE])
 
     renderInRouter(<FilesPage />)
-    await screen.findByRole('button', { name: 'Move Budget 2026.pdf to Trash' })
+    await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move Budget 2026.pdf to Trash' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
 
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))
@@ -292,25 +297,22 @@ describe('FilesPage', () => {
     await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith([FILE.id]))
   })
 
-  it('shows a plain message for a missing file', async () => {
+  it('marks a missing file and disables its open action', async () => {
     itemsMock.listItems.mockResolvedValue([FILE_MISSING])
 
     renderInRouter(<FilesPage />)
 
-    expect(
-      await screen.findByText(
-        'This file is missing from this device. Import it again to restore access.',
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Budget 2026.pdf' })).toBeDisabled()
+    expect(await screen.findByText('File is missing')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Budget 2026.pdf' })).toBeDisabled()
   })
 
-  it('shows the file type label derived from the extension', async () => {
+  it('shows the file type icon for the detected format', async () => {
     itemsMock.listItems.mockResolvedValue([FILE])
 
-    renderInRouter(<FilesPage />)
+    const view = renderInRouter(<FilesPage />)
+    await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    expect(await screen.findByText('PDF file')).toBeInTheDocument()
+    expect(view.container.querySelector('[data-file-icon="pdf"]')).not.toBeNull()
   })
 })
 
