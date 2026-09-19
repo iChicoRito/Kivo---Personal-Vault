@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.local
 .commandcode/
+docs/
 tasks/
 obsidian/system-analyzer/
 
