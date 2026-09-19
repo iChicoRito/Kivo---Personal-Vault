@@ -1,15 +1,11 @@
 import {
   Button,
-  Checkbox,
   Chip,
   Dropdown,
   EmptyState,
   Label,
   Pagination,
-  Table,
   Typography,
-  type Selection,
-  type SortDescriptor,
 } from '@heroui/react'
 import {
   Delete02Icon,
@@ -17,11 +13,13 @@ import {
   EyeIcon,
   FolderOpenIcon,
   InboxIcon,
+  Link02Icon,
   MoreVerticalIcon,
+  NoteEditIcon,
   StarIcon,
   StarOffIcon,
 } from '@hugeicons/core-free-icons'
-import { HugeiconsIcon } from '@hugeicons/react'
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 
 import type { ItemKind, ItemSummary } from '../../data/items'
 
@@ -30,12 +28,7 @@ export type ItemTableProps = {
   totalItems: number
   page: number
   pageSize: number
-  sortDescriptor: SortDescriptor
-  onSortChange: (descriptor: SortDescriptor) => void
   onPageChange: (page: number) => void
-  selectable?: boolean
-  selectedIds?: string[]
-  onSelectionChange?: (ids: string[]) => void
   onOpen?: (id: string) => void
   onToggleFavorite?: (id: string, next: boolean) => void
   onMove?: (id: string) => void
@@ -51,15 +44,10 @@ const KIND_LABELS: Record<ItemKind, string> = {
   file: 'File',
 }
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-})
-
-function formatUpdatedAt(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date)
+const KIND_ICONS: Record<ItemKind, IconSvgElement> = {
+  note: NoteEditIcon,
+  source: Link02Icon,
+  file: FolderOpenIcon,
 }
 
 export function ItemTable({
@@ -67,12 +55,7 @@ export function ItemTable({
   totalItems,
   page,
   pageSize,
-  sortDescriptor,
-  onSortChange,
   onPageChange,
-  selectable = false,
-  selectedIds = [],
-  onSelectionChange,
   onOpen,
   onToggleFavorite,
   onMove,
@@ -86,15 +69,6 @@ export function ItemTable({
   const end = Math.min(page * pageSize, totalItems)
   const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1)
 
-  function handleSelectionChange(keys: Selection) {
-    if (keys === 'all') {
-      onSelectionChange?.(items.map((item) => item.id))
-      return
-    }
-
-    onSelectionChange?.([...keys].map((key) => String(key)))
-  }
-
   function handleRowAction(item: ItemSummary, key: string) {
     if (key === 'open') onOpen?.(item.id)
     else if (key === 'favorite') onToggleFavorite?.(item.id, !item.isFavorite)
@@ -105,134 +79,52 @@ export function ItemTable({
   }
 
   return (
-    <Table className="min-h-[200px]">
-      <Table.ScrollContainer>
-        <Table.Content
-          aria-label="All items"
-          className="h-full"
-          selectedKeys={selectable ? new Set(selectedIds) : undefined}
-          selectionMode={selectable ? 'multiple' : undefined}
-          sortDescriptor={sortDescriptor}
-          onSelectionChange={handleSelectionChange}
-          onSortChange={onSortChange}
-        >
-          <Table.Header>
-            {selectable ? (
-              <Table.Column className="pe-0">
-                <Checkbox aria-label="Select all" slot="selection">
-                  <Checkbox.Content>
-                    <Checkbox.Control>
-                      <Checkbox.Indicator />
-                    </Checkbox.Control>
-                  </Checkbox.Content>
-                </Checkbox>
-              </Table.Column>
-            ) : null}
-
-            <Table.Column allowsSorting id="title" isRowHeader>
-              {({ sortDirection }) => (
-                <Table.SortableColumnHeader sortDirection={sortDirection}>
-                  Title
-                </Table.SortableColumnHeader>
-              )}
-            </Table.Column>
-            <Table.Column allowsSorting id="kind">
-              {({ sortDirection }) => (
-                <Table.SortableColumnHeader sortDirection={sortDirection}>
-                  Kind
-                </Table.SortableColumnHeader>
-              )}
-            </Table.Column>
-            <Table.Column id="status">Status</Table.Column>
-            <Table.Column allowsSorting id="updated">
-              {({ sortDirection }) => (
-                <Table.SortableColumnHeader sortDirection={sortDirection}>
-                  Updated
-                </Table.SortableColumnHeader>
-              )}
-            </Table.Column>
-            <Table.Column className="w-0" id="actions">
-              Action
-            </Table.Column>
-          </Table.Header>
-
-          <Table.Body
-            renderEmptyState={() => (
-              <EmptyState className="flex h-full w-full flex-col items-center justify-center gap-4 text-center">
-                <HugeiconsIcon
-                  aria-hidden="true"
-                  className="text-muted"
-                  icon={InboxIcon}
-                  size={24}
-                />
-                <span className="text-sm text-muted">{emptyMessage}</span>
-              </EmptyState>
-            )}
-          >
-            {items.map((item) => (
-              <Table.Row key={item.id} id={item.id}>
-                {selectable ? (
-                  <Table.Cell className="pe-0">
-                    <Checkbox
-                      aria-label={`Select ${item.title}`}
-                      slot="selection"
-                      variant="secondary"
-                    >
-                      <Checkbox.Content>
-                        <Checkbox.Control>
-                          <Checkbox.Indicator />
-                        </Checkbox.Control>
-                      </Checkbox.Content>
-                    </Checkbox>
-                  </Table.Cell>
-                ) : null}
-
-                <Table.Cell>
-                  <button
-                    className="text-left font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                    type="button"
-                    onClick={() => onOpen?.(item.id)}
-                  >
-                    {item.title}
-                  </button>
-                </Table.Cell>
-                <Table.Cell>
-                  <Chip size="sm" variant="soft">
-                    {KIND_LABELS[item.kind]}
-                  </Chip>
-                </Table.Cell>
-                <Table.Cell>
-                  <span className="flex flex-wrap items-center gap-2">
-                    {item.isPinned ? (
-                      <Chip color="accent" size="sm" variant="soft">
-                        Pinned
-                      </Chip>
-                    ) : null}
-                    {item.isFavorite ? (
-                      <Chip color="warning" size="sm" variant="soft">
-                        Favorite
-                      </Chip>
-                    ) : null}
-                    {item.kind === 'file' && item.fileMissing ? (
-                      <Typography className="font-semibold text-danger" type="body-xs">
-                        File is missing
-                      </Typography>
-                    ) : null}
+    <div className="grid gap-4">
+      {items.length === 0 ? (
+        <EmptyState className="flex min-h-[200px] w-full flex-col items-center justify-center gap-4 text-center">
+          <HugeiconsIcon aria-hidden="true" className="text-muted" icon={InboxIcon} size={24} />
+          <span className="text-sm text-muted">{emptyMessage}</span>
+        </EmptyState>
+      ) : (
+        <ul aria-label="All items" className="grid gap-2">
+          {items.map((item) => (
+            <li key={item.id}>
+              {/* The row menu floats over one full-card button, so a click
+                  anywhere opens the item while the menu keeps its own layer. */}
+              <div className="kivo-item-card relative rounded-3xl border border-default bg-surface transition-[background-color,scale] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover">
+                <button
+                  aria-label={item.title}
+                  className="grid w-full grid-cols-[auto_1fr] items-center gap-3 rounded-3xl p-3 pe-14 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  type="button"
+                  onClick={() => onOpen?.(item.id)}
+                >
+                  <span className="grid size-11 place-items-center rounded-xl bg-default">
+                    <HugeiconsIcon
+                      aria-hidden="true"
+                      className="text-muted"
+                      icon={KIND_ICONS[item.kind]}
+                      size={18}
+                      strokeWidth={1.75}
+                    />
                   </span>
-                </Table.Cell>
-                <Table.Cell>
-                  <Typography color="muted" type="body-xs">
-                    {item.deletedAt ? (
-                      <>
-                        Deleted{' '}
-                        <time dateTime={item.deletedAt}>{formatUpdatedAt(item.deletedAt)}</time>
-                      </>
-                    ) : (
-                      <time dateTime={item.updatedAt}>{formatUpdatedAt(item.updatedAt)}</time>
-                    )}
-                  </Typography>
-                </Table.Cell>
-                <Table.Cell>
+                  <span className="grid min-w-0 gap-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Chip color="accent" size="sm" variant="secondary">
+                        {KIND_LABELS[item.kind]}
+                      </Chip>
+                      {item.kind === 'file' && item.fileMissing ? (
+                        <Chip color="danger" size="sm" variant="soft">
+                          File is missing
+                        </Chip>
+                      ) : null}
+                    </span>
+                    <Typography className="truncate font-semibold" type="body">
+                      {item.title}
+                    </Typography>
+                  </span>
+                </button>
+
+                <div className="absolute inset-y-0 right-2 flex items-center">
                   <Dropdown>
                     <Button
                       aria-label={`Actions for ${item.title}`}
@@ -315,49 +207,44 @@ export function ItemTable({
                       </Dropdown.Menu>
                     </Dropdown.Popover>
                   </Dropdown>
-                </Table.Cell>
-              </Table.Row>
-            ))}
-          </Table.Body>
-        </Table.Content>
-      </Table.ScrollContainer>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {totalItems > 0 ? (
-        <Table.Footer>
-          <Pagination size="sm">
-            <Pagination.Summary>
-              Showing {start} to {end} of {totalItems} items
-            </Pagination.Summary>
-            <Pagination.Content>
-              <Pagination.Item>
-                <Pagination.Previous isDisabled={page <= 1} onPress={() => onPageChange(page - 1)}>
-                  <Pagination.PreviousIcon />
-                  Prev
-                </Pagination.Previous>
+        <Pagination size="sm">
+          <Pagination.Summary>
+            Showing {start} to {end} of {totalItems} items
+          </Pagination.Summary>
+          <Pagination.Content>
+            <Pagination.Item>
+              <Pagination.Previous isDisabled={page <= 1} onPress={() => onPageChange(page - 1)}>
+                <Pagination.PreviousIcon />
+                Prev
+              </Pagination.Previous>
+            </Pagination.Item>
+            {pageNumbers.map((number) => (
+              <Pagination.Item key={number}>
+                <Pagination.Link isActive={number === page} onPress={() => onPageChange(number)}>
+                  {number}
+                </Pagination.Link>
               </Pagination.Item>
-              {pageNumbers.map((number) => (
-                <Pagination.Item key={number}>
-                  <Pagination.Link
-                    isActive={number === page}
-                    onPress={() => onPageChange(number)}
-                  >
-                    {number}
-                  </Pagination.Link>
-                </Pagination.Item>
-              ))}
-              <Pagination.Item>
-                <Pagination.Next
-                  isDisabled={page >= totalPages}
-                  onPress={() => onPageChange(page + 1)}
-                >
-                  Next
-                  <Pagination.NextIcon />
-                </Pagination.Next>
-              </Pagination.Item>
-            </Pagination.Content>
-          </Pagination>
-        </Table.Footer>
+            ))}
+            <Pagination.Item>
+              <Pagination.Next
+                isDisabled={page >= totalPages}
+                onPress={() => onPageChange(page + 1)}
+              >
+                Next
+                <Pagination.NextIcon />
+              </Pagination.Next>
+            </Pagination.Item>
+          </Pagination.Content>
+        </Pagination>
       ) : null}
-    </Table>
+    </div>
   )
 }

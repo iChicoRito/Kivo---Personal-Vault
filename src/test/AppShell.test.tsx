@@ -11,7 +11,6 @@ import { setMediaQueryMatches } from './setup'
 
 const destinationLabels = [
   'Dashboard',
-  'Search',
   'All Items',
   'Notes',
   'Sources',
@@ -26,7 +25,6 @@ const destinationLabels = [
 
 const hrefByLabel: Record<string, string> = {
   Dashboard: '/dashboard',
-  Search: '/search',
   'All Items': '/items',
   Notes: '/notes',
   Sources: '/sources',
@@ -118,10 +116,8 @@ describe('AppShell', () => {
     }
   })
 
-  it('shows the Kivo title and an icon beside every destination', () => {
+  it('shows an icon beside every destination', () => {
     renderShell()
-
-    expect(screen.getByText('Kivo')).toBeInTheDocument()
 
     const links = within(dock()).getAllByRole('link')
     expect(links).toHaveLength(destinationLabels.length)
@@ -129,6 +125,59 @@ describe('AppShell', () => {
     for (const link of links) {
       expect(link.querySelector('svg')).not.toBeNull()
     }
+  })
+
+  it('shows the vault search in the navbar instead of a wordmark', () => {
+    renderShell()
+
+    expect(screen.getByRole('button', { name: 'Search the vault' })).toBeInTheDocument()
+    expect(screen.queryByText('Kivo')).not.toBeInTheDocument()
+  })
+
+  it('tucks the navbar away while the page scrolls down and brings it back on scroll up', () => {
+    renderShell()
+
+    const navbar = document.getElementById('kivo-navbar')
+    const main = document.getElementById('kivo-main')
+    if (!navbar || !main) throw new Error('shell navbar and scroll area were not rendered')
+
+    let scrollTop = 0
+    Object.defineProperty(main, 'scrollTop', { configurable: true, get: () => scrollTop })
+
+    // The first stretch of the page keeps the bar in place.
+    scrollTop = 20
+    fireEvent.scroll(main)
+    expect(navbar).not.toHaveAttribute('data-hidden')
+
+    scrollTop = 322
+    fireEvent.scroll(main)
+    expect(navbar).toHaveAttribute('data-hidden', 'true')
+
+    // Travel below the threshold does not flip the bar back.
+    scrollTop = 324
+    fireEvent.scroll(main)
+    expect(navbar).toHaveAttribute('data-hidden', 'true')
+
+    scrollTop = 300
+    fireEvent.scroll(main)
+    expect(navbar).not.toHaveAttribute('data-hidden')
+  })
+
+  it('drags the dock along with the scroll instead of hiding it', async () => {
+    renderShell()
+
+    const dockNav = document.getElementById('kivo-dock-nav')
+    const main = document.getElementById('kivo-main')
+    if (!dockNav || !main) throw new Error('shell dock and scroll area were not rendered')
+
+    let scrollTop = 0
+    Object.defineProperty(main, 'scrollTop', { configurable: true, get: () => scrollTop })
+
+    scrollTop = 400
+    fireEvent.scroll(main)
+
+    await waitFor(() => expect(dockNav.style.transform).toMatch(/^translateY\(/))
+    expect(dockNav).not.toHaveAttribute('data-hidden')
   })
 
   it('renders a label under every dock icon for the hover reveal', () => {

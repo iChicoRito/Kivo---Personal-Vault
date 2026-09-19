@@ -133,14 +133,14 @@ beforeEach(() => {
 })
 
 describe('TrashPage', () => {
-  it('lists trashed items with their deleted date', async () => {
+  it('lists trashed items', async () => {
     itemsMock.listItems.mockResolvedValue([TRASHED_NOTE])
 
     renderTrash()
 
     expect(await screen.findByText('Trashed note')).toBeInTheDocument()
     expect(itemsMock.listItems).toHaveBeenCalledWith({ trashed: true })
-    expect(screen.getByText(/^Deleted\b/)).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'All items' })).toBeInTheDocument()
   })
 
   it('restores an item and reloads the list', async () => {

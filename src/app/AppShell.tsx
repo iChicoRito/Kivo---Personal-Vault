@@ -1,9 +1,13 @@
-import { buttonVariants, Typography } from '@heroui/react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
+
+import { buttonVariants } from '@heroui/react'
 import { Outlet } from 'react-router-dom'
 
+import { GradualBlur } from '../components/ui/GradualBlur'
 import { AnimatedThemeToggler } from '../components/ui/animated-theme-toggler'
 import { cn } from '../lib/utils'
 import AppDock from './AppDock'
+import NavbarSearch from './NavbarSearch'
 import { usePreferences } from './preferences'
 
 function ThemeToggle() {
@@ -25,27 +29,81 @@ function ThemeToggle() {
   )
 }
 
-function AppNavbar() {
+// Scrolling down tucks the navbar away so the reading area gets the whole
+// window; any scroll up brings it back. The direction has to accumulate a
+// little first: sub-pixel wheel steps and pointer jitter would otherwise
+// flicker the bar mid-scroll.
+function useHideOnScroll(scrollerRef: RefObject<HTMLElement | null>) {
+  const [hidden, setHidden] = useState(false)
+
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+
+    let lastY = scroller.scrollTop
+    let travel = 0
+
+    const onScroll = () => {
+      const y = scroller.scrollTop
+      travel += y - lastY
+      lastY = y
+
+      if (Math.abs(travel) < 8) return
+
+      const scrollingDown = travel > 0
+      travel = 0
+      // Near the top the bar always shows; below that, down hides the bar and
+      // up reveals it.
+      setHidden(scrollingDown && y > 64)
+    }
+
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [scrollerRef])
+
+  return hidden
+}
+
+function AppNavbar({ hidden }: { hidden: boolean }) {
   return (
     <header
       id="kivo-navbar"
-      className="sticky top-0 z-20 flex min-h-12 items-center justify-between gap-3 border-b border-separator bg-surface px-4"
+      data-hidden={hidden ? 'true' : undefined}
+      className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 pt-4 pb-4"
     >
-      <Typography className="truncate text-foreground" type="body" weight="semibold">
-        Kivo
-      </Typography>
+      {/* Progressive blur over the scrolling content. It sits behind the
+          navbar's own controls (zIndex -1) so the field and toggle stay crisp. */}
+      <GradualBlur
+        curve="bezier"
+        divCount={6}
+        exponential
+        height="100%"
+        position="top"
+        strength={2.5}
+        zIndex={-1}
+      />
+      <NavbarSearch />
       <ThemeToggle />
     </header>
   )
 }
 
 export default function AppShell() {
+  const mainRef = useRef<HTMLElement>(null)
+  const hidden = useHideOnScroll(mainRef)
+
   return (
     <div className="min-h-screen bg-background text-foreground" id="kivo-shell">
       <div id="kivo-workspace" className="min-w-0">
-        <AppNavbar />
+        <main
+          ref={mainRef}
+          aria-label="Kivo application"
+          className="min-w-0"
+          id="kivo-main"
+          tabIndex={-1}
+        >
+          <AppNavbar hidden={hidden} />
 
-        <main aria-label="Kivo application" className="min-w-0" id="kivo-main" tabIndex={-1}>
           <div id="kivo-content">
             <Outlet />
           </div>

@@ -193,16 +193,17 @@ beforeEach(() => {
   dashboardMock.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
 })
 
-describe('SearchPage', () => {
-  it('loads results for a typed query and opens an item', async () => {
+describe('Navbar search', () => {
+  it('loads matches for a typed query and opens an item', async () => {
     itemsMock.listItems.mockResolvedValue([SEARCH_NOTE])
     itemsMock.loadItem.mockResolvedValue({ ...SEARCH_NOTE_ITEM })
 
-    renderRoute('/search')
+    renderRoute('/recent')
 
-    fireEvent.change(await screen.findByRole('textbox', { name: 'Search the vault' }), {
-      target: { value: 'alpha' },
-    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Search the vault' }))
+
+    const field = await screen.findByRole('textbox', { name: 'Search' })
+    fireEvent.change(field, { target: { value: 'alpha' } })
 
     await waitFor(() => expect(itemsMock.listItems).toHaveBeenLastCalledWith({ query: 'alpha' }))
     expect(await screen.findByText('Alpha note')).toBeInTheDocument()
@@ -211,45 +212,73 @@ describe('SearchPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Item details' })).toBeInTheDocument()
     expect(itemsMock.loadItem).toHaveBeenCalledWith(SEARCH_NOTE.id)
+    expect(screen.queryByRole('textbox', { name: 'Search' })).not.toBeInTheDocument()
   })
 
-  it('adds the selected type to the query filter', async () => {
-    itemsMock.listItems.mockResolvedValue([SEARCH_NOTE])
+  it('caps the list at eight matches and counts the rest', async () => {
+    itemsMock.listItems.mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => ({
+        ...SEARCH_NOTE,
+        id: `search-${index}`,
+        title: `Alpha note ${index}`,
+      })),
+    )
 
-    renderRoute('/search')
+    renderRoute('/recent')
 
-    fireEvent.change(await screen.findByRole('textbox', { name: 'Search the vault' }), {
+    fireEvent.click(await screen.findByRole('button', { name: 'Search the vault' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search' }), {
       target: { value: 'alpha' },
     })
-    await waitFor(() => expect(itemsMock.listItems).toHaveBeenLastCalledWith({ query: 'alpha' }))
 
-    await chooseItemType('Notes')
-
-    await waitFor(() =>
-      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ query: 'alpha', kind: 'note' }),
-    )
+    expect(await screen.findByText('Alpha note 0')).toBeInTheDocument()
+    expect(screen.queryByText('Alpha note 8')).not.toBeInTheDocument()
+    expect(screen.getByText('Showing first 8 of 10 matches.')).toBeInTheDocument()
   })
 
-  it('shows the empty prompt before a query is typed', async () => {
-    renderRoute('/search')
+  it('runs no query before a search is typed', async () => {
+    renderRoute('/recent')
 
-    expect(
-      await screen.findByRole('heading', { level: 2, name: 'Search your vault.', exact: true }),
-    ).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'Search the vault' }))
+
+    expect(await screen.findByRole('heading', { name: 'Search the vault' })).toBeInTheDocument()
     expect(itemsMock.listItems).not.toHaveBeenCalled()
+    expect(screen.queryByText('No matches.')).not.toBeInTheDocument()
   })
 
-  it('shows no matches when the query returns nothing', async () => {
-    itemsMock.listItems.mockResolvedValue([])
+  it('shows the no-match state and recovers from a failed search', async () => {
+    itemsMock.listItems.mockRejectedValueOnce(new Error('offline'))
 
+    renderRoute('/recent')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Search the vault' }))
+
+    const field = await screen.findByRole('textbox', { name: 'Search' })
+    fireEvent.change(field, { target: { value: 'zzz' } })
+
+    expect(await screen.findByText('Your search could not run. Try again.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByText('No matches.')).toBeInTheDocument()
+  })
+
+  it('opens the dialog from the Ctrl K shortcut', async () => {
+    renderRoute('/recent')
+
+    expect(screen.getByTitle('Control').closest('kbd')).toHaveTextContent('K')
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+
+    expect(await screen.findByRole('heading', { name: 'Search the vault' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Search' })).toHaveFocus()
+  })
+
+  it('no longer exposes the search page route', async () => {
     renderRoute('/search')
 
-    fireEvent.change(await screen.findByRole('textbox', { name: 'Search the vault' }), {
-      target: { value: 'zzz' },
-    })
-
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'No matches.', exact: true }),
+      await screen.findByRole('heading', { level: 1, name: 'Not Found', exact: true }),
     ).toBeInTheDocument()
   })
 })

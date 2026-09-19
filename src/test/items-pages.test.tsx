@@ -197,10 +197,6 @@ function renderItemsPage() {
   )
 }
 
-function itemTitles(): string[] {
-  return screen.getAllByRole('rowheader').map((cell) => cell.textContent ?? '')
-}
-
 async function openFiltersMenu() {
   fireEvent.click(screen.getByRole('button', { name: 'Filters' }))
   await screen.findByRole('menuitem', { name: 'Kind' })
@@ -250,7 +246,7 @@ beforeEach(() => {
 })
 
 describe('ItemsPage', () => {
-  it('shows the item table with the mocked rows and no view toggle', async () => {
+  it('shows the item cards with the mocked rows and no view toggle', async () => {
     renderItemsPage()
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading your items')
@@ -258,30 +254,39 @@ describe('ItemsPage', () => {
     expect(await screen.findByText('Alpha note')).toBeInTheDocument()
     expect(screen.getByText('Beta source')).toBeInTheDocument()
 
-    const table = screen.getByRole('grid', { name: 'All items' })
-    expect(within(table).getByText('Alpha note')).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: /Title/ })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: /Kind/ })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: /Status/ })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: /Updated/ })).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: 'All items' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getByText('Alpha note')).toBeInTheDocument()
+    expect(within(list).getByText('Note')).toBeInTheDocument()
+    expect(within(list).getByText('Source')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader')).not.toBeInTheDocument()
 
     expect(screen.queryByRole('button', { name: 'List view' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Grid view' })).not.toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('shows the empty state inside the table when there are no items', async () => {
+  it('warns on a card when the managed file is missing', async () => {
+    itemsMock.listItems.mockResolvedValue([toSummary(MISSING_FILE_ITEM)])
+    renderItemsPage()
+
+    expect(await screen.findByText('Delta file')).toBeInTheDocument()
+    expect(screen.getByText('File is missing')).toBeInTheDocument()
+  })
+
+  it('shows the empty state when there are no items', async () => {
     itemsMock.listItems.mockResolvedValue([])
     renderItemsPage()
 
     expect(
       await screen.findByText('No items yet. Save a note, source, or file to see it here.'),
     ).toBeInTheDocument()
-    expect(screen.getByRole('grid', { name: 'All items' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'All items' })).not.toBeInTheDocument()
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
   })
 
-  it('shows a filter message inside the table when nothing matches', async () => {
+  it('shows a filter message when nothing matches', async () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
@@ -324,35 +329,21 @@ describe('ItemsPage', () => {
     )
   })
 
-  it('sorts the rows by title and back when the Title column header is clicked', async () => {
-    renderItemsPage()
-    await screen.findByText('Alpha note')
-
-    const titleHeader = screen.getByRole('columnheader', { name: /Title/ })
-
-    fireEvent.click(titleHeader)
-    expect(itemTitles()).toEqual(['Alpha note', 'Beta source'])
-
-    fireEvent.click(titleHeader)
-    expect(itemTitles()).toEqual(['Beta source', 'Alpha note'])
-
-    expect(itemsMock.listItems).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows ten rows per page and moves to the next page', async () => {
+  it('shows ten cards per page and moves to the next page', async () => {
     itemsMock.listItems.mockResolvedValue(PAGED_ITEMS)
     renderItemsPage()
-    await screen.findByText('Paged item 12')
+    await screen.findByText('Paged item 01')
 
-    expect(screen.getAllByRole('rowheader')).toHaveLength(10)
+    const list = screen.getByRole('list', { name: 'All items' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(10)
     expect(screen.getByText('Showing 1 to 10 of 12 items')).toBeInTheDocument()
-    expect(screen.queryByText('Paged item 02')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paged item 11')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 
-    expect(await screen.findByText('Paged item 02')).toBeInTheDocument()
+    expect(await screen.findByText('Paged item 11')).toBeInTheDocument()
     expect(screen.getByText('Showing 11 to 12 of 12 items')).toBeInTheDocument()
-    expect(screen.getAllByRole('rowheader')).toHaveLength(2)
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
     expect(itemsMock.listItems).toHaveBeenCalledTimes(1)
   })
 
@@ -467,68 +458,7 @@ describe('ItemsPage', () => {
     )
   })
 
-  it('clears the selection from the batch bar', async () => {
-    renderItemsPage()
-    await screen.findByText('Alpha note')
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
-    expect(screen.getByText('1 selected')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }))
-
-    expect(screen.queryByText('1 selected')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Clear selection' })).not.toBeInTheDocument()
-  })
-
-  it('marks the selected items as favorite', async () => {
-    renderItemsPage()
-    await screen.findByText('Alpha note')
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
-    expect(screen.getByText('1 selected')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Mark favorite' }))
-
-    await waitFor(() =>
-      expect(itemsMock.setItemsFavorite).toHaveBeenCalledWith(['note-1'], true),
-    )
-    await waitFor(() => expect(screen.queryByText('1 selected')).not.toBeInTheDocument())
-  })
-
-  it('moves the selected items to the chosen collection', async () => {
-    renderItemsPage()
-    await screen.findByText('Alpha note')
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Move to collection' }))
-
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByLabelText('Collection'), {
-      target: { value: 'collection-1' },
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
-
-    await waitFor(() =>
-      expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['note-1'], 'collection-1'),
-    )
-    await waitFor(() => expect(screen.queryByText('1 selected')).not.toBeInTheDocument())
-  })
-
-  it('trashes the selected items after confirmation', async () => {
-    renderItemsPage()
-    await screen.findByText('Alpha note')
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /Select Alpha note/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Trash' }))
-
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }))
-
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['note-1']))
-    await waitFor(() => expect(screen.queryByText('1 selected')).not.toBeInTheDocument())
-  })
-
-  it('opens the details dialog for a row', async () => {
+  it('opens the details dialog when a card is clicked', async () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 

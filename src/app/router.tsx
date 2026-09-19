@@ -10,7 +10,6 @@ import { SourcesPage } from '../features/sources/SourcesPage'
 import { FilesPage } from '../features/files/FilesPage'
 import { CollectionsPage } from '../features/collections/CollectionsPage'
 import { TagsPage } from '../features/tags/TagsPage'
-import { SearchPage } from '../features/search/SearchPage'
 import { FavoritesPage } from '../features/favorites/FavoritesPage'
 import { RecentPage } from '../features/recent/RecentPage'
 import { TrashPage } from '../features/trash/TrashPage'
@@ -44,7 +43,6 @@ export function AppRoutes() {
         <Route path="files" element={<FilesPage />} />
         <Route path="collections" element={<CollectionsPage />} />
         <Route path="tags" element={<TagsPage />} />
-        <Route path="search" element={<SearchPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="recent" element={<RecentPage />} />
         <Route path="trash" element={<TrashPage />} />

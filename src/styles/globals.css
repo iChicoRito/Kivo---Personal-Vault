@@ -40,8 +40,8 @@
 
 /*
  * App frame geometry only: the workspace column that holds the navbar, the
- * scrolling page area, and the dock pinned to the bottom. Everything inside the
- * frame comes from HeroUI components and their tokens.
+ * scrolling page area, and the dock floating over its bottom. Everything inside
+ * the frame comes from HeroUI components and their tokens.
  */
 @layer components {
   #kivo-shell {
@@ -51,33 +51,61 @@
   }
 
   #kivo-workspace {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    position: relative;
     height: 100%;
     min-height: 0;
   }
 
-  /* The navbar and the dock stay in place; only the page area scrolls. */
+  /* The page area fills the window: the navbar sticks to its top and the dock
+     floats over its bottom, so content passes behind both instead of being cut
+     off above the dock. */
   #kivo-main {
+    height: 100%;
     min-height: 0;
     overflow-y: auto;
   }
 
   /* With the sidebar gone the page area is the whole window, so the content
      wrapper spans it and only keeps breathing room at the edges. The inline
-     padding grows with the window so wide pages read a little narrower. */
+     padding grows with the window so wide pages read a little narrower, and
+     the bottom padding keeps the last rows clear of the floating dock. */
   #kivo-content {
-    padding-block: clamp(1.25rem, 2.5vw, 2.5rem);
+    padding-top: clamp(1.25rem, 2.5vw, 2.5rem);
+    padding-bottom: calc(clamp(1.25rem, 2.5vw, 2.5rem) + 7.5rem);
     padding-inline: clamp(1.5rem, 3vw, 3rem);
   }
 
+  /* The navbar keeps the same inline padding as the page content so the search
+     field lines up with the page headers below it. */
+  #kivo-navbar {
+    padding-inline: clamp(1.5rem, 3vw, 3rem);
+  }
+
+  /* Scroll-aware navbar: it parks above the viewport while the page moves down
+     (the flag comes from the shell's scroll listener) and slides back on any
+     scroll up. Focus keeps it in place, so the keyboard path never points at a
+     control that has scrolled out. */
+  #kivo-navbar {
+    transition: transform 300ms ease-out;
+  }
+
+  #kivo-navbar[data-hidden='true']:not(:focus-within) {
+    transform: translateY(-100%);
+  }
+
   [data-density="compact"] #kivo-content {
-    padding-block: 1rem;
+    padding-top: 1rem;
+    padding-bottom: calc(1rem + 7.5rem);
   }
 
   @media (max-width: 52.5rem) {
     #kivo-content {
-      padding-block: 1.5rem;
+      padding-top: 1.5rem;
+      padding-bottom: calc(1.5rem + 7.5rem);
+      padding-inline: 1rem;
+    }
+
+    #kivo-navbar {
       padding-inline: 1rem;
     }
   }
@@ -87,19 +115,52 @@
  * Dock emphasis. While the dock bar is hovered the rest of the screen goes out
  * of focus, so the dock reads as the active surface. CSS keeps the pointer
  * tracking out of React; the rest state declares blur(0) so the filter
- * transition has both ends. The navbar and main areas are the only non-dock
- * regions of the workspace grid.
+ * transition has both ends. The scrolling main area, navbar included, is the
+ * only non-dock region of the workspace grid.
  */
 @layer components {
-  #kivo-navbar,
   #kivo-main {
     filter: blur(0px);
     transition: filter 300ms ease-out;
   }
 
-  #kivo-shell:has(.kivo-dock:hover) #kivo-navbar,
   #kivo-shell:has(.kivo-dock:hover) #kivo-main {
     filter: blur(8px);
+  }
+}
+
+/*
+ * Dock fill strength. The dock's glass bar paints its own fill as
+ * `bg-white/10` (dark: `bg-black/10`, hover and focus step up to `/20`), and
+ * the component stays exactly as it ships, so the stronger fill is declared
+ * here on the bar, the dock's first child. The rule sits in the utilities layer
+ * with the dock's background classes and wins on specificity, and it is flat
+ * across rest, hover, and focus: /40 reads the same over scrolling content in
+ * every state.
+ */
+@layer utilities {
+  #kivo-shell .kivo-dock > div:first-child {
+    background-color: rgb(255 255 255 / 0.4);
+  }
+
+  #kivo-shell .kivo-dock > div:first-child:is(.dark, .dark *, [data-theme=dark], [data-theme=dark] *) {
+    background-color: rgb(0 0 0 / 0.4);
+  }
+}
+
+/*
+ * Navbar fill. The navbar's progressive blur is blur only, so content scrolling
+ * under it stays legible right through the band; a light /10 fill sits on the
+ * header for a hint of scrim while the blur keeps fading above it. The band
+ * shares the header's box, so the fill and the blur cover the same strip.
+ */
+@layer utilities {
+  #kivo-navbar {
+    background-color: rgb(255 255 255 / 0.1);
+  }
+
+  #kivo-navbar:is(.dark, .dark *, [data-theme=dark], [data-theme=dark] *) {
+    background-color: rgb(0 0 0 / 0.1);
   }
 }
 
@@ -136,6 +197,20 @@
   .kivo-row-actions-menu .menu-item:is(:focus-visible, [data-focus-visible="true"]) {
     box-shadow: none;
     background-color: var(--default);
+  }
+}
+
+/*
+ * List cards. HeroUI's default surface hover mixes 8% of the foreground into
+ * the card, which lands the hovered card on almost exactly the kind tile's
+ * lightness, so the tile flattens out under the cursor in both themes. The
+ * cards pull the mix to 10%, which keeps the tile one clear step off the
+ * hovered fill in light and dark, and the card swells a little to mark which
+ * row the pointer is on.
+ */
+@layer components {
+  .kivo-item-card {
+    --surface-hover: color-mix(in oklab, var(--surface) 90%, var(--surface-foreground) 10%);
   }
 }
 

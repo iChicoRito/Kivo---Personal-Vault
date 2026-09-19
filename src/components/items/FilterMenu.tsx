@@ -57,7 +57,7 @@ export function FilterMenu({
 
   return (
     <Dropdown>
-      <Button aria-label="Filters" variant="secondary">
+      <Button aria-label="Filters" variant="tertiary">
         <HugeiconsIcon aria-hidden="true" icon={FilterIcon} size={16} />
         Filters
         {activeCount > 0 ? <Chip size="sm" variant="soft">{activeCount}</Chip> : null}

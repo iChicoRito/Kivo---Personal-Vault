@@ -1,12 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-  Alert,
-  Button,
-  Card,
-  Spinner,
-  Typography,
-  type SortDescriptor,
-} from '@heroui/react'
+import { useEffect, useState } from 'react'
+import { Alert, Button, Card, Spinner, Typography } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
 import { ConfirmDialog } from '../../components/items/dialogs'
@@ -25,35 +18,10 @@ const panelLabelClass = 'uppercase'
 const ACTION_ERROR =
   'Kivo could not finish that action. The Trash is unchanged. Try again.'
 
-function deletedDate(item: ItemSummary) {
-  return item.deletedAt ?? item.updatedAt
-}
-
-function sortTrash(items: ItemSummary[], descriptor: SortDescriptor): ItemSummary[] {
-  const direction = descriptor.direction === 'descending' ? -1 : 1
-  const column = String(descriptor.column)
-
-  return [...items].sort((first, second) => {
-    let result: number
-
-    if (column === 'title') result = first.title.localeCompare(second.title)
-    else if (column === 'kind') result = first.kind.localeCompare(second.kind)
-    else if (column === 'updated') result = deletedDate(first).localeCompare(deletedDate(second))
-    else result = 0
-
-    return result * direction
-  })
-}
-
 export function TrashPage() {
   const [items, setItems] = useState<ItemSummary[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [attempt, setAttempt] = useState(0)
-
-  const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
-    column: 'updated',
-    direction: 'descending',
-  })
 
   const [actionError, setActionError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
@@ -77,8 +45,6 @@ export function TrashPage() {
       active = false
     }
   }, [attempt])
-
-  const sortedItems = useMemo(() => sortTrash(items, sortDescriptor), [items, sortDescriptor])
 
   function reload() {
     setAttempt((value) => value + 1)
@@ -197,17 +163,15 @@ export function TrashPage() {
       {loadState === 'ready' ? (
         <ItemTable
           emptyMessage="Trash is empty."
-          items={sortedItems}
+          items={items}
           page={1}
           pageSize={PAGE_SIZE}
-          sortDescriptor={sortDescriptor}
-          totalItems={sortedItems.length}
+          totalItems={items.length}
           onDeletePermanently={setDeleteTarget}
           onPageChange={() => undefined}
           onRestore={(id) => {
             void handleRestore(id)
           }}
-          onSortChange={setSortDescriptor}
         />
       ) : null}
 

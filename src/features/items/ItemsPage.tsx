@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
@@ -10,7 +10,6 @@ import {
   Spinner,
   TextField,
   Typography,
-  type SortDescriptor,
 } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
@@ -55,22 +54,6 @@ function buildFilter(
   return filter
 }
 
-function sortItems(items: ItemSummary[], descriptor: SortDescriptor): ItemSummary[] {
-  const direction = descriptor.direction === 'descending' ? -1 : 1
-  const column = String(descriptor.column)
-
-  return [...items].sort((first, second) => {
-    let result: number
-
-    if (column === 'title') result = first.title.localeCompare(second.title)
-    else if (column === 'kind') result = first.kind.localeCompare(second.kind)
-    else if (column === 'updated') result = first.updatedAt.localeCompare(second.updatedAt)
-    else result = 0
-
-    return result * direction
-  })
-}
-
 export function ItemsPage() {
   const [searchParams] = useSearchParams()
   const [items, setItems] = useState<ItemSummary[]>([])
@@ -87,20 +70,15 @@ export function ItemsPage() {
   )
   const [tagId, setTagId] = useState<string | null>(null)
   const [favorite, setFavorite] = useState(false)
-  const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
-    column: 'updated',
-    direction: 'descending',
-  })
   const [page, setPage] = useState(1)
 
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [moveIds, setMoveIds] = useState<string[]>([])
+  const [moveId, setMoveId] = useState<string | null>(null)
   const [moveOpen, setMoveOpen] = useState(false)
   const [targetCollectionId, setTargetCollectionId] = useState<string | null>(null)
-  const [trashIds, setTrashIds] = useState<string[]>([])
+  const [trashId, setTrashId] = useState<string | null>(null)
   const [trashOpen, setTrashOpen] = useState(false)
   const [openItemId, setOpenItemId] = useState<string | null>(null)
-  const [batchError, setBatchError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -143,73 +121,65 @@ export function ItemsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [kind, collectionId, tagId, favorite, query, sortDescriptor])
+  }, [kind, collectionId, tagId, favorite, query])
 
-  const sortedItems = useMemo(() => sortItems(items, sortDescriptor), [items, sortDescriptor])
-  const totalPages = Math.max(1, Math.ceil(sortedItems.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
-  const pagedItems = useMemo(
-    () => sortedItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [sortedItems, currentPage],
-  )
+  const pagedItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const hasActiveFilters =
     kind !== 'all' || collectionId !== null || tagId !== null || favorite || query.trim() !== ''
 
   function reload() {
-    setSelectedIds([])
     setAttempt((value) => value + 1)
   }
 
-  async function runBatch(action: () => Promise<void>) {
-    setBatchError(null)
+  async function runAction(action: () => Promise<void>) {
+    setActionError(null)
 
     try {
       await action()
     } catch {
-      setBatchError('Kivo could not finish that action. Your items are unchanged. Try again.')
+      setActionError('Kivo could not finish that action. Your items are unchanged. Try again.')
     }
   }
 
-  async function handleFavorite(nextFavorite: boolean) {
-    await runBatch(async () => {
-      await setItemsFavorite(selectedIds, nextFavorite)
-      reload()
-    })
-  }
-
   async function handleRowFavorite(id: string, nextFavorite: boolean) {
-    await runBatch(async () => {
+    await runAction(async () => {
       await setItemsFavorite([id], nextFavorite)
       reload()
     })
   }
 
-  function openMove(ids: string[]) {
-    setMoveIds(ids)
+  function openMove(id: string) {
+    setMoveId(id)
     setTargetCollectionId(null)
     setMoveOpen(true)
   }
 
-  function openTrash(ids: string[]) {
-    setTrashIds(ids)
+  function openTrash(id: string) {
+    setTrashId(id)
     setTrashOpen(true)
   }
 
   async function handleMove() {
-    await runBatch(async () => {
-      await moveItemsToCollection(moveIds, targetCollectionId)
+    if (!moveId) return
+
+    await runAction(async () => {
+      await moveItemsToCollection([moveId], targetCollectionId)
       setMoveOpen(false)
-      setMoveIds([])
+      setMoveId(null)
       setTargetCollectionId(null)
       reload()
     })
   }
 
   async function handleTrash() {
-    await runBatch(async () => {
-      await trashItems(trashIds)
+    if (!trashId) return
+
+    await runAction(async () => {
+      await trashItems([trashId])
       setTrashOpen(false)
-      setTrashIds([])
+      setTrashId(null)
       reload()
     })
   }
@@ -252,36 +222,11 @@ export function ItemsPage() {
         </div>
       </div>
 
-      {selectedIds.length > 0 ? (
-        <Card aria-label="Batch actions">
-          <Card.Content className="flex flex-wrap items-center gap-3">
-            <Typography type="body" weight="bold">
-              {selectedIds.length} selected
-            </Typography>
-            <Button variant="secondary" onPress={() => openMove(selectedIds)}>
-              Move to collection
-            </Button>
-            <Button variant="secondary" onPress={() => void handleFavorite(true)}>
-              Mark favorite
-            </Button>
-            <Button variant="secondary" onPress={() => void handleFavorite(false)}>
-              Remove favorite
-            </Button>
-            <Button variant="danger" onPress={() => openTrash(selectedIds)}>
-              Trash
-            </Button>
-            <Button variant="secondary" onPress={() => setSelectedIds([])}>
-              Clear selection
-            </Button>
-          </Card.Content>
-        </Card>
-      ) : null}
-
-      {batchError ? (
+      {actionError ? (
         <Alert role="alert" status="danger">
           <Alert.Content className="grid gap-2">
             <Typography className="font-semibold text-danger" type="body">
-              {batchError}
+              {actionError}
             </Typography>
           </Alert.Content>
         </Alert>
@@ -341,19 +286,14 @@ export function ItemsPage() {
           items={pagedItems}
           page={currentPage}
           pageSize={PAGE_SIZE}
-          selectable
-          selectedIds={selectedIds}
-          sortDescriptor={sortDescriptor}
-          totalItems={sortedItems.length}
-          onMove={(id) => openMove([id])}
+          totalItems={items.length}
+          onMove={openMove}
           onOpen={setOpenItemId}
           onPageChange={setPage}
-          onSelectionChange={setSelectedIds}
-          onSortChange={setSortDescriptor}
           onToggleFavorite={(id, next) => {
             void handleRowFavorite(id, next)
           }}
-          onTrash={(id) => openTrash([id])}
+          onTrash={openTrash}
         />
       ) : null}
 
@@ -362,7 +302,7 @@ export function ItemsPage() {
         onOpenChange={(isOpen) => {
           if (!isOpen) {
             setMoveOpen(false)
-            setMoveIds([])
+            setMoveId(null)
           }
         }}
       >
@@ -392,17 +332,13 @@ export function ItemsPage() {
 
       <ConfirmDialog
         confirmLabel="Move to trash"
-        description={
-          trashIds.length === 1
-            ? 'This item leaves every list. You can restore it from Trash.'
-            : 'The selected items leave every list. You can restore them from Trash.'
-        }
+        description="This item leaves every list. You can restore it from Trash."
         open={trashOpen}
-        title={trashIds.length === 1 ? 'Move this item to Trash?' : 'Move selected items to Trash?'}
+        title="Move this item to Trash?"
         tone="danger"
         onCancel={() => {
           setTrashOpen(false)
-          setTrashIds([])
+          setTrashId(null)
         }}
         onConfirm={() => void handleTrash()}
       />

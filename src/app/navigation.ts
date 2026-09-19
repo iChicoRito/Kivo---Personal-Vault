@@ -7,7 +7,6 @@ import {
   LibraryIcon,
   Link02Icon,
   NoteEditIcon,
-  Search01Icon,
   Settings01Icon,
   StarIcon,
   Tag01Icon,
@@ -25,7 +24,6 @@ export const navigationGroups: Array<{ label: string; links: NavigationLink[] }>
     label: 'KIVO',
     links: [
       { label: 'Dashboard', to: '/dashboard', icon: DashboardSquare01Icon },
-      { label: 'Search', to: '/search', icon: Search01Icon },
       { label: 'All Items', to: '/items', icon: LibraryIcon },
     ],
   },

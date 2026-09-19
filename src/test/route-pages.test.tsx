@@ -83,7 +83,6 @@ const REAL_DESTINATIONS: Array<{ path: string; title: string; description?: stri
   { path: '/files', title: 'Files' },
   { path: '/collections', title: 'Collections' },
   { path: '/tags', title: 'Tags' },
-  { path: '/search', title: 'Search', description: 'Find anything in your vault.' },
   { path: '/favorites', title: 'Favorites', description: 'Keep priority items easy to find.' },
   { path: '/recent', title: 'Recent', description: 'Return to items opened lately.' },
   {
@@ -221,7 +220,7 @@ describe('Primary dock navigation', () => {
     const dock = await screen.findByRole('navigation', { name: 'Primary navigation' })
     const links = within(dock).getAllByRole('link')
 
-    expect(dockDestinations).toHaveLength(12)
+    expect(dockDestinations).toHaveLength(11)
     expect(links).toHaveLength(dockDestinations.length)
 
     for (const destination of dockDestinations) {

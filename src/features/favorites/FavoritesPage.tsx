@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
@@ -7,7 +7,6 @@ import {
   Select,
   Spinner,
   Typography,
-  type SortDescriptor,
 } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
@@ -60,31 +59,11 @@ function KindSelect({ value, onChange }: { value: Kind; onChange: (kind: Kind) =
   )
 }
 
-function sortItems(items: ItemSummary[], descriptor: SortDescriptor): ItemSummary[] {
-  const direction = descriptor.direction === 'descending' ? -1 : 1
-  const column = String(descriptor.column)
-
-  return [...items].sort((first, second) => {
-    let result: number
-
-    if (column === 'title') result = first.title.localeCompare(second.title)
-    else if (column === 'kind') result = first.kind.localeCompare(second.kind)
-    else if (column === 'updated') result = first.updatedAt.localeCompare(second.updatedAt)
-    else result = 0
-
-    return result * direction
-  })
-}
-
 export function FavoritesPage() {
   const [items, setItems] = useState<ItemSummary[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [attempt, setAttempt] = useState(0)
   const [kind, setKind] = useState<Kind>('all')
-  const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
-    column: 'updated',
-    direction: 'descending',
-  })
   const [page, setPage] = useState(1)
   const [openItemId, setOpenItemId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -110,15 +89,11 @@ export function FavoritesPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [kind, sortDescriptor])
+  }, [kind])
 
-  const sortedItems = useMemo(() => sortItems(items, sortDescriptor), [items, sortDescriptor])
-  const totalPages = Math.max(1, Math.ceil(sortedItems.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
-  const pagedItems = useMemo(
-    () => sortedItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [sortedItems, currentPage],
-  )
+  const pagedItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   function reload() {
     setAttempt((value) => value + 1)
@@ -203,11 +178,9 @@ export function FavoritesPage() {
           items={pagedItems}
           page={currentPage}
           pageSize={PAGE_SIZE}
-          sortDescriptor={sortDescriptor}
-          totalItems={sortedItems.length}
+          totalItems={items.length}
           onOpen={setOpenItemId}
           onPageChange={setPage}
-          onSortChange={setSortDescriptor}
           onToggleFavorite={(id, next) => {
             void handleToggleFavorite(id, next)
           }}
