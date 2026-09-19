@@ -12,6 +12,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@heroui/react": "^3.2.5",
     "@heroui/styles": "^3.2.5",
     "@hugeicons/core-free-icons": "^4.3.3",
@@ -21,6 +22,7 @@
     "@thesvg/react": "^3.3.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "gsap": "^3.15.0",
     "lucide-react": "^1.46.0",
     "motion": "^13.4.0",
     "react": "^19.3.0",
