@@ -70,6 +70,7 @@ const SUMMARIES: ItemSummary[] = [
     fileMissing: false,
     isPinned: true,
     file: null,
+    content: 'Body text',
   },
   {
     id: FILE_ITEM.id,
@@ -85,6 +86,7 @@ const SUMMARIES: ItemSummary[] = [
       byteSize: 284_915,
       importedAt: '2026-09-15T08:00:00.000Z',
     },
+    content: null,
   },
 ]
 

@@ -70,6 +70,7 @@ const TRASHED_NOTE: ItemSummary = {
   fileMissing: false,
   isPinned: false,
   file: null,
+  content: null,
 }
 
 const TRASHED_SOURCE: ItemSummary = {
@@ -83,6 +84,7 @@ const TRASHED_SOURCE: ItemSummary = {
   fileMissing: false,
   isPinned: false,
   file: null,
+  content: null,
 }
 
 function renderTrash() {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
-import { buttonVariants } from '@heroui/react'
+import { buttonVariants, ScrollShadow } from '@heroui/react'
 import { Outlet } from 'react-router-dom'
 
 import { GradualBlur } from '../components/ui/GradualBlur'
@@ -89,17 +89,18 @@ function AppNavbar({ hidden }: { hidden: boolean }) {
 }
 
 export default function AppShell() {
-  const mainRef = useRef<HTMLElement>(null)
+  const mainRef = useRef<HTMLDivElement>(null)
   const hidden = useHideOnScroll(mainRef)
 
   return (
     <div className="min-h-screen bg-background text-foreground" id="kivo-shell">
       <div id="kivo-workspace" className="min-w-0">
-        <main
+        <ScrollShadow
           ref={mainRef}
           aria-label="Kivo application"
           className="min-w-0"
           id="kivo-main"
+          role="main"
           tabIndex={-1}
         >
           <AppNavbar hidden={hidden} />
@@ -107,7 +108,7 @@ export default function AppShell() {
           <div id="kivo-content">
             <Outlet />
           </div>
-        </main>
+        </ScrollShadow>
 
         <AppDock />
       </div>

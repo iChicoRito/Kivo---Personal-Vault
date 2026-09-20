@@ -172,6 +172,7 @@ const PAGED_ITEMS: ItemSummary[] = Array.from({ length: 12 }, (_, index) => ({
   fileMissing: false,
   isPinned: false,
   file: null,
+  content: null,
 }))
 
 function toSummary(item: VaultItem): ItemSummary {
@@ -185,6 +186,7 @@ function toSummary(item: VaultItem): ItemSummary {
     fileMissing: item.fileMissing,
     isPinned: item.isPinned,
     file: item.file,
+    content: item.content,
   }
 }
 

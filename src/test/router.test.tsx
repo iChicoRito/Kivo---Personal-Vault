@@ -140,7 +140,7 @@ describe('router', () => {
     renderAt('/notes/note-1')
 
     expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Alpha note')
-    expect(screen.getByRole('textbox', { name: 'Content' })).toHaveValue('Body text')
+    expect(screen.getByRole('textbox', { name: 'Content' })).toHaveTextContent('Body text')
   })
 
   it('renders the exact not-found heading for unknown paths', async () => {

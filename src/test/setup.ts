@@ -107,3 +107,14 @@ class ResizeObserverMock {
 }
 
 vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+
+/*
+ * jsdom ships no Web Animations API, but React Aria's shared element transition
+ * (HeroUI's `Tabs.Indicator` uses it) reads `getAnimations()`. An empty list
+ * leaves those elements still, which is what the tests want anyway.
+ */
+Object.defineProperty(Element.prototype, 'getAnimations', {
+  configurable: true,
+  writable: true,
+  value: () => [],
+})

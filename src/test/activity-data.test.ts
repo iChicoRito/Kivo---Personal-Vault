@@ -58,6 +58,7 @@ const SUMMARY: ItemSummary = {
   fileMissing: false,
   isPinned: true,
   file: null,
+  content: null,
 }
 
 const RECENT: RecentItems = {

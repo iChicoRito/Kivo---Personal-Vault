@@ -89,6 +89,7 @@ const FILE: ItemSummary = {
     byteSize: 284_915,
     importedAt: '2026-09-15T08:00:00.000Z',
   },
+  content: null,
 }
 
 const FILE_MISSING: ItemSummary = { ...FILE, fileMissing: true }
@@ -120,6 +121,7 @@ const NOTE: ItemSummary = {
   fileMissing: false,
   isPinned: false,
   file: null,
+  content: '<p>Body text</p>',
 }
 
 const NOTE_ITEM: VaultItem = {

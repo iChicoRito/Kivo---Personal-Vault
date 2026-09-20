@@ -12,6 +12,7 @@ const PHASE_TWO_MIGRATION: &str =
     include_str!("../migrations/0002_drop_unused_preference_columns.sql");
 const PHASE_TWO_SCHEMA_MIGRATION: &str = include_str!("../migrations/0003_phase_two.sql");
 const PHASE_THREE_MIGRATION: &str = include_str!("../migrations/0004_phase_three.sql");
+const NOTES_VIEW_MIGRATION: &str = include_str!("../migrations/0005_notes_view.sql");
 
 struct Migration {
     version: i64,
@@ -36,6 +37,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 4,
         sql: PHASE_THREE_MIGRATION,
+    },
+    Migration {
+        version: 5,
+        sql: NOTES_VIEW_MIGRATION,
     },
 ];
 
@@ -75,6 +80,7 @@ pub struct Preferences {
     pub theme: String,
     pub density: String,
     pub start_at_login: bool,
+    pub notes_view: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -241,7 +247,8 @@ fn validate_setup(input: &SetupInput) -> Result<(), String> {
 
 fn validate_preferences(preferences: &Preferences) -> Result<(), String> {
     let valid = matches!(preferences.theme.as_str(), "light" | "dark" | "system")
-        && matches!(preferences.density.as_str(), "comfortable" | "compact");
+        && matches!(preferences.density.as_str(), "comfortable" | "compact")
+        && matches!(preferences.notes_view.as_str(), "grid" | "list");
 
     if valid {
         Ok(())
@@ -396,13 +403,14 @@ pub fn write_profile(connection: &mut Connection, profile: &ProfileInput) -> rus
 
 pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences> {
     connection.query_row(
-        "SELECT theme, density, start_at_login FROM preferences WHERE id = 1",
+        "SELECT theme, density, start_at_login, notes_view FROM preferences WHERE id = 1",
         [],
         |row| {
             Ok(Preferences {
                 theme: row.get(0)?,
                 density: row.get(1)?,
                 start_at_login: row.get::<_, i64>(2)? != 0,
+                notes_view: row.get(3)?,
             })
         },
     )
@@ -415,12 +423,13 @@ pub fn write_preferences(
     let transaction = connection.transaction()?;
     let updated = transaction.execute(
         "UPDATE preferences
-         SET theme = ?1, density = ?2, start_at_login = ?3
+         SET theme = ?1, density = ?2, start_at_login = ?3, notes_view = ?4
          WHERE id = 1",
         params![
             preferences.theme,
             preferences.density,
             i64::from(preferences.start_at_login),
+            preferences.notes_view,
         ],
     )?;
 
@@ -627,7 +636,7 @@ mod tests {
         apply_migrations(&mut connection).expect("first migration");
         apply_migrations(&mut connection).expect("second migration");
 
-        assert_eq!(read_user_version(&connection), 4);
+        assert_eq!(read_user_version(&connection), 5);
 
         for table in [
             "profile",
@@ -655,7 +664,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
-        assert_eq!(read_user_version(&connection), 4);
+        assert_eq!(read_user_version(&connection), 5);
 
         // Dropping a table gives the test a way to detect whether the migration ran again.
         connection
@@ -668,7 +677,7 @@ mod tests {
             !table_exists(&connection, "preferences"),
             "an up-to-date database must not re-run its migration"
         );
-        assert_eq!(read_user_version(&connection), 4);
+        assert_eq!(read_user_version(&connection), 5);
     }
 
     #[test]
@@ -691,13 +700,14 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 4);
+        assert_eq!(read_user_version(&connection), 5);
         assert_eq!(
             read_preferences(&connection).expect("read preferences"),
             Preferences {
                 theme: "light".to_string(),
                 density: "compact".to_string(),
                 start_at_login: true,
+                notes_view: "grid".to_string(),
             }
         );
 
@@ -756,7 +766,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 4);
+        assert_eq!(read_user_version(&connection), 5);
         assert!(
             !table_exists(&connection, "starter_collections"),
             "the onboarding table is dropped after the copy"
@@ -786,6 +796,7 @@ mod tests {
                 theme: "light".to_string(),
                 density: "compact".to_string(),
                 start_at_login: true,
+                notes_view: "grid".to_string(),
             }
         );
     }
@@ -828,7 +839,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 4);
+        assert_eq!(read_user_version(&connection), 5);
 
         let (title, content, is_pinned, deleted_at, icon): (
             String,
@@ -1002,6 +1013,7 @@ mod tests {
                 theme: "dark".to_string(),
                 density: "comfortable".to_string(),
                 start_at_login: false,
+                notes_view: "grid".to_string(),
             }
         );
 

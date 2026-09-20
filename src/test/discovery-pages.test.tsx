@@ -70,6 +70,7 @@ const SEARCH_NOTE: ItemSummary = {
   fileMissing: false,
   isPinned: false,
   file: null,
+  content: null,
 }
 
 const SEARCH_NOTE_ITEM: VaultItem = {

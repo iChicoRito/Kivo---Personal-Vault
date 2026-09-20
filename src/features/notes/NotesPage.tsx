@@ -8,21 +8,29 @@ import {
   Input,
   Label,
   Spinner,
+  Tabs,
   TextField,
   Typography,
 } from '@heroui/react'
 import {
   Delete02Icon,
+  GridViewIcon,
+  LeftToRightListBulletIcon,
+  Note01Icon,
   PinIcon,
   PinOffIcon,
+  PlusSignIcon,
   StarIcon,
   StarOffIcon,
 } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useNavigate } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
+import { usePreferences } from '../../app/preferences'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import { ConfirmDialog } from '../../components/items/dialogs'
+import type { NoteView } from '../../data/settings'
 import {
   listItems,
   saveItem,
@@ -31,6 +39,13 @@ import {
   trashItems,
   type ItemSummary,
 } from '../../data/items'
+import { NoteGridCard } from './NoteGridCard'
+import { notePreview } from './noteContent'
+import {
+  NOTE_STATUS_BAR_CLASS,
+  NOTE_STATUS_CHIP_COLOR,
+  noteStatus,
+} from './noteStatus'
 import { moduleRoutes } from '../modules/ModulePage'
 
 const notesModule = moduleRoutes.find((route) => route.path === 'notes')
@@ -58,6 +73,8 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 export function NotesPage() {
   const navigate = useNavigate()
+  const { preferences, updatePreferences } = usePreferences()
+  const view = preferences.notesView
 
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [items, setItems] = useState<ItemSummary[]>([])
@@ -142,6 +159,17 @@ export function NotesPage() {
     }
   }
 
+  async function changeView(next: NoteView) {
+    if (next === view) return
+
+    try {
+      setActionError(null)
+      await updatePreferences({ notesView: next })
+    } catch {
+      setActionError('Kivo could not remember the note layout. Try again.')
+    }
+  }
+
   function handleMenuAction(item: ItemSummary, key: string) {
     if (key === 'favorite') void toggleFavorite(item)
     if (key === 'pin') void togglePin(item)
@@ -157,14 +185,44 @@ export function NotesPage() {
           titleId="notes-title"
         />
         <Button isDisabled={creating} onPress={() => void handleCreate()}>
-          New note
+          <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+          New Note
         </Button>
       </div>
 
-      <TextField value={search} onChange={setSearch}>
-        <Label>Search notes</Label>
-        <Input fullWidth placeholder="Search notes" variant="secondary" />
-      </TextField>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <TextField className="w-full max-w-md" value={search} onChange={setSearch}>
+          <Label>Search notes</Label>
+          <Input fullWidth placeholder="I am looking for..." variant="secondary" />
+        </TextField>
+
+        <Tabs
+          className="w-fit"
+          selectedKey={view}
+          onSelectionChange={(key) => {
+            if (key === 'grid' || key === 'list') void changeView(key)
+          }}
+        >
+          <Tabs.ListContainer>
+            <Tabs.List aria-label="Note layout">
+              <Tabs.Tab id="grid">
+                <span className="flex items-center gap-2">
+                  <HugeiconsIcon aria-hidden="true" icon={GridViewIcon} size={16} />
+                  Grid
+                </span>
+                <Tabs.Indicator />
+              </Tabs.Tab>
+              <Tabs.Tab id="list">
+                <span className="flex items-center gap-2">
+                  <HugeiconsIcon aria-hidden="true" icon={LeftToRightListBulletIcon} size={16} />
+                  List
+                </span>
+                <Tabs.Indicator />
+              </Tabs.Tab>
+            </Tabs.List>
+          </Tabs.ListContainer>
+        </Tabs>
+      </div>
 
       {actionError ? (
         <Typography className="font-semibold text-danger" role="alert" type="body">
@@ -210,47 +268,46 @@ export function NotesPage() {
         </Alert>
       ) : null}
 
-      {loadState === 'ready' && items.length === 0 ? (
+      {loadState === 'ready' && items.length === 0 && search.trim() === '' ? (
+        <EmptyState className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center">
+          <span
+            aria-hidden="true"
+            className="flex size-14 items-center justify-center rounded-full bg-background-tertiary text-muted"
+          >
+            <HugeiconsIcon icon={Note01Icon} size={24} />
+          </span>
+          <div className="grid max-w-lg gap-2">
+            <Typography align="center" type="h3">
+              {notesEmptyTitle}
+            </Typography>
+            <Typography align="center" color="muted" type="body">
+              {notesEmptyDescription}
+            </Typography>
+          </div>
+          <Button isDisabled={creating} onPress={() => void handleCreate()}>
+            <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+            Create Note
+          </Button>
+        </EmptyState>
+      ) : null}
+
+      {loadState === 'ready' && items.length === 0 && search.trim() !== '' ? (
         <EmptyState className="grid justify-items-start gap-3">
-          <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-            EMPTY STATE
-          </Typography>
-          <Typography type="h2">{notesEmptyTitle}</Typography>
+          <Typography type="h2">No notes match your search.</Typography>
           <Typography color="muted" type="body">
-            {notesEmptyDescription}
+            Try a different word, or clear the search to see every note.
           </Typography>
         </EmptyState>
       ) : null}
 
       {loadState === 'ready' && items.length > 0 ? (
-        <ul className="grid gap-2">
+        <ul
+          className={
+            view === 'grid' ? 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' : 'grid gap-2'
+          }
+        >
           {items.map((item) => {
-            const status =
-              item.isPinned && item.isFavorite
-                ? 'pinned-favorite'
-                : item.isPinned
-                  ? 'pinned'
-                  : item.isFavorite
-                    ? 'favorite'
-                    : 'plain'
-
-            const statusColor: 'accent' | 'default' | 'success' | 'warning' =
-              status === 'pinned-favorite'
-                ? 'success'
-                : status === 'pinned'
-                  ? 'accent'
-                  : status === 'favorite'
-                    ? 'warning'
-                    : 'default'
-
-            const barClass =
-              status === 'pinned-favorite'
-                ? 'bg-success'
-                : status === 'pinned'
-                  ? 'bg-accent'
-                  : status === 'favorite'
-                    ? 'bg-warning'
-                    : 'bg-foreground'
+            const status = noteStatus(item)
 
             const actions: ItemCardAction[] = [
               {
@@ -266,6 +323,14 @@ export function NotesPage() {
               { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
             ]
 
+            if (view === 'grid') {
+              return (
+                <li key={item.id} className="min-w-0">
+                  <NoteGridCard item={item} onOpen={() => navigate(`/notes/${item.id}`)} />
+                </li>
+              )
+            }
+
             return (
               <li key={item.id} className="min-w-0">
                 <ItemCard
@@ -278,12 +343,12 @@ export function NotesPage() {
                     ) : (
                       <>
                         {item.isPinned ? (
-                          <Chip color={statusColor} size="sm" variant="soft">
+                          <Chip color={NOTE_STATUS_CHIP_COLOR[status]} size="sm" variant="soft">
                             Pinned
                           </Chip>
                         ) : null}
                         {item.isFavorite ? (
-                          <Chip color={statusColor} size="sm" variant="soft">
+                          <Chip color={NOTE_STATUS_CHIP_COLOR[status]} size="sm" variant="soft">
                             Favorite
                           </Chip>
                         ) : null}
@@ -293,9 +358,16 @@ export function NotesPage() {
                   leading={
                     <span
                       aria-hidden="true"
-                      className={`w-1 self-stretch rounded-full ${barClass}`}
+                      className={`h-8 w-1 self-center rounded-full ${NOTE_STATUS_BAR_CLASS[status]}`}
                       data-note-status={status}
                     />
+                  }
+                  subtitle={
+                    notePreview(item.content ?? '') ? (
+                      <Typography className="truncate" color="muted" type="body-sm">
+                        {notePreview(item.content ?? '')}
+                      </Typography>
+                    ) : undefined
                   }
                   title={item.title}
                   onAction={(key) => handleMenuAction(item, key)}

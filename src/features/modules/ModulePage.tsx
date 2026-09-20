@@ -37,8 +37,9 @@ export const moduleRoutes: ModuleRoute[] = [
     path: 'notes',
     title: 'Notes',
     description: 'Keep written notes on this device.',
-    emptyTitle: 'No notes yet.',
-    emptyDescription: 'Notes saved on this device will appear here.',
+    emptyTitle: 'No Notes Yet',
+    emptyDescription:
+      "You haven't created any notes yet. Get started by creating your first note.",
     emptyNextStep: dashboardNextStep,
     loadingTitle: 'Loading your notes',
     loadingDescription: 'Kivo is reading notes saved on this device.',

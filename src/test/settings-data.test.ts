@@ -21,6 +21,7 @@ const PREFERENCES = {
   theme: 'dark',
   density: 'compact',
   startAtLogin: false,
+  notesView: 'grid',
 } as const
 
 beforeEach(() => {

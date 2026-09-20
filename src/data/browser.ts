@@ -15,6 +15,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   theme: 'dark',
   density: 'comfortable',
   startAtLogin: false,
+  notesView: 'grid',
 }
 
 function createDefaultState(): BrowserPreviewState {

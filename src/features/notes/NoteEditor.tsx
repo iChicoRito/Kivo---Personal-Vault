@@ -1,20 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Alert,
   Button,
+  ButtonGroup,
   Card,
-  Input,
-  Label,
+  Separator,
   Spinner,
-  Switch,
-  TextArea,
-  TextField,
   Typography,
 } from '@heroui/react'
+import {
+  ArrowLeft01Icon,
+  Delete02Icon,
+  PinIcon,
+  PinOffIcon,
+  StarIcon,
+  StarOffIcon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import PageHeader, { textLinkClass } from '../../app/PageHeader'
-import { CollectionSelect, ConfirmDialog, TagPicker } from '../../components/items/dialogs'
+import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { markItemOpened } from '../../data/activity'
 import {
   loadItem,
@@ -25,8 +31,17 @@ import {
   trashItems,
   type VaultItem,
 } from '../../data/items'
+import { NoteContentEditor } from './NoteContentEditor'
+import { NoteTagField } from './NoteTagField'
+import { toEditorHtml, toStoredContent } from './noteContent'
 
 const AUTOSAVE_DELAY = 800
+
+/** Base title size in pixels; matches the title field's `text-[2.5rem]` class. */
+const TITLE_FONT_SIZE = 40
+
+/** Size the title shrinks to before it clips instead of shrinking further. */
+const MIN_TITLE_FONT_SIZE = 16
 
 const UNTITLED = 'Untitled note'
 
@@ -58,8 +73,10 @@ export function NoteEditor() {
   const [trashOpen, setTrashOpen] = useState(false)
 
   const titleRef = useRef('')
+  const titleFieldRef = useRef<HTMLInputElement | null>(null)
   const contentRef = useRef('')
   const savedRef = useRef({ title: '', content: '' })
+  const loadedRef = useRef(false)
   const metaRef = useRef<EditorMeta>({
     description: '',
     collectionId: null,
@@ -74,7 +91,17 @@ export function NoteEditor() {
       timerRef.current = null
     }
 
-    const current = { title: titleRef.current, content: contentRef.current }
+    // Development mounts run every effect twice, so the cleanup that flushes on
+    // the way out can fire before the note has loaded. Nothing is editable until
+    // then, and saving the still-empty fields would overwrite the stored note.
+    if (!loadedRef.current) return
+
+    // The vault refuses a blank title, and autosave can fire while the field is
+    // mid-edit, so a blank title goes in under the untitled name.
+    const current = {
+      title: titleRef.current.trim() || UNTITLED,
+      content: contentRef.current,
+    }
 
     if (current.title === savedRef.current.title && current.content === savedRef.current.content) {
       return
@@ -97,6 +124,7 @@ export function NoteEditor() {
       })
       savedRef.current = current
       setSaveStatus('saved')
+      setActionError(null)
     } catch {
       setSaveStatus('idle')
       setActionError('Kivo could not save this note. Your changes are still here. Try again.')
@@ -113,6 +141,7 @@ export function NoteEditor() {
 
   useEffect(() => {
     let active = true
+    loadedRef.current = false
     setLoadState('loading')
 
     loadItem(id)
@@ -132,6 +161,7 @@ export function NoteEditor() {
           isFavorite: loaded.isFavorite,
           isPinned: loaded.isPinned,
         }
+        loadedRef.current = true
         setLoadState('ready')
         void markItemOpened(loaded.id).catch(() => undefined)
       })
@@ -155,6 +185,30 @@ export function NoteEditor() {
     }
   }, [flush])
 
+  // The title holds one line inside the note panel's column. When the text
+  // outgrows that room its size steps down instead of clipping at the edge.
+  useLayoutEffect(() => {
+    const field = titleFieldRef.current
+    if (!field) return
+
+    const fit = () => {
+      field.style.fontSize = ''
+
+      const room = field.clientWidth
+      const needed = field.scrollWidth
+
+      if (room > 0 && needed > room) {
+        const fitted = Math.max(MIN_TITLE_FONT_SIZE, (TITLE_FONT_SIZE * room) / needed)
+        field.style.fontSize = `${fitted}px`
+      }
+    }
+
+    fit()
+    window.addEventListener('resize', fit)
+
+    return () => window.removeEventListener('resize', fit)
+  }, [title, loadState])
+
   function handleTitleChange(next: string) {
     titleRef.current = next
     setTitle(next)
@@ -162,9 +216,8 @@ export function NoteEditor() {
     scheduleSave()
   }
 
-  function handleContentChange(next: string) {
-    contentRef.current = next
-    setContent(next)
+  function handleContentChange(html: string) {
+    contentRef.current = toStoredContent(html)
     setSaveStatus('idle')
     scheduleSave()
   }
@@ -215,7 +268,7 @@ export function NoteEditor() {
       const saved = await saveItem({
         id: item.id,
         kind: 'note',
-        title: titleRef.current,
+        title: titleRef.current.trim() || UNTITLED,
         content: contentRef.current,
         description: metaRef.current.description,
         collectionId: next,
@@ -285,22 +338,56 @@ export function NoteEditor() {
   }
 
   return (
-    <section aria-labelledby="note-editor-title" className="grid gap-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <PageHeader title={title.trim() || UNTITLED} titleId="note-editor-title" />
-        <div className="flex flex-wrap items-center gap-3">
-          <Typography aria-live="polite" color="muted" type="body-xs">
-            {STATUS_TEXT[saveStatus]}
-          </Typography>
-          <Button variant="danger" onPress={() => setTrashOpen(true)}>
-            Trash
-          </Button>
+    <section aria-labelledby="note-editor-title" className="grid gap-5">
+      <h1 className="sr-only" id="note-editor-title">
+        {title.trim() || UNTITLED}
+      </h1>
+
+      <Link
+        className="inline-flex w-fit items-center gap-1.5 rounded-sm text-sm text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        to="/notes"
+      >
+        <HugeiconsIcon aria-hidden="true" icon={ArrowLeft01Icon} size={18} />
+        Back
+      </Link>
+
+      <div className="grid items-center gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <input
+          aria-label="Title"
+          className="min-w-0 border-0 bg-transparent text-[2.5rem] leading-tight font-semibold tracking-tight text-foreground outline-none placeholder:text-muted"
+          placeholder={UNTITLED}
+          ref={titleFieldRef}
+          value={title}
+          onChange={(event) => handleTitleChange(event.target.value)}
+        />
+        <div className="flex justify-end">
+          <ButtonGroup aria-label="Note actions" size="lg" variant="tertiary">
+            <Button
+              variant={item.isPinned ? 'primary' : undefined}
+              onPress={() => void handlePin(!item.isPinned)}
+            >
+              <HugeiconsIcon
+                aria-hidden="true"
+                icon={item.isPinned ? PinOffIcon : PinIcon}
+                size={18}
+              />
+              {item.isPinned ? 'Unpin' : 'Pin'}
+            </Button>
+            <Button
+              variant={item.isFavorite ? 'primary' : undefined}
+              onPress={() => void handleFavorite(!item.isFavorite)}
+            >
+              <ButtonGroup.Separator />
+              <HugeiconsIcon
+                aria-hidden="true"
+                icon={item.isFavorite ? StarOffIcon : StarIcon}
+                size={18}
+              />
+              {item.isFavorite ? 'Remove from Favorite' : 'Add to Favorite'}
+            </Button>
+          </ButtonGroup>
         </div>
       </div>
-
-      <Link className={textLinkClass} to="/notes">
-        Back to Notes
-      </Link>
 
       {actionError ? (
         <Typography className="font-semibold text-danger" role="alert" type="body">
@@ -308,49 +395,36 @@ export function NoteEditor() {
         </Typography>
       ) : null}
 
-      <Card>
-        <Card.Content className="grid gap-4">
-          <TextField value={title} onChange={handleTitleChange}>
-            <Label>Title</Label>
-            <Input fullWidth variant="secondary" />
-          </TextField>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <NoteContentEditor
+          key={item.id}
+          initialHtml={toEditorHtml(content)}
+          status={STATUS_TEXT[saveStatus]}
+          onChange={handleContentChange}
+        />
 
-          <TextField value={content} onChange={handleContentChange}>
-            <Label>Content</Label>
-            <TextArea className="min-h-64 font-mono" fullWidth variant="secondary" />
-          </TextField>
-        </Card.Content>
-      </Card>
+        <div className="grid gap-4">
+          <aside
+            aria-label="Note settings"
+            className="grid gap-4 rounded-3xl border border-default bg-surface p-4"
+          >
+            <NoteTagField value={item.tags} onChange={(next) => void handleTags(next)} />
 
-      <Card>
-        <Card.Content className="grid gap-4">
-          <Switch isSelected={item.isPinned} onChange={(enabled) => void handlePin(enabled)}>
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-              Pinned
-            </Switch.Content>
-          </Switch>
+            <Separator />
 
-          <Switch isSelected={item.isFavorite} onChange={(enabled) => void handleFavorite(enabled)}>
-            <Switch.Content>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-              Favorite
-            </Switch.Content>
-          </Switch>
+            <CollectionSelect
+              label="Collection"
+              value={item.collectionId}
+              onChange={(next) => void handleCollection(next)}
+            />
+          </aside>
 
-          <TagPicker label="Tags" value={item.tags} onChange={(next) => void handleTags(next)} />
-
-          <CollectionSelect
-            label="Collection"
-            value={item.collectionId}
-            onChange={(next) => void handleCollection(next)}
-          />
-        </Card.Content>
-      </Card>
+          <Button className="w-full" size="lg" variant="danger" onPress={() => setTrashOpen(true)}>
+            <HugeiconsIcon aria-hidden="true" icon={Delete02Icon} size={18} />
+            Delete Note
+          </Button>
+        </div>
+      </div>
 
       <ConfirmDialog
         confirmLabel="Move to Trash"

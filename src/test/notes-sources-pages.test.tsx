@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import type { Mock } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -30,12 +31,20 @@ const collectionsMock = vi.hoisted(() => ({
   listCollections: vi.fn(),
 }))
 
+const settingsMock = vi.hoisted(() => ({
+  loadPreferences: vi.fn(),
+  savePreferences: vi.fn(),
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/collections', () => collectionsMock)
+vi.mock('../data/settings', () => settingsMock)
 
 import type { ItemSummary, VaultItem } from '../data/items'
+import type { Preferences } from '../data/settings'
+import { DEFAULT_PREFERENCES, PreferencesProvider } from '../app/preferences'
 import { NoteEditor } from '../features/notes/NoteEditor'
 import { NotesPage } from '../features/notes/NotesPage'
 import { SaveSourceDialog } from '../features/sources/SaveSourceDialog'
@@ -52,9 +61,13 @@ function noteSummary(overrides: Partial<ItemSummary> = {}): ItemSummary {
     fileMissing: false,
     isPinned: false,
     file: null,
+    content: null,
     ...overrides,
   }
 }
+
+const EMPTY_NOTE_MESSAGE =
+  "Your note currently doesn't have any content. Your content will be displayed here."
 
 function noteItem(overrides: Partial<VaultItem> = {}): VaultItem {
   return {
@@ -88,13 +101,15 @@ function sourceItem(overrides: Partial<VaultItem> = {}): VaultItem {
   })
 }
 
-function renderNotes() {
+function renderNotes(preferences: Partial<Preferences> = {}) {
   return render(
     <MemoryRouter initialEntries={['/notes']}>
-      <Routes>
-        <Route path="/notes" element={<NotesPage />} />
-        <Route path="/notes/:id" element={<div>Editor route</div>} />
-      </Routes>
+      <PreferencesProvider initialPreferences={{ ...DEFAULT_PREFERENCES, ...preferences }}>
+        <Routes>
+          <Route path="/notes" element={<NotesPage />} />
+          <Route path="/notes/:id" element={<div>Editor route</div>} />
+        </Routes>
+      </PreferencesProvider>
     </MemoryRouter>,
   )
 }
@@ -142,6 +157,9 @@ beforeEach(() => {
   tagsMock.listTags.mockResolvedValue([])
   collectionsMock.listCollections.mockResolvedValue([])
 
+  settingsMock.loadPreferences.mockResolvedValue(DEFAULT_PREFERENCES)
+  settingsMock.savePreferences.mockResolvedValue(undefined)
+
   Object.defineProperty(window.navigator, 'clipboard', {
     configurable: true,
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -167,8 +185,26 @@ describe('NotesPage', () => {
     renderNotes()
 
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'No notes yet.' }),
+      await screen.findByRole('heading', { level: 3, name: 'No Notes Yet' }),
     ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "You haven't created any notes yet. Get started by creating your first note.",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create Note' })).toBeInTheDocument()
+  })
+
+  it('creates a note from the empty state action', async () => {
+    itemsMock.saveItem.mockResolvedValue(noteItem({ id: 'new1', title: 'Untitled note' }))
+
+    renderNotes()
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Note' }))
+
+    await waitFor(() =>
+      expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
+    )
+    expect(await screen.findByText('Editor route')).toBeInTheDocument()
   })
 
   it('shows an error state and reloads from Try again', async () => {
@@ -187,7 +223,7 @@ describe('NotesPage', () => {
 
   it('passes the search text as a query filter', async () => {
     renderNotes()
-    await screen.findByRole('heading', { level: 2, name: 'No notes yet.' })
+    await screen.findByRole('heading', { level: 3, name: 'No Notes Yet' })
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Search notes' }), {
       target: { value: 'roadmap' },
@@ -196,6 +232,20 @@ describe('NotesPage', () => {
     await waitFor(() =>
       expect(itemsMock.listItems).toHaveBeenLastCalledWith({ kind: 'note', query: 'roadmap' }),
     )
+  })
+
+  it('shows the no-match line when a search finds nothing', async () => {
+    renderNotes()
+    await screen.findByRole('heading', { level: 3, name: 'No Notes Yet' })
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search notes' }), {
+      target: { value: 'roadmap' },
+    })
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'No notes match your search.' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('No Notes Yet')).not.toBeInTheDocument()
   })
 
   it('shows pinned notes before the rest', async () => {
@@ -234,11 +284,57 @@ describe('NotesPage', () => {
     expect(within(list).getAllByText('Favorite')).toHaveLength(2)
   })
 
+  it('shows the note preview on a grid card and opens the editor from the card', async () => {
+    itemsMock.listItems.mockResolvedValue([
+      noteSummary({ content: '<p>Hello <strong>there</strong></p>' }),
+    ])
+
+    renderNotes()
+    await screen.findByText('Alpha')
+
+    expect(screen.getByText('Hello there')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Note' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Actions for Alpha' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alpha' }))
+    expect(await screen.findByText('Editor route')).toBeInTheDocument()
+  })
+
+  it('shows the empty note message on a grid card but not on a list row', async () => {
+    itemsMock.listItems.mockResolvedValue([noteSummary({ content: null })])
+
+    const grid = renderNotes()
+    await screen.findByText('Alpha')
+    expect(screen.getByText(EMPTY_NOTE_MESSAGE)).toBeInTheDocument()
+    grid.unmount()
+
+    renderNotes({ notesView: 'list' })
+    await screen.findByText('Alpha')
+    expect(screen.queryByText(EMPTY_NOTE_MESSAGE)).not.toBeInTheDocument()
+  })
+
+  it('remembers the list layout when the view toggle changes', async () => {
+    itemsMock.listItems.mockResolvedValue([noteSummary()])
+
+    renderNotes()
+    await screen.findByText('Alpha')
+
+    expect(screen.getByRole('tab', { name: 'Grid' })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'List' }))
+
+    await waitFor(() =>
+      expect(settingsMock.savePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ notesView: 'list' }),
+      ),
+    )
+  })
+
   it('creates a new note and opens its editor', async () => {
     itemsMock.saveItem.mockResolvedValue(noteItem({ id: 'new1', title: 'Untitled note' }))
 
     renderNotes()
-    fireEvent.click(screen.getByRole('button', { name: 'New note' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New Note' }))
 
     await waitFor(() =>
       expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
@@ -249,7 +345,7 @@ describe('NotesPage', () => {
   it('pins a note from its row menu', async () => {
     itemsMock.listItems.mockResolvedValue([noteSummary({ isPinned: false })])
 
-    renderNotes()
+    renderNotes({ notesView: 'list' })
     await screen.findByText('Alpha')
     await openRowMenu('Alpha')
 
@@ -261,7 +357,7 @@ describe('NotesPage', () => {
   it('moves a note to Trash after confirmation', async () => {
     itemsMock.listItems.mockResolvedValue([noteSummary()])
 
-    renderNotes()
+    renderNotes({ notesView: 'list' })
     await screen.findByText('Alpha')
     await openRowMenu('Alpha')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
@@ -274,13 +370,73 @@ describe('NotesPage', () => {
 })
 
 describe('NoteEditor', () => {
-  it('loads the note into the title and content fields', async () => {
+  it('loads the note into the title field and the body editor', async () => {
     itemsMock.loadItem.mockResolvedValue(noteItem())
 
     renderEditor('n1')
 
     expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Alpha')
-    expect(screen.getByRole('textbox', { name: 'Content' })).toHaveValue('Body text')
+    expect(screen.getByRole('textbox', { name: 'Content' })).toHaveTextContent('Body text')
+  })
+
+  it('counts the characters in the note body', async () => {
+    itemsMock.loadItem.mockResolvedValue(noteItem())
+
+    renderEditor('n1')
+
+    expect(await screen.findByText('Characters: 9/18000')).toBeInTheDocument()
+  })
+
+  it('wires the formatting toolbar to the note body', async () => {
+    itemsMock.loadItem.mockResolvedValue(noteItem())
+
+    renderEditor('n1')
+    await screen.findByRole('textbox', { name: 'Content' })
+
+    const bold = screen.getByRole('button', { name: 'Bold' })
+
+    expect(bold).not.toHaveAttribute('data-selected', 'true')
+
+    fireEvent.click(bold)
+
+    expect(screen.getByRole('button', { name: 'Bold' })).toHaveAttribute('data-selected', 'true')
+    expect(screen.getByRole('button', { name: 'Align center' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Align right' })).toBeInTheDocument()
+  })
+
+  it('formats the note body with headings, lists, quotes, and strikethrough', async () => {
+    itemsMock.loadItem.mockResolvedValue(noteItem())
+
+    renderEditor('n1')
+    await screen.findByRole('textbox', { name: 'Content' })
+
+    for (const name of ['Heading 2', 'Bullet list', 'Numbered list', 'Quote', 'Strikethrough']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
+
+    const bullets = screen.getByRole('button', { name: 'Bullet list' })
+
+    expect(bullets).not.toHaveAttribute('data-selected', 'true')
+
+    fireEvent.click(bullets)
+
+    expect(screen.getByRole('button', { name: 'Bullet list' })).toHaveAttribute(
+      'data-selected',
+      'true',
+    )
+  })
+
+  it('pins and favorites the note from the header group', async () => {
+    itemsMock.loadItem.mockResolvedValue(noteItem())
+
+    renderEditor('n1')
+    await screen.findByRole('textbox', { name: 'Title' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin' }))
+    await waitFor(() => expect(itemsMock.setItemPinned).toHaveBeenCalledWith('n1', true))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Favorite' }))
+    await waitFor(() => expect(itemsMock.setItemsFavorite).toHaveBeenCalledWith(['n1'], true))
   })
 
   it('handles a missing note with a link back to the list', async () => {
@@ -292,19 +448,37 @@ describe('NoteEditor', () => {
     expect(screen.getByRole('link', { name: 'Return to Notes' })).toHaveAttribute('href', '/notes')
   })
 
-  it('shows edited title and content in the fields', async () => {
+  it('shows an edited title in the field', async () => {
     renderEditor('n1')
     await screen.findByRole('textbox', { name: 'Title' })
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
       target: { value: 'Renamed' },
     })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Content' }), {
-      target: { value: 'More text' },
-    })
 
     expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Renamed')
-    expect(screen.getByRole('textbox', { name: 'Content' })).toHaveValue('More text')
+    expect(screen.getByRole('link', { name: 'Back' })).toHaveAttribute('href', '/notes')
+  })
+
+  it('shrinks the title font when the text outgrows the field', async () => {
+    renderEditor('n1')
+    const field = await screen.findByRole('textbox', { name: 'Title' })
+
+    // jsdom lays nothing out, so the field is told how wide it is and how wide
+    // its text is before each change.
+    Object.defineProperty(field, 'clientWidth', { configurable: true, value: 400 })
+    Object.defineProperty(field, 'scrollWidth', { configurable: true, value: 800 })
+
+    fireEvent.change(field, { target: { value: 'A title that is too long' } })
+    expect(field).toHaveStyle({ fontSize: '20px' })
+
+    Object.defineProperty(field, 'scrollWidth', { configurable: true, value: 100000 })
+    fireEvent.change(field, { target: { value: 'x'.repeat(120) } })
+    expect(field).toHaveStyle({ fontSize: '16px' })
+
+    Object.defineProperty(field, 'scrollWidth', { configurable: true, value: 200 })
+    fireEvent.change(field, { target: { value: 'Short title' } })
+    expect(field.style.fontSize).toBe('')
   })
 
   it('autosaves once after the debounce', async () => {
@@ -332,6 +506,54 @@ describe('NoteEditor', () => {
     expect(itemsMock.saveItem).toHaveBeenCalledTimes(1)
   })
 
+  it('saves a blank title under the untitled name', async () => {
+    vi.useFakeTimers()
+    renderEditor('n1')
+    await act(async () => {})
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
+      target: { value: '   ' },
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+    })
+
+    expect(itemsMock.saveItem).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'n1', kind: 'note', title: 'Untitled note' }),
+    )
+  })
+
+  it('clears the save error once a later save succeeds', async () => {
+    vi.useFakeTimers()
+    itemsMock.saveItem.mockRejectedValueOnce(new Error('Item title is required'))
+
+    renderEditor('n1')
+    await act(async () => {})
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
+      target: { value: 'Renamed' },
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+    })
+    await act(async () => {})
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Kivo could not save this note')
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
+      target: { value: 'Renamed again' },
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+    })
+
+    expect(screen.queryByText(/Kivo could not save this note/)).not.toBeInTheDocument()
+    expect(screen.getByText('Saved')).toBeInTheDocument()
+  })
+
   it('flushes a pending save on window blur', async () => {
     renderEditor('n1')
     await screen.findByRole('textbox', { name: 'Title' })
@@ -349,6 +571,36 @@ describe('NoteEditor', () => {
     await waitFor(() => expect(itemsMock.saveItem).toHaveBeenCalledTimes(1))
   })
 
+  it('keeps the stored note when development remounts the editor', async () => {
+    // Every effect runs twice under StrictMode, so the blur cleanup flushes once
+    // while the note is still loading. That early flush holds empty fields and
+    // must not save over the stored note.
+    let resolveLoad: (item: VaultItem) => void = () => undefined
+    itemsMock.loadItem.mockImplementation(
+      () =>
+        new Promise<VaultItem>((resolve) => {
+          resolveLoad = resolve
+        }),
+    )
+
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/notes/n1']}>
+          <Routes>
+            <Route path="/notes/:id" element={<NoteEditor />} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>,
+    )
+
+    await act(async () => {
+      resolveLoad(noteItem())
+    })
+
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Alpha')
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
+  })
+
   it('saves tags and collection through their data calls', async () => {
     collectionsMock.listCollections.mockResolvedValue([
       {
@@ -364,10 +616,10 @@ describe('NoteEditor', () => {
     renderEditor('n1')
     await screen.findByRole('textbox', { name: 'Title' })
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'New tag' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Tag name' }), {
       target: { value: 'work' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Add tag' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Tag' }))
 
     await waitFor(() => expect(itemsMock.setItemTags).toHaveBeenCalledWith('n1', ['work']))
 
@@ -383,7 +635,7 @@ describe('NoteEditor', () => {
 
   it('moves the note to Trash and returns to the list', async () => {
     renderEditor('n1')
-    fireEvent.click(await screen.findByRole('button', { name: 'Trash' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Note' }))
 
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))

@@ -35,6 +35,7 @@ export type ItemSummary = Pick<
   | 'updatedAt'
   | 'fileMissing'
   | 'isPinned'
+  | 'content'
   | 'file'
 > & { deletedAt?: string | null }
 

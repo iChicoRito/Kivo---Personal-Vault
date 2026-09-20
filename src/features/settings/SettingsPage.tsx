@@ -53,6 +53,7 @@ const RESET_PREFERENCES: Preferences = {
   theme: 'dark',
   density: 'comfortable',
   startAtLogin: false,
+  notesView: 'grid',
 }
 
 const OWNER_REQUIRED_ERROR = 'Owner name is required.'

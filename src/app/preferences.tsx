@@ -33,6 +33,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'dark',
   density: 'comfortable',
   startAtLogin: false,
+  notesView: 'grid',
 }
 
 const FALLBACK_PREFERENCES: PreferencesContextValue = {
@@ -94,6 +95,7 @@ function normalizePreferences(value: Preferences | null | undefined): Preference
     theme: value?.theme ?? DEFAULT_PREFERENCES.theme,
     density: value?.density ?? DEFAULT_PREFERENCES.density,
     startAtLogin: value?.startAtLogin ?? DEFAULT_PREFERENCES.startAtLogin,
+    notesView: value?.notesView === 'list' ? 'list' : DEFAULT_PREFERENCES.notesView,
   }
 }
 

@@ -50,6 +50,8 @@ pub struct ItemSummary {
     pub deleted_at: Option<String>,
     pub file: Option<FileDetails>,
     pub file_missing: bool,
+    /// Raw note body, so list cards can show a short text preview.
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -315,7 +317,7 @@ fn read_item(
 // and file_missing answers everywhere. The column order is load-bearing.
 const ITEM_SUMMARY_COLUMNS: &str = "i.id, i.kind, i.title, i.is_favorite, i.is_pinned,
             i.collection_id, i.updated_at, i.deleted_at,
-            f.stored_name, f.original_name, f.byte_size, f.imported_at";
+            f.stored_name, f.original_name, f.byte_size, f.imported_at, i.content";
 
 fn map_summary_row(row: &rusqlite::Row<'_>, files_dir: &Path) -> rusqlite::Result<ItemSummary> {
     let kind: String = row.get(1)?;
@@ -350,6 +352,7 @@ fn map_summary_row(row: &rusqlite::Row<'_>, files_dir: &Path) -> rusqlite::Resul
         deleted_at: row.get(7)?,
         file,
         file_missing,
+        content: row.get(12)?,
     })
 }
 

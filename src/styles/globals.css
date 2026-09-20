@@ -58,7 +58,8 @@
 
   /* The page area fills the window: the navbar sticks to its top and the dock
      floats over its bottom, so content passes behind both instead of being cut
-     off above the dock. */
+     off above the dock. HeroUI's ScrollShadow owns the scrolling and fades the
+     cut edges; the shell puts this id on that element. */
   #kivo-main {
     height: 100%;
     min-height: 0;
@@ -201,16 +202,140 @@
 }
 
 /*
- * List cards. HeroUI's default surface hover mixes 8% of the foreground into
- * the card, which lands the hovered card on almost exactly the kind tile's
- * lightness, so the tile flattens out under the cursor in both themes. The
- * cards pull the mix to 10%, which keeps the tile one clear step off the
- * hovered fill in light and dark, and the card swells a little to mark which
- * row the pointer is on.
+ * Item cards. HeroUI's default surface hover mixes 8% of the foreground into
+ * the card, which lands the hovered card on the kind tile's lightness, so the
+ * tile flattens out under the cursor in both themes. The cards pull the mix
+ * down to 5%: the hovered fill stays a clear step away from the tile -- lighter
+ * in light, darker in dark -- so the tile, chip, and title keep reading while
+ * the pointer is on the card. The card also swells a little to mark which one
+ * the pointer is on.
  */
 @layer components {
   .kivo-item-card {
-    --surface-hover: color-mix(in oklab, var(--surface) 90%, var(--surface-foreground) 10%);
+    --surface-hover: color-mix(in oklab, var(--surface) 95%, var(--surface-foreground) 5%);
+  }
+}
+
+/*
+ * Note body. The text inside the note editor belongs to ProseMirror, which
+ * carries the `kivo-note-body` class on its own element, so the block spacing,
+ * list markers, and marks are declared here rather than on a HeroUI component.
+ * The default focus outline comes off: it would ring the whole text area, and
+ * the caret already marks focus the way the design does.
+ *
+ * TipTap wraps the editable element in a bare div, so that wrapper takes the
+ * field's height and the editable element grows into it. The text surface then
+ * covers the whole field, padding included, so a click anywhere inside the
+ * field lands on it and drops the caret instead of hitting the scroll box.
+ */
+@layer components {
+  .kivo-note-field > div {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+  }
+
+  .kivo-note-body {
+    flex: 1;
+    padding: 1.25rem 1.5rem 5rem;
+    outline: none;
+  }
+
+  .kivo-note-body p {
+    margin: 0 0 0.75rem;
+  }
+
+  .kivo-note-body > :last-child {
+    margin-bottom: 0;
+  }
+
+  .kivo-note-body strong {
+    font-weight: 700;
+  }
+
+  .kivo-note-body ul,
+  .kivo-note-body ol {
+    margin: 0 0 0.75rem;
+    padding-left: 1.5rem;
+  }
+
+  .kivo-note-body ul {
+    list-style: disc;
+  }
+
+  .kivo-note-body ol {
+    list-style: decimal;
+  }
+
+  .kivo-note-body li {
+    margin: 0 0 0.25rem;
+  }
+
+  .kivo-note-body h1,
+  .kivo-note-body h2,
+  .kivo-note-body h3 {
+    margin: 1.25rem 0 0.75rem;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  .kivo-note-body h1 {
+    font-size: 1.5rem;
+  }
+
+  .kivo-note-body h2 {
+    font-size: 1.25rem;
+  }
+
+  .kivo-note-body h3 {
+    font-size: 1.125rem;
+  }
+
+  .kivo-note-body blockquote {
+    margin: 0 0 0.75rem;
+    border-inline-start: 3px solid var(--border);
+    padding-inline-start: 1rem;
+    color: color-mix(in oklab, var(--foreground) 70%, transparent);
+  }
+
+  .kivo-note-body li > :last-child,
+  .kivo-note-body blockquote > :last-child {
+    margin-bottom: 0;
+  }
+
+  .kivo-note-body > :first-child {
+    margin-top: 0;
+  }
+}
+
+/*
+ * Note tags. Every chip carries its own remove control, but the design only
+ * shows it while the chip is under the pointer or holds focus. The control
+ * takes no room while it is hidden, so the chip hugs the tag name instead of
+ * carrying a fixed slot for a button nobody can see. Focusing it still brings
+ * it back into sight for the keyboard path.
+ */
+@layer components {
+  .kivo-note-tags .tag__remove-button {
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    margin-inline-start: calc(var(--spacing) * -1);
+    opacity: 0;
+    overflow: hidden;
+    transition:
+      width 150ms ease-out,
+      padding 150ms ease-out,
+      margin-inline-start 150ms ease-out,
+      opacity 150ms ease-out;
+  }
+
+  .kivo-note-tags .tag:hover .tag__remove-button,
+  .kivo-note-tags .tag:focus-within .tag__remove-button {
+    width: calc(var(--spacing) * 3);
+    padding: calc(var(--spacing) * 1);
+    margin-inline-start: 0;
+    opacity: 1;
   }
 }
 
