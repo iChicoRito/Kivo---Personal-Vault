@@ -125,12 +125,14 @@ function renderEditor(id = 'n1') {
   )
 }
 
-function renderSources() {
+function renderSources(preferences: Partial<Preferences> = {}) {
   return render(
     <MemoryRouter initialEntries={['/sources']}>
-      <Routes>
-        <Route path="/sources" element={<SourcesPage />} />
-      </Routes>
+      <PreferencesProvider initialPreferences={{ ...DEFAULT_PREFERENCES, ...preferences }}>
+        <Routes>
+          <Route path="/sources" element={<SourcesPage />} />
+        </Routes>
+      </PreferencesProvider>
     </MemoryRouter>,
   )
 }
@@ -159,11 +161,6 @@ beforeEach(() => {
 
   settingsMock.loadPreferences.mockResolvedValue(DEFAULT_PREFERENCES)
   settingsMock.savePreferences.mockResolvedValue(undefined)
-
-  Object.defineProperty(window.navigator, 'clipboard', {
-    configurable: true,
-    value: { writeText: vi.fn().mockResolvedValue(undefined) },
-  })
 })
 
 afterEach(() => {
@@ -320,6 +317,7 @@ describe('NotesPage', () => {
     await screen.findByText('Alpha')
 
     expect(screen.getByRole('tab', { name: 'Grid' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'List' }))
 
@@ -328,6 +326,7 @@ describe('NotesPage', () => {
         expect.objectContaining({ notesView: 'list' }),
       ),
     )
+    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
   })
 
   it('creates a new note and opens its editor', async () => {
@@ -653,60 +652,90 @@ describe('SourcesPage', () => {
     itemsMock.loadItem.mockResolvedValue(sourceItem())
   }
 
-  it('lists sources with title, address, and summary', async () => {
+  it('shows the title and the address on a Source card', async () => {
     setupSource()
 
-    renderSources()
+    renderSources({ sourcesView: 'list' })
 
     expect(await screen.findByText('Example')).toBeInTheDocument()
     expect(screen.getByText('https://example.com')).toBeInTheDocument()
-    expect(screen.getByText('A summary')).toBeInTheDocument()
+    expect(screen.queryByText('A summary')).not.toBeInTheDocument()
   })
 
-  it('opens a source through openSourceUrl', async () => {
+  it('opens a source from the list row body', async () => {
     setupSource()
 
-    renderSources()
-    fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
+    renderSources({ sourcesView: 'list' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Example' }))
 
     await waitFor(() => expect(filesMock.openSourceUrl).toHaveBeenCalledWith('s1'))
   })
 
-  it('copies the address and confirms it', async () => {
+  it('edits a source from the row menu', async () => {
     setupSource()
 
-    renderSources()
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy address' }))
-
-    await waitFor(() =>
-      expect(window.navigator.clipboard.writeText as Mock).toHaveBeenCalledWith(
-        'https://example.com',
-      ),
-    )
-    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
-  })
-
-  it('loads the item when editing', async () => {
-    setupSource()
-
-    renderSources()
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    renderSources({ sourcesView: 'list' })
+    await screen.findByText('Example')
+    await openRowMenu('Example')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit source' }))
 
     expect(await screen.findByRole('heading', { name: 'Edit source' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Address' })).toHaveValue('https://example.com')
     expect(itemsMock.loadItem).toHaveBeenCalledWith('s1')
   })
 
-  it('removes a source after confirmation', async () => {
+  it('moves a source to Trash from the row menu', async () => {
     setupSource()
 
-    renderSources()
-    fireEvent.click(await screen.findByRole('button', { name: 'Trash' }))
+    renderSources({ sourcesView: 'list' })
+    await screen.findByText('Example')
+    await openRowMenu('Example')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
 
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))
 
     await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['s1']))
+  })
+
+  it('opens a source from the grid card button', async () => {
+    setupSource()
+
+    renderSources()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Link' }))
+
+    await waitFor(() => expect(filesMock.openSourceUrl).toHaveBeenCalledWith('s1'))
+  })
+
+  it('remembers the list layout when the view toggle changes', async () => {
+    setupSource()
+
+    renderSources()
+    await screen.findByText('Example')
+
+    expect(screen.getByRole('tab', { name: 'Grid' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'List' }))
+
+    await waitFor(() =>
+      expect(settingsMock.savePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ sourcesView: 'list' }),
+      ),
+    )
+    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
+  })
+
+  it('shows the no-match line when a search finds nothing', async () => {
+    renderSources()
+    await screen.findByText('No sources yet.')
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search link' }), {
+      target: { value: 'roadmap' },
+    })
+
+    expect(await screen.findByText('No sources match your search.')).toBeInTheDocument()
+    expect(screen.queryByText('No sources yet.')).not.toBeInTheDocument()
   })
 })
 

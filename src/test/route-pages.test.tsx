@@ -20,6 +20,7 @@ const itemsMock = vi.hoisted(() => ({
 
 const filesMock = vi.hoisted(() => ({
   pickFile: vi.fn(),
+  pickFiles: vi.fn(),
   openItemFile: vi.fn(),
   revealItemFile: vi.fn(),
   openSourceUrl: vi.fn(),
@@ -79,7 +80,7 @@ const EMPTY_SUMMARY = {
 const REAL_DESTINATIONS: Array<{ path: string; title: string; description?: string }> = [
   { path: '/items', title: 'All Items' },
   { path: '/notes', title: 'Notes' },
-  { path: '/sources', title: 'Sources' },
+  { path: '/sources', title: 'Source' },
   { path: '/files', title: 'Files' },
   { path: '/collections', title: 'Collections' },
   { path: '/tags', title: 'Tags' },

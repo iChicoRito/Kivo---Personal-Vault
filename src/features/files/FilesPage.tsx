@@ -18,6 +18,7 @@ import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { FileTypeIcon } from '../../components/items/FileTypeIcon'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
+import { ListScrollArea } from '../../components/items/ListScrollArea'
 import {
   importFile,
   listItems,
@@ -27,13 +28,13 @@ import {
   trashItems,
   type ItemSummary,
 } from '../../data/items'
-import { openItemFile, pickFile, revealItemFile } from '../../data/files'
+import { openItemFile, pickFiles, revealItemFile } from '../../data/files'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 const stateLabelClass = 'uppercase'
 
-const IMPORT_ERROR = 'Kivo could not import that file. Try again.'
+const IMPORT_ERROR = 'Kivo could not import one or more files. Try again.'
 const OPEN_ERROR = 'Kivo could not open this file. It may be missing from this device.'
 const REVEAL_ERROR = 'Kivo could not reveal this file. It may be missing from this device.'
 const RENAME_ERROR = 'Kivo could not rename this file. Try again.'
@@ -93,24 +94,33 @@ export function FilesPage() {
   async function handleImport() {
     setActionError(null)
 
-    let path: string | null
+    let paths: string[] | null
 
     try {
-      path = await pickFile()
+      paths = await pickFiles()
     } catch {
       setActionError(IMPORT_ERROR)
       return
     }
 
-    if (!path) return
+    if (!paths || paths.length === 0) return
 
     setBusy(true)
 
     try {
-      await importFile(path)
+      let failed = 0
+
+      for (const path of paths) {
+        try {
+          await importFile(path)
+        } catch {
+          failed += 1
+        }
+      }
+
       await loadFiles()
-    } catch {
-      setActionError(IMPORT_ERROR)
+
+      if (failed > 0) setActionError(IMPORT_ERROR)
     } finally {
       setBusy(false)
     }
@@ -275,7 +285,7 @@ export function FilesPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button isDisabled={busy} onPress={() => void handleImport()}>
-          Import file
+          Import files
         </Button>
       </div>
 
@@ -293,48 +303,50 @@ export function FilesPage() {
           </Typography>
         </EmptyState>
       ) : (
-        <ul className="grid gap-2">
-          {files.map((file) => {
-            const actions: ItemCardAction[] = [
-              { id: 'open', label: 'Open', icon: EyeIcon, isDisabled: file.fileMissing },
-              { id: 'reveal', label: 'Reveal', icon: FolderOpenIcon, isDisabled: file.fileMissing },
-              { id: 'rename', label: 'Rename', icon: NoteEditIcon },
-              { id: 'move', label: 'Move to collection', icon: FolderOpenIcon },
-              { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
-            ]
+        <ListScrollArea>
+          <ul className="grid gap-2">
+            {files.map((file) => {
+              const actions: ItemCardAction[] = [
+                { id: 'open', label: 'Open', icon: EyeIcon, isDisabled: file.fileMissing },
+                { id: 'reveal', label: 'Reveal', icon: FolderOpenIcon, isDisabled: file.fileMissing },
+                { id: 'rename', label: 'Rename', icon: NoteEditIcon },
+                { id: 'move', label: 'Move to collection', icon: FolderOpenIcon },
+                { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
+              ]
 
-            return (
-              <li key={file.id} className="min-w-0">
-                <ItemCard
-                  actions={actions}
-                  chips={
-                    file.fileMissing ? (
-                      <Chip color="danger" size="sm" variant="soft">
-                        File is missing
-                      </Chip>
-                    ) : undefined
-                  }
-                  isOpenDisabled={file.fileMissing}
-                  leading={
-                    <span className="grid size-11 place-items-center rounded-xl bg-default">
-                      <FileTypeIcon name={file.file?.originalName ?? file.title} size={22} />
-                    </span>
-                  }
-                  subtitle={
-                    <Typography color="muted" type="body-xs">
-                      {formatSize(file.file?.byteSize)}
-                    </Typography>
-                  }
-                  title={file.title}
-                  onAction={(key) => handleFileAction(file, key)}
-                  onOpen={() => {
-                    void handleOpen(file.id)
-                  }}
-                />
-              </li>
-            )
-          })}
-        </ul>
+              return (
+                <li key={file.id} className="min-w-0">
+                  <ItemCard
+                    actions={actions}
+                    chips={
+                      file.fileMissing ? (
+                        <Chip color="danger" size="sm" variant="soft">
+                          File is missing
+                        </Chip>
+                      ) : undefined
+                    }
+                    isOpenDisabled={file.fileMissing}
+                    leading={
+                      <span className="grid size-11 place-items-center rounded-xl bg-default">
+                        <FileTypeIcon name={file.file?.originalName ?? file.title} size={22} />
+                      </span>
+                    }
+                    subtitle={
+                      <Typography color="muted" type="body-xs">
+                        {formatSize(file.file?.byteSize)}
+                      </Typography>
+                    }
+                    title={file.title}
+                    onAction={(key) => handleFileAction(file, key)}
+                    onOpen={() => {
+                      void handleOpen(file.id)
+                    }}
+                  />
+                </li>
+              )
+            })}
+          </ul>
+        </ListScrollArea>
       )}
 
       <Modal

@@ -4,6 +4,10 @@ export async function pickFile(): Promise<string | null> {
   return invoke<string | null>('pick_file')
 }
 
+export async function pickFiles(): Promise<string[] | null> {
+  return invoke<string[] | null>('pick_files')
+}
+
 export async function openItemFile(id: string): Promise<void> {
   return invoke<void>('open_item_file', { id })
 }

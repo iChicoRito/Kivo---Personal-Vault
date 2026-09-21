@@ -1,22 +1,38 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
   Card,
+  Chip,
   EmptyState,
   Input,
   Label,
   Spinner,
+  Tabs,
   TextField,
   Typography,
 } from '@heroui/react'
+import {
+  Delete02Icon,
+  GridViewIcon,
+  LeftToRightListBulletIcon,
+  Link02Icon,
+  NoteEditIcon,
+  PlusSignIcon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 
 import PageHeader from '../../app/PageHeader'
+import { usePreferences } from '../../app/preferences'
+import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
+import { ListScrollArea } from '../../components/items/ListScrollArea'
 import { ConfirmDialog } from '../../components/items/dialogs'
+import type { SourceView } from '../../data/settings'
 import { openSourceUrl } from '../../data/files'
 import { listItems, loadItem, trashItems, type VaultItem } from '../../data/items'
 import { moduleRoutes } from '../modules/ModulePage'
 import { SaveSourceDialog } from './SaveSourceDialog'
+import { SourceGridCard } from './SourceGridCard'
 
 const sourcesModule = moduleRoutes.find((route) => route.path === 'sources')
 
@@ -35,18 +51,7 @@ const {
 
 const panelLabelClass = 'uppercase'
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-})
-
-function formatUpdatedAt(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : dateFormatter.format(date)
-}
-
-// Item summaries stay lean, so each row reads its full record for the address and summary.
+// Item summaries stay lean, so each row reads its full record for the address.
 async function loadSources(query?: string) {
   const summaries = await listItems({ kind: 'source', query })
   return Promise.all(summaries.map((summary) => loadItem(summary.id)))
@@ -55,6 +60,9 @@ async function loadSources(query?: string) {
 type LoadState = 'loading' | 'ready' | 'error'
 
 export function SourcesPage() {
+  const { preferences, updatePreferences } = usePreferences()
+  const view = preferences.sourcesView
+
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [sources, setSources] = useState<VaultItem[]>([])
   const [search, setSearch] = useState('')
@@ -62,9 +70,7 @@ export function SourcesPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [trashTarget, setTrashTarget] = useState<VaultItem | null>(null)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let active = true
@@ -85,13 +91,6 @@ export function SourcesPage() {
     }
   }, [search, attempt])
 
-  useEffect(
-    () => () => {
-      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
-    },
-    [],
-  )
-
   function openCreate() {
     setEditingId(null)
     setDialogOpen(true)
@@ -103,26 +102,13 @@ export function SourcesPage() {
   }
 
   async function handleOpen(source: VaultItem) {
+    if (!source.url) return
     setActionError(null)
 
     try {
       await openSourceUrl(source.id)
     } catch {
       setActionError('Kivo could not open this address.')
-    }
-  }
-
-  async function handleCopy(source: VaultItem) {
-    if (!source.url) return
-    setActionError(null)
-
-    try {
-      await navigator.clipboard.writeText(source.url)
-      setCopiedId(source.id)
-      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
-      copyTimerRef.current = setTimeout(() => setCopiedId(null), 2000)
-    } catch {
-      setActionError('Kivo could not copy this address.')
     }
   }
 
@@ -140,6 +126,23 @@ export function SourcesPage() {
     }
   }
 
+  async function changeView(next: SourceView) {
+    if (next === view) return
+
+    try {
+      setActionError(null)
+      await updatePreferences({ sourcesView: next })
+    } catch {
+      setActionError('Kivo could not remember the source layout. Try again.')
+    }
+  }
+
+  function handleMenuAction(source: VaultItem, key: string) {
+    if (key === 'open') void handleOpen(source)
+    if (key === 'edit') openEdit(source.id)
+    if (key === 'trash') setTrashTarget(source)
+  }
+
   return (
     <section aria-labelledby="sources-title" className="grid gap-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -148,13 +151,45 @@ export function SourcesPage() {
           title={sourcesTitle}
           titleId="sources-title"
         />
-        <Button onPress={openCreate}>New source</Button>
+        <Button onPress={openCreate}>
+          <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+          New Source
+        </Button>
       </div>
 
-      <TextField value={search} onChange={setSearch}>
-        <Label>Search sources</Label>
-        <Input fullWidth placeholder="Search sources" variant="secondary" />
-      </TextField>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <TextField className="w-full max-w-md" value={search} onChange={setSearch}>
+          <Label>Search link</Label>
+          <Input fullWidth placeholder="I am looking for..." variant="secondary" />
+        </TextField>
+
+        <Tabs
+          className="w-fit"
+          selectedKey={view}
+          onSelectionChange={(key) => {
+            if (key === 'grid' || key === 'list') void changeView(key)
+          }}
+        >
+          <Tabs.ListContainer>
+            <Tabs.List aria-label="Source layout">
+              <Tabs.Tab id="grid">
+                <span className="flex items-center gap-2">
+                  <HugeiconsIcon aria-hidden="true" icon={GridViewIcon} size={16} />
+                  Grid
+                </span>
+                <Tabs.Indicator />
+              </Tabs.Tab>
+              <Tabs.Tab id="list">
+                <span className="flex items-center gap-2">
+                  <HugeiconsIcon aria-hidden="true" icon={LeftToRightListBulletIcon} size={16} />
+                  List
+                </span>
+                <Tabs.Indicator />
+              </Tabs.Tab>
+            </Tabs.List>
+          </Tabs.ListContainer>
+        </Tabs>
+      </div>
 
       {actionError ? (
         <Typography className="font-semibold text-danger" role="alert" type="body">
@@ -200,11 +235,8 @@ export function SourcesPage() {
         </Alert>
       ) : null}
 
-      {loadState === 'ready' && sources.length === 0 ? (
+      {loadState === 'ready' && sources.length === 0 && search.trim() === '' ? (
         <EmptyState className="grid justify-items-start gap-3">
-          <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-            EMPTY STATE
-          </Typography>
           <Typography type="h2">{sourcesEmptyTitle}</Typography>
           <Typography color="muted" type="body">
             {sourcesEmptyDescription}
@@ -212,59 +244,77 @@ export function SourcesPage() {
         </EmptyState>
       ) : null}
 
-      {loadState === 'ready' && sources.length > 0 ? (
-        <ul className="grid gap-2">
-          {sources.map((source) => (
-            <li key={source.id} className="min-w-0">
-              <div className="grid gap-3 rounded-lg border border-default p-3">
-                <div className="grid min-w-0 gap-1">
-                  <Typography className="truncate font-semibold" type="body">
-                    {source.title}
-                  </Typography>
-                  {source.url ? (
-                    <Typography className="break-all" color="muted" type="body-xs">
-                      {source.url}
-                    </Typography>
-                  ) : (
-                    <Typography color="muted" type="body-xs">
-                      No address saved.
-                    </Typography>
-                  )}
-                  {source.description ? (
-                    <Typography type="body-sm">{source.description}</Typography>
-                  ) : null}
-                  <Typography color="muted" type="body-xs">
-                    Updated{' '}
-                    <time dateTime={source.updatedAt}>{formatUpdatedAt(source.updatedAt)}</time>
-                  </Typography>
-                </div>
+      {loadState === 'ready' && sources.length === 0 && search.trim() !== '' ? (
+        <EmptyState className="grid justify-items-start gap-3">
+          <Typography type="h2">No sources match your search.</Typography>
+          <Typography color="muted" type="body">
+            Try a different word, or clear the search to see every source.
+          </Typography>
+        </EmptyState>
+      ) : null}
 
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    isDisabled={!source.url}
-                    variant="secondary"
-                    onPress={() => void handleOpen(source)}
-                  >
-                    Open
-                  </Button>
-                  <Button
-                    isDisabled={!source.url}
-                    variant="secondary"
-                    onPress={() => void handleCopy(source)}
-                  >
-                    {copiedId === source.id ? 'Copied' : 'Copy address'}
-                  </Button>
-                  <Button variant="secondary" onPress={() => openEdit(source.id)}>
-                    Edit
-                  </Button>
-                  <Button variant="danger" onPress={() => setTrashTarget(source)}>
-                    Trash
-                  </Button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+      {loadState === 'ready' && sources.length > 0 ? (
+        <ListScrollArea>
+          <ul className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-2'}>
+            {sources.map((source) => {
+              const actions: ItemCardAction[] = [
+                {
+                  id: 'open',
+                  label: 'Open link',
+                  icon: Link02Icon,
+                  isDisabled: !source.url,
+                },
+                { id: 'edit', label: 'Edit source', icon: NoteEditIcon },
+                { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
+              ]
+
+              if (view === 'grid') {
+                return (
+                  <li key={source.id} className="min-w-0">
+                    <SourceGridCard
+                      item={source}
+                      onAction={(key) => handleMenuAction(source, key)}
+                      onOpen={() => void handleOpen(source)}
+                    />
+                  </li>
+                )
+              }
+
+              return (
+                <li key={source.id} className="min-w-0">
+                  <ItemCard
+                    actions={actions}
+                    chips={
+                      <Chip color="accent" size="sm" variant="secondary">
+                        Source
+                      </Chip>
+                    }
+                    isOpenDisabled={!source.url}
+                    leading={
+                      <span className="grid size-11 place-items-center rounded-xl bg-default">
+                        <HugeiconsIcon
+                          aria-hidden="true"
+                          className="text-muted"
+                          icon={Link02Icon}
+                          size={18}
+                          strokeWidth={1.75}
+                        />
+                      </span>
+                    }
+                    subtitle={
+                      <Typography className="truncate" color="muted" type="body-sm">
+                        {source.url ?? 'No address saved.'}
+                      </Typography>
+                    }
+                    title={source.title}
+                    onAction={(key) => handleMenuAction(source, key)}
+                    onOpen={() => void handleOpen(source)}
+                  />
+                </li>
+              )
+            })}
+          </ul>
+        </ListScrollArea>
       ) : null}
 
       <SaveSourceDialog

@@ -22,6 +22,7 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 
 import type { ItemKind, ItemSummary } from '../../data/items'
+import { ListScrollArea } from './ListScrollArea'
 
 export type ItemTableProps = {
   items: ItemSummary[]
@@ -86,132 +87,134 @@ export function ItemTable({
           <span className="text-sm text-muted">{emptyMessage}</span>
         </EmptyState>
       ) : (
-        <ul aria-label="All items" className="grid gap-2">
-          {items.map((item) => (
-            <li key={item.id}>
-              {/* The row menu floats over one full-card button, so a click
-                  anywhere opens the item while the menu keeps its own layer. */}
-              <div className="kivo-item-card relative rounded-3xl border border-default bg-surface transition-[background-color,scale] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover">
-                <button
-                  aria-label={item.title}
-                  className="grid w-full grid-cols-[auto_1fr] items-center gap-3 rounded-3xl p-3 pe-14 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                  type="button"
-                  onClick={() => onOpen?.(item.id)}
-                >
-                  <span className="grid size-11 place-items-center rounded-xl bg-default">
-                    <HugeiconsIcon
-                      aria-hidden="true"
-                      className="text-muted"
-                      icon={KIND_ICONS[item.kind]}
-                      size={18}
-                      strokeWidth={1.75}
-                    />
-                  </span>
-                  <span className="grid min-w-0 gap-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <Chip color="accent" size="sm" variant="secondary">
-                        {KIND_LABELS[item.kind]}
-                      </Chip>
-                      {item.kind === 'file' && item.fileMissing ? (
-                        <Chip color="danger" size="sm" variant="soft">
-                          File is missing
-                        </Chip>
-                      ) : null}
+        <ListScrollArea>
+          <ul aria-label="All items" className="grid gap-2">
+            {items.map((item) => (
+              <li key={item.id}>
+                {/* The row menu floats over one full-card button, so a click
+                    anywhere opens the item while the menu keeps its own layer. */}
+                <div className="kivo-item-card relative rounded-3xl border border-default bg-surface transition-[background-color,scale] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover">
+                  <button
+                    aria-label={item.title}
+                    className="grid w-full grid-cols-[auto_1fr] items-center gap-3 rounded-3xl p-3 pe-14 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    type="button"
+                    onClick={() => onOpen?.(item.id)}
+                  >
+                    <span className="grid size-11 place-items-center rounded-xl bg-default">
+                      <HugeiconsIcon
+                        aria-hidden="true"
+                        className="text-muted"
+                        icon={KIND_ICONS[item.kind]}
+                        size={18}
+                        strokeWidth={1.75}
+                      />
                     </span>
-                    <Typography className="truncate font-semibold" type="body">
-                      {item.title}
-                    </Typography>
-                  </span>
-                </button>
+                    <span className="grid min-w-0 gap-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <Chip color="accent" size="sm" variant="secondary">
+                          {KIND_LABELS[item.kind]}
+                        </Chip>
+                        {item.kind === 'file' && item.fileMissing ? (
+                          <Chip color="danger" size="sm" variant="soft">
+                            File is missing
+                          </Chip>
+                        ) : null}
+                      </span>
+                      <Typography className="truncate font-semibold" type="body">
+                        {item.title}
+                      </Typography>
+                    </span>
+                  </button>
 
-                <div className="absolute inset-y-0 right-2 flex items-center">
-                  <Dropdown>
-                    <Button
-                      aria-label={`Actions for ${item.title}`}
-                      className="kivo-row-actions-trigger"
-                      isIconOnly
-                      size="sm"
-                      variant="ghost"
-                    >
-                      <HugeiconsIcon aria-hidden="true" icon={MoreVerticalIcon} size={18} />
-                    </Button>
-                    <Dropdown.Popover>
-                      <Dropdown.Menu
-                        className="kivo-row-actions-menu"
-                        onAction={(key) => handleRowAction(item, String(key))}
+                  <div className="absolute inset-y-0 right-2 flex items-center">
+                    <Dropdown>
+                      <Button
+                        aria-label={`Actions for ${item.title}`}
+                        className="kivo-row-actions-trigger"
+                        isIconOnly
+                        size="sm"
+                        variant="ghost"
                       >
-                        {onOpen ? (
-                          <Dropdown.Item id="open" textValue="Open details">
-                            <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
-                            <Label>Open details</Label>
-                          </Dropdown.Item>
-                        ) : null}
-                        {onToggleFavorite ? (
-                          <Dropdown.Item
-                            id="favorite"
-                            textValue={item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
-                          >
-                            <HugeiconsIcon
-                              aria-hidden="true"
-                              icon={item.isFavorite ? StarOffIcon : StarIcon}
-                              size={16}
-                            />
-                            <Label>
-                              {item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
-                            </Label>
-                          </Dropdown.Item>
-                        ) : null}
-                        {onMove ? (
-                          <Dropdown.Item id="move" textValue="Move to collection">
-                            <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
-                            <Label>Move to collection</Label>
-                          </Dropdown.Item>
-                        ) : null}
-                        {onRestore ? (
-                          <Dropdown.Item id="restore" textValue="Restore">
-                            <HugeiconsIcon aria-hidden="true" icon={DeletePutBackIcon} size={16} />
-                            <Label>Restore</Label>
-                          </Dropdown.Item>
-                        ) : null}
-                        <Dropdown.Section
-                          aria-label="Danger zone"
-                          className="mt-1 border-t border-separator pt-1"
+                        <HugeiconsIcon aria-hidden="true" icon={MoreVerticalIcon} size={18} />
+                      </Button>
+                      <Dropdown.Popover>
+                        <Dropdown.Menu
+                          className="kivo-row-actions-menu"
+                          onAction={(key) => handleRowAction(item, String(key))}
                         >
-                          {onTrash ? (
-                            <Dropdown.Item id="trash" textValue="Move to trash" variant="danger">
-                              <HugeiconsIcon
-                                aria-hidden="true"
-                                className="text-danger"
-                                icon={Delete02Icon}
-                                size={16}
-                              />
-                              <Label>Move to trash</Label>
+                          {onOpen ? (
+                            <Dropdown.Item id="open" textValue="Open details">
+                              <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
+                              <Label>Open details</Label>
                             </Dropdown.Item>
                           ) : null}
-                          {onDeletePermanently ? (
+                          {onToggleFavorite ? (
                             <Dropdown.Item
-                              id="delete-permanently"
-                              textValue="Delete permanently"
-                              variant="danger"
+                              id="favorite"
+                              textValue={item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
                             >
                               <HugeiconsIcon
                                 aria-hidden="true"
-                                className="text-danger"
-                                icon={Delete02Icon}
+                                icon={item.isFavorite ? StarOffIcon : StarIcon}
                                 size={16}
                               />
-                              <Label>Delete permanently</Label>
+                              <Label>
+                                {item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
+                              </Label>
                             </Dropdown.Item>
                           ) : null}
-                        </Dropdown.Section>
-                      </Dropdown.Menu>
-                    </Dropdown.Popover>
-                  </Dropdown>
+                          {onMove ? (
+                            <Dropdown.Item id="move" textValue="Move to collection">
+                              <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
+                              <Label>Move to collection</Label>
+                            </Dropdown.Item>
+                          ) : null}
+                          {onRestore ? (
+                            <Dropdown.Item id="restore" textValue="Restore">
+                              <HugeiconsIcon aria-hidden="true" icon={DeletePutBackIcon} size={16} />
+                              <Label>Restore</Label>
+                            </Dropdown.Item>
+                          ) : null}
+                          <Dropdown.Section
+                            aria-label="Danger zone"
+                            className="mt-1 border-t border-separator pt-1"
+                          >
+                            {onTrash ? (
+                              <Dropdown.Item id="trash" textValue="Move to trash" variant="danger">
+                                <HugeiconsIcon
+                                  aria-hidden="true"
+                                  className="text-danger"
+                                  icon={Delete02Icon}
+                                  size={16}
+                                />
+                                <Label>Move to trash</Label>
+                              </Dropdown.Item>
+                            ) : null}
+                            {onDeletePermanently ? (
+                              <Dropdown.Item
+                                id="delete-permanently"
+                                textValue="Delete permanently"
+                                variant="danger"
+                              >
+                                <HugeiconsIcon
+                                  aria-hidden="true"
+                                  className="text-danger"
+                                  icon={Delete02Icon}
+                                  size={16}
+                                />
+                                <Label>Delete permanently</Label>
+                              </Dropdown.Item>
+                            ) : null}
+                          </Dropdown.Section>
+                        </Dropdown.Menu>
+                      </Dropdown.Popover>
+                    </Dropdown>
+                  </div>
                 </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        </ListScrollArea>
       )}
 
       {totalItems > 0 ? (

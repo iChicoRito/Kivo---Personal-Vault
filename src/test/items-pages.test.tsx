@@ -30,6 +30,7 @@ const tagsMock = vi.hoisted(() => ({
 
 const filesMock = vi.hoisted(() => ({
   pickFile: vi.fn(),
+  pickFiles: vi.fn(),
   openItemFile: vi.fn(),
   revealItemFile: vi.fn(),
   openSourceUrl: vi.fn(),
@@ -258,6 +259,7 @@ describe('ItemsPage', () => {
 
     const list = screen.getByRole('list', { name: 'All items' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(list.closest('[data-slot="scroll-shadow"]')).not.toBeNull()
     expect(within(list).getByText('Alpha note')).toBeInTheDocument()
     expect(within(list).getByText('Note')).toBeInTheDocument()
     expect(within(list).getByText('Source')).toBeInTheDocument()

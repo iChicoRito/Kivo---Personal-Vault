@@ -48,7 +48,7 @@ export const moduleRoutes: ModuleRoute[] = [
   },
   {
     path: 'sources',
-    title: 'Sources',
+    title: 'Source',
     description: 'Keep links and source material together.',
     emptyTitle: 'No sources yet.',
     emptyDescription: 'Saved links and source material will appear here.',

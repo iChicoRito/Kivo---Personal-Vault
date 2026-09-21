@@ -1937,6 +1937,15 @@ pub fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+pub fn pick_files(app: AppHandle) -> Result<Option<Vec<String>>, String> {
+    Ok(app
+        .dialog()
+        .file()
+        .blocking_pick_files()
+        .map(|paths| paths.into_iter().map(|path| path.to_string()).collect()))
+}
+
+#[tauri::command]
 pub fn open_item_file(
     id: String,
     app: AppHandle,

@@ -34,6 +34,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   density: 'comfortable',
   startAtLogin: false,
   notesView: 'grid',
+  sourcesView: 'grid',
 }
 
 const FALLBACK_PREFERENCES: PreferencesContextValue = {
@@ -96,6 +97,7 @@ function normalizePreferences(value: Preferences | null | undefined): Preference
     density: value?.density ?? DEFAULT_PREFERENCES.density,
     startAtLogin: value?.startAtLogin ?? DEFAULT_PREFERENCES.startAtLogin,
     notesView: value?.notesView === 'list' ? 'list' : DEFAULT_PREFERENCES.notesView,
+    sourcesView: value?.sourcesView === 'list' ? 'list' : 'grid',
   }
 }
 

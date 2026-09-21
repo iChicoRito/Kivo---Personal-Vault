@@ -16,6 +16,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   density: 'comfortable',
   startAtLogin: false,
   notesView: 'grid',
+  sourcesView: 'grid',
 }
 
 function createDefaultState(): BrowserPreviewState {

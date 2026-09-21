@@ -22,6 +22,7 @@ const PREFERENCES = {
   density: 'compact',
   startAtLogin: false,
   notesView: 'grid',
+  sourcesView: 'grid',
 } as const
 
 beforeEach(() => {

@@ -51,6 +51,7 @@ const PREFERENCES: Preferences = {
   density: 'comfortable',
   startAtLogin: false,
   notesView: 'grid',
+  sourcesView: 'grid',
 }
 
 const RESET_PREFERENCES: Preferences = {
@@ -58,6 +59,7 @@ const RESET_PREFERENCES: Preferences = {
   density: 'comfortable',
   startAtLogin: false,
   notesView: 'grid',
+  sourcesView: 'grid',
 }
 
 const NATIVE_SAVE_ERROR = 'Kivo could not change the start at login setting on this device.'

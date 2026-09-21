@@ -60,6 +60,7 @@ pub fn run() {
             vault::save_tag,
             vault::delete_tag,
             vault::pick_file,
+            vault::pick_files,
             vault::open_item_file,
             vault::reveal_item_file,
             vault::open_source_url,

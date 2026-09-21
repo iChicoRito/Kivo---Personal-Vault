@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { openItemFile, openSourceUrl, pickFile, revealItemFile } from '../data/files'
+import { openItemFile, openSourceUrl, pickFile, pickFiles, revealItemFile } from '../data/files'
 import { getTauriInvoke } from './setup'
 
 const ITEM_ID = '9e8d7c6b5a49382716f5e4d3c2b1a090'
@@ -24,6 +24,20 @@ describe('files data contract', () => {
 
     await expect(pickFile()).resolves.toBeNull()
     expect(getTauriInvoke()).toHaveBeenCalledWith('pick_file')
+  })
+
+  it('picks several files with pick_files and no arguments', async () => {
+    getTauriInvoke().mockResolvedValue(['C:\\Docs\\Report.pdf', 'C:\\Docs\\Notes.txt'])
+
+    await expect(pickFiles()).resolves.toEqual(['C:\\Docs\\Report.pdf', 'C:\\Docs\\Notes.txt'])
+    expect(getTauriInvoke()).toHaveBeenCalledWith('pick_files')
+  })
+
+  it('returns null when the multi-file picker is cancelled', async () => {
+    getTauriInvoke().mockResolvedValue(null)
+
+    await expect(pickFiles()).resolves.toBeNull()
+    expect(getTauriInvoke()).toHaveBeenCalledWith('pick_files')
   })
 
   it('opens a managed file with open_item_file and { id }', async () => {

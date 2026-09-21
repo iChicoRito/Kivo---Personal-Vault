@@ -23,6 +23,7 @@ const itemsMock = vi.hoisted(() => ({
 
 const filesMock = vi.hoisted(() => ({
   pickFile: vi.fn(),
+  pickFiles: vi.fn(),
   openItemFile: vi.fn(),
   revealItemFile: vi.fn(),
   openSourceUrl: vi.fn(),
@@ -169,6 +170,7 @@ beforeEach(() => {
   itemsMock.trashItems.mockResolvedValue(undefined)
   itemsMock.importFile.mockResolvedValue({ ...LOADED_FILE })
   filesMock.pickFile.mockResolvedValue(null)
+  filesMock.pickFiles.mockResolvedValue(null)
   filesMock.openItemFile.mockResolvedValue(undefined)
   filesMock.revealItemFile.mockResolvedValue(undefined)
   collectionsMock.listCollections.mockResolvedValue([])
@@ -194,33 +196,50 @@ beforeEach(() => {
 })
 
 describe('FilesPage', () => {
-  it('imports a picked file and reloads the list', async () => {
+  it('imports every picked file and reloads the list once', async () => {
     itemsMock.listItems.mockResolvedValue([FILE])
-    filesMock.pickFile.mockResolvedValue('C:\\Docs\\Report.pdf')
+    filesMock.pickFiles.mockResolvedValue(['C:\\Docs\\Report.pdf', 'C:\\Docs\\Notes.txt'])
 
     renderInRouter(<FilesPage />)
     await screen.findByRole('heading', { level: 1, name: 'Files', exact: true })
     await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Import file' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Import files' }))
 
     await waitFor(() =>
-      expect(itemsMock.importFile).toHaveBeenCalledWith('C:\\Docs\\Report.pdf'),
+      expect(itemsMock.importFile).toHaveBeenCalledWith('C:\\Docs\\Notes.txt'),
     )
+    expect(itemsMock.importFile).toHaveBeenCalledWith('C:\\Docs\\Report.pdf')
     await waitFor(() => expect(itemsMock.listItems).toHaveBeenCalledTimes(2))
     expect(itemsMock.listItems).toHaveBeenCalledWith({ kind: 'file' })
   })
 
   it('does nothing when the picker is cancelled', async () => {
-    filesMock.pickFile.mockResolvedValue(null)
+    filesMock.pickFiles.mockResolvedValue(null)
 
     renderInRouter(<FilesPage />)
     await screen.findByRole('heading', { level: 1, name: 'Files', exact: true })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Import file' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Import files' }))
 
-    await waitFor(() => expect(filesMock.pickFile).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(filesMock.pickFiles).toHaveBeenCalledTimes(1))
     expect(itemsMock.importFile).not.toHaveBeenCalled()
+  })
+
+  it('keeps importing the rest when one file fails', async () => {
+    filesMock.pickFiles.mockResolvedValue(['C:\\Docs\\Broken.pdf', 'C:\\Docs\\Report.pdf'])
+    itemsMock.importFile.mockRejectedValueOnce(new Error('missing'))
+
+    renderInRouter(<FilesPage />)
+    await screen.findByRole('heading', { level: 1, name: 'Files', exact: true })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import files' }))
+
+    await waitFor(() =>
+      expect(itemsMock.importFile).toHaveBeenCalledWith('C:\\Docs\\Report.pdf'),
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not import')
+    await waitFor(() => expect(itemsMock.listItems).toHaveBeenCalledTimes(2))
   })
 
   it('opens and reveals a file through the row menu', async () => {
@@ -314,6 +333,7 @@ describe('FilesPage', () => {
     const view = renderInRouter(<FilesPage />)
     await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
+    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
     expect(view.container.querySelector('[data-file-icon="pdf"]')).not.toBeNull()
   })
 })

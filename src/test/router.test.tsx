@@ -31,6 +31,7 @@ const dashboardMock = vi.hoisted(() => ({
 
 const filesMock = vi.hoisted(() => ({
   pickFile: vi.fn(),
+  pickFiles: vi.fn(),
   openItemFile: vi.fn(),
   revealItemFile: vi.fn(),
   openSourceUrl: vi.fn(),
@@ -74,7 +75,7 @@ const destinations: Array<[path: string, heading: string]> = [
   ['/dashboard', 'Dashboard'],
   ['/items', 'All Items'],
   ['/notes', 'Notes'],
-  ['/sources', 'Sources'],
+  ['/sources', 'Source'],
   ['/files', 'Files'],
   ['/collections', 'Collections'],
   ['/tags', 'Tags'],
