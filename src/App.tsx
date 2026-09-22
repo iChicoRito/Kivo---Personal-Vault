@@ -63,11 +63,9 @@ function BootRoute({ route, onEnterApp }: { route: BootState; onEnterApp: () => 
     return (
       <main
         aria-label="Kivo application"
-        className="min-h-screen bg-background text-foreground"
+        className="h-screen overflow-hidden bg-background text-foreground"
       >
-        <div id="kivo-content">
-          <OnboardingPage onCompleted={onEnterApp} />
-        </div>
+        <OnboardingPage onCompleted={onEnterApp} />
       </main>
     )
   }

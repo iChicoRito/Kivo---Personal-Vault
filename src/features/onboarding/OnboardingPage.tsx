@@ -165,7 +165,7 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
     <section
       aria-labelledby="onboarding-heading"
       aria-busy={saving}
-      className="flex min-h-[calc(100dvh_-_2_*_clamp(2rem,6vw,5rem))] w-full flex-col items-center justify-center"
+      className="flex h-full w-full flex-col items-center justify-center px-6 py-8 sm:px-10"
     >
       <div className="grid w-full max-w-2xl gap-10">
         <header className={isCenteredStep ? 'grid justify-items-center gap-3 text-center' : 'grid gap-3'}>
