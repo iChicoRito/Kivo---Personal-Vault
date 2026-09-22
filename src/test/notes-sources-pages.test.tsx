@@ -42,9 +42,15 @@ vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/settings', () => settingsMock)
 
+import type { Collection } from '../data/collections'
 import type { ItemSummary, VaultItem } from '../data/items'
 import type { Preferences } from '../data/settings'
 import { DEFAULT_PREFERENCES, PreferencesProvider } from '../app/preferences'
+import {
+  ITEM_DRAG_GHOST_CLASS,
+  ITEM_DRAG_GHOST_OVER_CLASS,
+  ITEM_DRAG_SOURCE_CLASS,
+} from '../features/collections/itemDrag'
 import { NoteEditor } from '../features/notes/NoteEditor'
 import { NotesPage } from '../features/notes/NotesPage'
 import { SaveSourceDialog } from '../features/sources/SaveSourceDialog'
@@ -141,6 +147,36 @@ async function openRowMenu(title: string) {
   const trigger = screen.getByRole('button', { name: `Actions for ${title}` })
   fireEvent.click(trigger)
   return trigger
+}
+
+function findCardRow(title: string) {
+  const row = screen.getByText(title).closest('li')
+
+  if (!row) throw new Error('The item row is missing.')
+
+  return row
+}
+
+function collectionSummary(overrides: Partial<Collection> = {}): Collection {
+  return {
+    id: 'col-1',
+    name: 'Work',
+    icon: null,
+    sortOrder: 0,
+    createdAt: '2026-09-10T11:20:00.000Z',
+    itemCount: 1,
+    ...overrides,
+  }
+}
+
+function findCollectionRow(panel: HTMLElement, name: string) {
+  const row = within(panel)
+    .getByRole('button', { name: `Open collection ${name}` })
+    .closest('li')
+
+  if (!row) throw new Error('The collection row is missing.')
+
+  return row
 }
 
 beforeEach(() => {
@@ -365,6 +401,39 @@ describe('NotesPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))
 
     await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['n1']))
+  })
+
+  it('floats a note card toward a collection and drops it there', async () => {
+    itemsMock.listItems.mockResolvedValue([noteSummary()])
+    collectionsMock.listCollections.mockResolvedValue([collectionSummary()])
+
+    renderNotes()
+    await screen.findByText('Alpha')
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+    const row = findCardRow('Alpha')
+
+    fireEvent.pointerDown(row, { button: 0, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(row, { clientX: 40, clientY: 40 })
+
+    const ghost = document.querySelector(`.${ITEM_DRAG_GHOST_CLASS}`)
+
+    expect(ghost).not.toBeNull()
+    expect(row).toHaveClass(ITEM_DRAG_SOURCE_CLASS)
+
+    const target = findCollectionRow(panel, 'Work')
+
+    fireEvent.pointerMove(target, { clientX: 40, clientY: 40 })
+    expect(target).toHaveClass('outline-focus')
+    expect(ghost).toHaveClass(ITEM_DRAG_GHOST_OVER_CLASS)
+
+    fireEvent.pointerUp(target, { clientX: 40, clientY: 40 })
+
+    await waitFor(() =>
+      expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['n1'], 'col-1'),
+    )
+    expect(row).not.toHaveClass(ITEM_DRAG_SOURCE_CLASS)
+    await waitFor(() => expect(document.querySelector(`.${ITEM_DRAG_GHOST_CLASS}`)).toBeNull())
   })
 })
 
@@ -736,6 +805,39 @@ describe('SourcesPage', () => {
 
     expect(await screen.findByText('No sources match your search.')).toBeInTheDocument()
     expect(screen.queryByText('No sources yet.')).not.toBeInTheDocument()
+  })
+
+  it('floats a source card toward a collection and drops it there', async () => {
+    setupSource()
+    collectionsMock.listCollections.mockResolvedValue([collectionSummary()])
+
+    renderSources()
+    await screen.findByText('Example')
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+    const row = findCardRow('Example')
+
+    fireEvent.pointerDown(row, { button: 0, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(row, { clientX: 40, clientY: 40 })
+
+    const ghost = document.querySelector(`.${ITEM_DRAG_GHOST_CLASS}`)
+
+    expect(ghost).not.toBeNull()
+    expect(row).toHaveClass(ITEM_DRAG_SOURCE_CLASS)
+
+    const target = findCollectionRow(panel, 'Work')
+
+    fireEvent.pointerMove(target, { clientX: 40, clientY: 40 })
+    expect(target).toHaveClass('outline-focus')
+    expect(ghost).toHaveClass(ITEM_DRAG_GHOST_OVER_CLASS)
+
+    fireEvent.pointerUp(target, { clientX: 40, clientY: 40 })
+
+    await waitFor(() =>
+      expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['s1'], 'col-1'),
+    )
+    expect(row).not.toHaveClass(ITEM_DRAG_SOURCE_CLASS)
+    await waitFor(() => expect(document.querySelector(`.${ITEM_DRAG_GHOST_CLASS}`)).toBeNull())
   })
 })
 

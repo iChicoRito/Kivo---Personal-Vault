@@ -29,6 +29,7 @@ import {
   type ItemSummary,
 } from '../../data/items'
 import { openItemFile, pickFiles, revealItemFile } from '../../data/files'
+import { CollectionFolderPanel } from '../collections/CollectionFolderPanel'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
@@ -303,7 +304,10 @@ export function FilesPage() {
           </Typography>
         </EmptyState>
       ) : (
-        <ListScrollArea>
+        <div className="flex gap-4">
+          <CollectionFolderPanel />
+          <div className="min-w-0 flex-1">
+            <ListScrollArea>
           <ul className="grid gap-2">
             {files.map((file) => {
               const actions: ItemCardAction[] = [
@@ -346,7 +350,9 @@ export function FilesPage() {
               )
             })}
           </ul>
-        </ListScrollArea>
+            </ListScrollArea>
+          </div>
+        </div>
       )}
 
       <Modal

@@ -31,6 +31,8 @@ import type { SourceView } from '../../data/settings'
 import { openSourceUrl } from '../../data/files'
 import { listItems, loadItem, trashItems, type VaultItem } from '../../data/items'
 import { moduleRoutes } from '../modules/ModulePage'
+import { CollectionFolderPanel } from '../collections/CollectionFolderPanel'
+import { startItemDrag } from '../collections/itemDrag'
 import { SaveSourceDialog } from './SaveSourceDialog'
 import { SourceGridCard } from './SourceGridCard'
 
@@ -254,7 +256,10 @@ export function SourcesPage() {
       ) : null}
 
       {loadState === 'ready' && sources.length > 0 ? (
-        <ListScrollArea>
+        <div className="flex gap-4">
+          <CollectionFolderPanel />
+          <div className="min-w-0 flex-1">
+            <ListScrollArea>
           <ul className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-2'}>
             {sources.map((source) => {
               const actions: ItemCardAction[] = [
@@ -270,7 +275,11 @@ export function SourcesPage() {
 
               if (view === 'grid') {
                 return (
-                  <li key={source.id} className="min-w-0">
+                  <li
+                    key={source.id}
+                    className="min-w-0 select-none"
+                    onPointerDown={(event) => startItemDrag(event, source.id)}
+                  >
                     <SourceGridCard
                       item={source}
                       onAction={(key) => handleMenuAction(source, key)}
@@ -281,7 +290,11 @@ export function SourcesPage() {
               }
 
               return (
-                <li key={source.id} className="min-w-0">
+                <li
+                  key={source.id}
+                  className="min-w-0 select-none"
+                  onPointerDown={(event) => startItemDrag(event, source.id)}
+                >
                   <ItemCard
                     actions={actions}
                     chips={
@@ -314,7 +327,9 @@ export function SourcesPage() {
               )
             })}
           </ul>
-        </ListScrollArea>
+            </ListScrollArea>
+          </div>
+        </div>
       ) : null}
 
       <SaveSourceDialog

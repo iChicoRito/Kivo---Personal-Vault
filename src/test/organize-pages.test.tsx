@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 
@@ -406,6 +406,24 @@ describe('CollectionsPage', () => {
     await screen.findByRole('button', { name: 'View items in Work' })
 
     fireEvent.click(screen.getByRole('button', { name: 'View items in Work' }))
+
+    await waitFor(() =>
+      expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: COLLECTION.id }),
+    )
+    expect(await screen.findByText('Meeting notes')).toBeInTheDocument()
+  })
+
+  it('opens the collection named in the query parameter', async () => {
+    collectionsMock.listCollections.mockResolvedValue([{ ...COLLECTION }])
+    itemsMock.listItems.mockResolvedValue([NOTE])
+
+    render(
+      <MemoryRouter initialEntries={[`/collections?collection=${COLLECTION.id}`]}>
+        <Routes>
+          <Route path="/collections" element={<CollectionsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
 
     await waitFor(() =>
       expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: COLLECTION.id }),

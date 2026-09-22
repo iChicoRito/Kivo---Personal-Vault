@@ -217,6 +217,63 @@
 }
 
 /*
+ * Drag to a collection. The card under the pointer is copied into a fixed layer
+ * that follows it at full strength, lifted off the page with a drop shadow,
+ * while the card left in the list dims until the drop lands. Over a collection
+ * the copy narrows to that row's width and settles a touch smaller -- a real
+ * width change, so the card reads as being filed down to the folder instead of
+ * being scaled like a picture, plus a slight scale so it also feels taken in
+ * hand. The copy is two layers: the outer one follows the pointer and eases only
+ * its width, the inner one carries the lift and the scale, so neither animation
+ * drags the follow behind the pointer.
+ */
+@layer components {
+  .kivo-drag-ghost {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 60;
+    pointer-events: none;
+    list-style: none;
+    width: var(--kivo-drag-width, auto);
+    transform: translate3d(var(--kivo-drag-x, 0), var(--kivo-drag-y, 0), 0);
+    transition: width 220ms var(--ease-smooth, ease-out);
+    will-change: transform;
+  }
+
+  .kivo-drag-ghost-scale {
+    transform-origin: var(--kivo-drag-origin, top left);
+    transform: scale(1.02);
+    transition: transform 220ms var(--ease-smooth, ease-out);
+    filter: drop-shadow(0 20px 32px rgb(0 0 0 / 0.35));
+  }
+
+  .kivo-drag-ghost-over {
+    width: var(--kivo-drag-over-width, auto);
+  }
+
+  .kivo-drag-ghost-over .kivo-drag-ghost-scale {
+    transform: scale(0.96);
+  }
+
+  .kivo-drag-ghost-leaving {
+    opacity: 0;
+    transition: opacity 160ms var(--ease-smooth, ease-out);
+  }
+
+  .kivo-drag-source {
+    opacity: 0.35;
+    transition: opacity 200ms ease-out;
+  }
+
+  /* A card in flight means the pointer is holding it, wherever it travels. */
+  body.kivo-dragging,
+  body.kivo-dragging * {
+    cursor: grabbing !important;
+  }
+}
+
+/*
  * Note body. The text inside the note editor belongs to ProseMirror, which
  * carries the `kivo-note-body` class on its own element, so the block spacing,
  * list markers, and marks are declared here rather than on a HeroUI component.

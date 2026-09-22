@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -17,6 +17,7 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import { FolderOpenIcon, Layers01Icon, StarIcon, Tag01Icon } from '@hugeicons/core-free-icons'
 import type { IconSvgElement } from '@hugeicons/react'
+import { useSearchParams } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
 import { ConfirmDialog } from '../../components/items/dialogs'
@@ -70,6 +71,9 @@ export function CollectionsPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Collection | null>(null)
 
+  const [searchParams] = useSearchParams()
+  const openedFromUrl = useRef(false)
+
   const loadCollections = useCallback(async () => {
     setLoadState('loading')
 
@@ -110,6 +114,18 @@ export function CollectionsPage() {
       active = false
     }
   }, [selectedId])
+
+  // Opens a collection linked from the URL once, without re-opening after the user goes back.
+  useEffect(() => {
+    if (openedFromUrl.current || selectedId || loadState !== 'ready') return
+
+    const requestedId = searchParams.get('collection')
+    if (!requestedId) return
+    if (!collections.some((collection) => collection.id === requestedId)) return
+
+    openedFromUrl.current = true
+    setSelectedId(requestedId)
+  }, [collections, loadState, searchParams, selectedId])
 
   function openCreate() {
     setEditError(null)

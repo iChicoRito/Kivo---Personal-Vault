@@ -48,6 +48,8 @@ import {
   noteStatus,
 } from './noteStatus'
 import { moduleRoutes } from '../modules/ModulePage'
+import { CollectionFolderPanel } from '../collections/CollectionFolderPanel'
+import { startItemDrag } from '../collections/itemDrag'
 
 const notesModule = moduleRoutes.find((route) => route.path === 'notes')
 
@@ -302,7 +304,10 @@ export function NotesPage() {
       ) : null}
 
       {loadState === 'ready' && items.length > 0 ? (
-        <ListScrollArea>
+        <div className="flex gap-4">
+          <CollectionFolderPanel />
+          <div className="min-w-0 flex-1">
+            <ListScrollArea>
           <ul
             className={
               view === 'grid' ? 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' : 'grid gap-2'
@@ -327,14 +332,22 @@ export function NotesPage() {
 
               if (view === 'grid') {
                 return (
-                  <li key={item.id} className="min-w-0">
+                  <li
+                    key={item.id}
+                    className="min-w-0 select-none"
+                    onPointerDown={(event) => startItemDrag(event, item.id)}
+                  >
                     <NoteGridCard item={item} onOpen={() => navigate(`/notes/${item.id}`)} />
                   </li>
                 )
               }
 
               return (
-                <li key={item.id} className="min-w-0">
+                <li
+                  key={item.id}
+                  className="min-w-0 select-none"
+                  onPointerDown={(event) => startItemDrag(event, item.id)}
+                >
                   <ItemCard
                     actions={actions}
                     chips={
@@ -379,7 +392,9 @@ export function NotesPage() {
               )
             })}
           </ul>
-        </ListScrollArea>
+            </ListScrollArea>
+          </div>
+        </div>
       ) : null}
 
       <ConfirmDialog
