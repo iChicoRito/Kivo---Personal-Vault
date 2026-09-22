@@ -56,6 +56,7 @@ pub fn run() {
             vault::load_vault_summary,
             vault::save_collection,
             vault::delete_collection,
+            vault::verify_collection_secret,
             vault::list_tags,
             vault::save_tag,
             vault::delete_tag,

@@ -157,8 +157,8 @@ const MISSING_FILE_ITEM: VaultItem = {
 }
 
 const COLLECTIONS: Collection[] = [
-  { id: 'collection-1', name: 'Collection One', icon: null, sortOrder: 1, createdAt: '', itemCount: 0 },
-  { id: 'collection-2', name: 'Collection Two', icon: null, sortOrder: 2, createdAt: '', itemCount: 0 },
+  { id: 'collection-1', name: 'Collection One', icon: null, protection: 'none', sortOrder: 1, createdAt: '', itemCount: 0 },
+  { id: 'collection-2', name: 'Collection Two', icon: null, protection: 'none', sortOrder: 2, createdAt: '', itemCount: 0 },
 ]
 
 const TAGS: Tag[] = [{ id: 'tag-1', name: 'alpha', count: 1 }]

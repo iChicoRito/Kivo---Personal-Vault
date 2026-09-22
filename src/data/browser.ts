@@ -17,6 +17,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   startAtLogin: false,
   notesView: 'grid',
   sourcesView: 'grid',
+  collectionsView: 'grid',
 }
 
 function createDefaultState(): BrowserPreviewState {

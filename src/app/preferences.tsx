@@ -35,6 +35,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   startAtLogin: false,
   notesView: 'grid',
   sourcesView: 'grid',
+  collectionsView: 'grid',
 }
 
 const FALLBACK_PREFERENCES: PreferencesContextValue = {
@@ -98,6 +99,7 @@ function normalizePreferences(value: Preferences | null | undefined): Preference
     startAtLogin: value?.startAtLogin ?? DEFAULT_PREFERENCES.startAtLogin,
     notesView: value?.notesView === 'list' ? 'list' : DEFAULT_PREFERENCES.notesView,
     sourcesView: value?.sourcesView === 'list' ? 'list' : 'grid',
+    collectionsView: value?.collectionsView === 'list' ? 'list' : 'grid',
   }
 }
 

@@ -27,6 +27,7 @@ import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { FileTypeIcon } from '../../components/items/FileTypeIcon'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
+import { formatSize } from '../../components/items/fileSize'
 import {
   importFile,
   listItems,
@@ -49,23 +50,6 @@ const REVEAL_ERROR = 'Kivo could not reveal this file. It may be missing from th
 const RENAME_ERROR = 'Kivo could not rename this file. Try again.'
 const MOVE_ERROR = 'Kivo could not move this file. Try again.'
 const TRASH_ERROR = 'Kivo could not move this file to Trash. Try again.'
-
-function formatSize(bytes: number | null | undefined) {
-  if (typeof bytes !== 'number' || bytes < 0) return 'Unknown'
-  if (bytes < 1024) return `${bytes} B`
-
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let size = bytes / 1024
-  let unit = 0
-
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024
-    unit += 1
-  }
-
-  const rounded = size >= 10 ? Math.round(size) : Math.round(size * 10) / 10
-  return `${rounded} ${units[unit]}`
-}
 
 type RenameState = { id: string; title: string } | null
 type MoveState = { id: string; collectionId: string | null } | null

@@ -3,28 +3,38 @@ use argon2::{
     Argon2,
 };
 
+/// Shared argon2 work. The app lock and the collection secrets both hash and
+/// verify through these two so the stored format stays one format.
+pub(crate) fn hash_secret(secret: &str) -> Result<String, String> {
+    let verifier = Argon2::default()
+        .hash_password(secret.as_bytes())
+        .map_err(|_| "Could not protect the secret".to_string())?;
+
+    Ok(verifier.to_string())
+}
+
+pub(crate) fn secret_matches(secret: &str, verifier: &str) -> bool {
+    let Ok(parsed) = PasswordHash::new(verifier) else {
+        return false;
+    };
+
+    Argon2::default()
+        .verify_password(secret.as_bytes(), &parsed)
+        .is_ok()
+}
+
 #[tauri::command]
 pub fn hash_password(password: String) -> Result<String, String> {
     if password.trim().is_empty() {
         return Err("Password is required".to_string());
     }
 
-    let verifier = Argon2::default()
-        .hash_password(password.as_bytes())
-        .map_err(|_| "Could not protect the password".to_string())?;
-
-    Ok(verifier.to_string())
+    hash_secret(&password)
 }
 
 #[tauri::command]
 pub fn verify_password(password: String, verifier: String) -> Result<bool, String> {
-    let Ok(parsed) = PasswordHash::new(&verifier) else {
-        return Ok(false);
-    };
-
-    Ok(Argon2::default()
-        .verify_password(password.as_bytes(), &parsed)
-        .is_ok())
+    Ok(secret_matches(&password, &verifier))
 }
 
 #[cfg(test)]

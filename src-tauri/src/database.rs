@@ -14,6 +14,9 @@ const PHASE_TWO_SCHEMA_MIGRATION: &str = include_str!("../migrations/0003_phase_
 const PHASE_THREE_MIGRATION: &str = include_str!("../migrations/0004_phase_three.sql");
 const NOTES_VIEW_MIGRATION: &str = include_str!("../migrations/0005_notes_view.sql");
 const SOURCES_VIEW_MIGRATION: &str = include_str!("../migrations/0006_sources_view.sql");
+const COLLECTIONS_VIEW_MIGRATION: &str = include_str!("../migrations/0007_collections_view.sql");
+const COLLECTION_PROTECTION_MIGRATION: &str =
+    include_str!("../migrations/0008_collection_protection.sql");
 
 struct Migration {
     version: i64,
@@ -46,6 +49,14 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 6,
         sql: SOURCES_VIEW_MIGRATION,
+    },
+    Migration {
+        version: 7,
+        sql: COLLECTIONS_VIEW_MIGRATION,
+    },
+    Migration {
+        version: 8,
+        sql: COLLECTION_PROTECTION_MIGRATION,
     },
 ];
 
@@ -87,6 +98,7 @@ pub struct Preferences {
     pub start_at_login: bool,
     pub notes_view: String,
     pub sources_view: String,
+    pub collections_view: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -255,7 +267,8 @@ fn validate_preferences(preferences: &Preferences) -> Result<(), String> {
     let valid = matches!(preferences.theme.as_str(), "light" | "dark" | "system")
         && matches!(preferences.density.as_str(), "comfortable" | "compact")
         && matches!(preferences.notes_view.as_str(), "grid" | "list")
-        && matches!(preferences.sources_view.as_str(), "grid" | "list");
+        && matches!(preferences.sources_view.as_str(), "grid" | "list")
+        && matches!(preferences.collections_view.as_str(), "grid" | "list");
 
     if valid {
         Ok(())
@@ -410,7 +423,7 @@ pub fn write_profile(connection: &mut Connection, profile: &ProfileInput) -> rus
 
 pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences> {
     connection.query_row(
-        "SELECT theme, density, start_at_login, notes_view, sources_view FROM preferences WHERE id = 1",
+        "SELECT theme, density, start_at_login, notes_view, sources_view, collections_view FROM preferences WHERE id = 1",
         [],
         |row| {
             Ok(Preferences {
@@ -419,6 +432,7 @@ pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences
                 start_at_login: row.get::<_, i64>(2)? != 0,
                 notes_view: row.get(3)?,
                 sources_view: row.get(4)?,
+                collections_view: row.get(5)?,
             })
         },
     )
@@ -431,7 +445,8 @@ pub fn write_preferences(
     let transaction = connection.transaction()?;
     let updated = transaction.execute(
         "UPDATE preferences
-         SET theme = ?1, density = ?2, start_at_login = ?3, notes_view = ?4, sources_view = ?5
+         SET theme = ?1, density = ?2, start_at_login = ?3, notes_view = ?4, sources_view = ?5,
+             collections_view = ?6
          WHERE id = 1",
         params![
             preferences.theme,
@@ -439,6 +454,7 @@ pub fn write_preferences(
             i64::from(preferences.start_at_login),
             preferences.notes_view,
             preferences.sources_view,
+            preferences.collections_view,
         ],
     )?;
 
@@ -645,7 +661,7 @@ mod tests {
         apply_migrations(&mut connection).expect("first migration");
         apply_migrations(&mut connection).expect("second migration");
 
-        assert_eq!(read_user_version(&connection), 6);
+        assert_eq!(read_user_version(&connection), 8);
 
         for table in [
             "profile",
@@ -673,7 +689,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
-        assert_eq!(read_user_version(&connection), 6);
+        assert_eq!(read_user_version(&connection), 8);
 
         // Dropping a table gives the test a way to detect whether the migration ran again.
         connection
@@ -686,7 +702,7 @@ mod tests {
             !table_exists(&connection, "preferences"),
             "an up-to-date database must not re-run its migration"
         );
-        assert_eq!(read_user_version(&connection), 6);
+        assert_eq!(read_user_version(&connection), 8);
     }
 
     #[test]
@@ -709,7 +725,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 6);
+        assert_eq!(read_user_version(&connection), 8);
         assert_eq!(
             read_preferences(&connection).expect("read preferences"),
             Preferences {
@@ -718,6 +734,7 @@ mod tests {
                 start_at_login: true,
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
+                collections_view: "grid".to_string(),
             }
         );
 
@@ -776,7 +793,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 6);
+        assert_eq!(read_user_version(&connection), 8);
         assert!(
             !table_exists(&connection, "starter_collections"),
             "the onboarding table is dropped after the copy"
@@ -808,6 +825,7 @@ mod tests {
                 start_at_login: true,
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
+                collections_view: "grid".to_string(),
             }
         );
     }
@@ -850,7 +868,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 6);
+        assert_eq!(read_user_version(&connection), 8);
 
         let (title, content, is_pinned, deleted_at, icon): (
             String,
@@ -882,6 +900,92 @@ mod tests {
         assert_eq!(is_pinned, 0, "existing items start unpinned");
         assert_eq!(deleted_at, None, "existing items start live");
         assert_eq!(icon, None, "existing collections start without an icon");
+    }
+
+    #[test]
+    fn migration_seven_defaults_existing_preferences_to_grid() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        // Stage a version-six vault the way it shipped, then let the gate add the
+        // Collections view preference.
+        for migration in [
+            PHASE_ONE_MIGRATION,
+            PHASE_TWO_MIGRATION,
+            PHASE_TWO_SCHEMA_MIGRATION,
+            PHASE_THREE_MIGRATION,
+            NOTES_VIEW_MIGRATION,
+            SOURCES_VIEW_MIGRATION,
+        ] {
+            connection
+                .execute_batch(migration)
+                .expect("apply shipped migration");
+        }
+        connection
+            .execute(
+                "INSERT INTO preferences (id, theme, density, start_at_login)
+                 VALUES (1, 'light', 'compact', 0)",
+                [],
+            )
+            .expect("seed preferences");
+        connection
+            .pragma_update(None, "user_version", 6)
+            .expect("set version six");
+
+        apply_migrations(&mut connection).expect("upgrade database");
+
+        assert_eq!(read_user_version(&connection), 8);
+        let collections_view: String = connection
+            .query_row(
+                "SELECT collections_view FROM preferences WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read collections view");
+        assert_eq!(collections_view, "grid");
+    }
+
+    #[test]
+    fn migration_eight_defaults_existing_collections_to_no_protection() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        // Stage a version-seven vault with a collection, then let the gate add the
+        // protection columns. Existing rows start unprotected and unhashed.
+        for migration in [
+            PHASE_ONE_MIGRATION,
+            PHASE_TWO_MIGRATION,
+            PHASE_TWO_SCHEMA_MIGRATION,
+            PHASE_THREE_MIGRATION,
+            NOTES_VIEW_MIGRATION,
+            SOURCES_VIEW_MIGRATION,
+            COLLECTIONS_VIEW_MIGRATION,
+        ] {
+            connection
+                .execute_batch(migration)
+                .expect("apply shipped migration");
+        }
+        connection
+            .execute(
+                "INSERT INTO collections (id, name, sort_order, created_at)
+                 VALUES ('col-old', 'Legacy', 0, '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("seed collection");
+        connection
+            .pragma_update(None, "user_version", 7)
+            .expect("set version seven");
+
+        apply_migrations(&mut connection).expect("upgrade database");
+
+        assert_eq!(read_user_version(&connection), 8);
+        let (protection, secret_hash): (String, Option<String>) = connection
+            .query_row(
+                "SELECT protection, secret_hash FROM collections WHERE id = 'col-old'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read protection");
+        assert_eq!(protection, "none");
+        assert_eq!(secret_hash, None);
     }
 
     #[test]
@@ -1026,6 +1130,7 @@ mod tests {
                 start_at_login: false,
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
+                collections_view: "grid".to_string(),
             }
         );
 

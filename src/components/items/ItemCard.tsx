@@ -16,7 +16,8 @@ export type ItemCardProps = {
   leading?: ReactNode
   chips?: ReactNode
   subtitle?: ReactNode
-  actions: ItemCardAction[]
+  /** Rows without actions render without the dots menu. */
+  actions?: ItemCardAction[]
   onOpen?: () => void
   isOpenDisabled?: boolean
   onAction?: (id: string) => void
@@ -32,8 +33,9 @@ export function ItemCard({
   isOpenDisabled,
   onAction,
 }: ItemCardProps) {
-  const items = actions.filter((action) => action.danger !== true)
-  const dangerItems = actions.filter((action) => action.danger === true)
+  const items = (actions ?? []).filter((action) => action.danger !== true)
+  const dangerItems = (actions ?? []).filter((action) => action.danger === true)
+  const hasMenu = items.length > 0 || dangerItems.length > 0
 
   return (
     <div className="kivo-item-card relative rounded-3xl border border-default bg-surface transition-[background-color,scale] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover">
@@ -41,7 +43,7 @@ export function ItemCard({
           the item while the menu keeps its own layer. */}
       <button
         aria-label={title}
-        className="flex w-full items-center gap-3 rounded-3xl p-3 pe-14 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
+        className={`flex w-full items-center gap-3 rounded-3xl p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60 ${hasMenu ? 'pe-14' : 'pe-3'}`}
         disabled={isOpenDisabled}
         type="button"
         onClick={onOpen}
@@ -56,61 +58,63 @@ export function ItemCard({
         </span>
       </button>
 
-      <div className="absolute inset-y-0 right-2 flex items-center">
-        <Dropdown>
-          <Button
-            aria-label={`Actions for ${title}`}
-            className="kivo-row-actions-trigger"
-            isIconOnly
-            size="sm"
-            variant="ghost"
-          >
-            <HugeiconsIcon aria-hidden="true" icon={MoreVerticalIcon} size={18} />
-          </Button>
-          <Dropdown.Popover>
-            <Dropdown.Menu
-              className="kivo-row-actions-menu"
-              onAction={(key) => onAction?.(String(key))}
+      {hasMenu ? (
+        <div className="absolute inset-y-0 right-2 flex items-center">
+          <Dropdown>
+            <Button
+              aria-label={`Actions for ${title}`}
+              className="kivo-row-actions-trigger"
+              isIconOnly
+              size="sm"
+              variant="ghost"
             >
-              {items.map((action) => (
-                <Dropdown.Item
-                  key={action.id}
-                  id={action.id}
-                  isDisabled={action.isDisabled}
-                  textValue={action.label}
-                >
-                  <HugeiconsIcon aria-hidden="true" icon={action.icon} size={16} />
-                  <Label>{action.label}</Label>
-                </Dropdown.Item>
-              ))}
-              {dangerItems.length > 0 ? (
-                <Dropdown.Section
-                  aria-label="Danger zone"
-                  className="mt-1 border-t border-separator pt-1"
-                >
-                  {dangerItems.map((action) => (
-                    <Dropdown.Item
-                      key={action.id}
-                      id={action.id}
-                      isDisabled={action.isDisabled}
-                      textValue={action.label}
-                      variant="danger"
-                    >
-                      <HugeiconsIcon
-                        aria-hidden="true"
-                        className="text-danger"
-                        icon={action.icon}
-                        size={16}
-                      />
-                      <Label>{action.label}</Label>
-                    </Dropdown.Item>
-                  ))}
-                </Dropdown.Section>
-              ) : null}
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
-      </div>
+              <HugeiconsIcon aria-hidden="true" icon={MoreVerticalIcon} size={18} />
+            </Button>
+            <Dropdown.Popover>
+              <Dropdown.Menu
+                className="kivo-row-actions-menu"
+                onAction={(key) => onAction?.(String(key))}
+              >
+                {items.map((action) => (
+                  <Dropdown.Item
+                    key={action.id}
+                    id={action.id}
+                    isDisabled={action.isDisabled}
+                    textValue={action.label}
+                  >
+                    <HugeiconsIcon aria-hidden="true" icon={action.icon} size={16} />
+                    <Label>{action.label}</Label>
+                  </Dropdown.Item>
+                ))}
+                {dangerItems.length > 0 ? (
+                  <Dropdown.Section
+                    aria-label="Danger zone"
+                    className="mt-1 border-t border-separator pt-1"
+                  >
+                    {dangerItems.map((action) => (
+                      <Dropdown.Item
+                        key={action.id}
+                        id={action.id}
+                        isDisabled={action.isDisabled}
+                        textValue={action.label}
+                        variant="danger"
+                      >
+                        <HugeiconsIcon
+                          aria-hidden="true"
+                          className="text-danger"
+                          icon={action.icon}
+                          size={16}
+                        />
+                        <Label>{action.label}</Label>
+                      </Dropdown.Item>
+                    ))}
+                  </Dropdown.Section>
+                ) : null}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
+        </div>
+      ) : null}
     </div>
   )
 }

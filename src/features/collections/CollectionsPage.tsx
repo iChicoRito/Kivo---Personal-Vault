@@ -3,46 +3,87 @@ import {
   Alert,
   Button,
   Card,
+  Chip,
+  Dropdown,
   EmptyState,
   FieldError,
   Input,
+  InputOTP,
   Label,
-  ListBox,
   Modal,
-  Select,
+  Radio,
+  RadioGroup,
+  REGEXP_ONLY_DIGITS,
   Spinner,
+  Tabs,
   TextField,
   Typography,
 } from '@heroui/react'
-import { HugeiconsIcon } from '@hugeicons/react'
-import { FolderOpenIcon, Layers01Icon, StarIcon, Tag01Icon } from '@hugeicons/core-free-icons'
-import type { IconSvgElement } from '@hugeicons/react'
-import { useSearchParams } from 'react-router-dom'
+import {
+  ArrowLeft01Icon,
+  Delete02Icon,
+  EyeIcon,
+  FolderMinusIcon,
+  FolderOpenIcon,
+  GridViewIcon,
+  Layers01Icon,
+  LeftToRightListBulletIcon,
+  Link02Icon,
+  LockIcon,
+  Note01Icon,
+  NoteEditIcon,
+  PlusSignIcon,
+  StarIcon,
+  Tag01Icon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
+import { usePreferences } from '../../app/preferences'
+import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
+import { ListScrollArea } from '../../components/items/ListScrollArea'
 import { ConfirmDialog } from '../../components/items/dialogs'
-import { ItemList } from '../../components/items/ItemList'
 import {
   deleteCollection,
   listCollections,
   saveCollection,
   type Collection,
+  type CollectionProtection,
 } from '../../data/collections'
-import { listItems, type ItemSummary } from '../../data/items'
+import { openItemFile, openSourceUrl, revealItemFile } from '../../data/files'
+import {
+  listItems,
+  loadItem,
+  moveItemsToCollection,
+  trashItems,
+  type ItemSummary,
+} from '../../data/items'
+import type { CollectionsView } from '../../data/settings'
+import { CollectionFolderFloat } from './CollectionFolderFloat'
+import { CollectionItemView } from './CollectionItemView'
+import { UnlockDialog } from './UnlockDialog'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 const stateLabelClass = 'uppercase'
-const NO_ICON = 'kivo-no-icon'
+const NAME_REQUIRED_ERROR = 'Collection name is required.'
+const PASSWORD_REQUIRED_ERROR = 'Enter a password for this collection.'
+const PASSWORD_SHORT_ERROR = 'Password must be at least 4 characters.'
+const PASSWORD_MISMATCH_ERROR = 'Passwords do not match.'
+const PIN_REQUIRED_ERROR = 'Enter a 4-digit PIN.'
+const PIN_MISMATCH_ERROR = 'PINs do not match.'
+const SAVE_ERROR = 'Kivo could not save this collection. Try again.'
+const DELETE_ERROR = 'Kivo could not delete this collection. Try again.'
+const ITEMS_ERROR = 'Kivo could not load items in this collection. Try again.'
+const OPEN_ERROR = 'Kivo could not open this item. Try again.'
+const REVEAL_ERROR = 'Kivo could not reveal this file. It may be missing from this device.'
+const REMOVE_ERROR = 'Kivo could not remove this item from the collection. Try again.'
+const TRASH_ERROR = 'Kivo could not move this item to Trash. Try again.'
+const VIEW_ERROR = 'Kivo could not remember the collection layout. Try again.'
 
-const ICON_OPTIONS = [
-  { value: '', label: 'No icon' },
-  { value: 'folder', label: 'Folder' },
-  { value: 'star', label: 'Star' },
-  { value: 'tag', label: 'Tag' },
-  { value: 'layers', label: 'Layers' },
-]
-
+// Kept so collections saved before the icon picker was removed still show the
+// icon they stored; anything unknown falls back to the folder.
 const ICON_COMPONENTS: Record<string, IconSvgElement> = {
   folder: FolderOpenIcon,
   star: StarIcon,
@@ -50,28 +91,142 @@ const ICON_COMPONENTS: Record<string, IconSvgElement> = {
   layers: Layers01Icon,
 }
 
-const NAME_REQUIRED_ERROR = 'Collection name is required.'
-const SAVE_ERROR = 'Kivo could not save this collection. Try again.'
-const DELETE_ERROR = 'Kivo could not delete this collection. Try again.'
-const ITEMS_ERROR = 'Kivo could not load items in this collection. Try again.'
+function collectionIcon(icon: string | null) {
+  return (icon ? ICON_COMPONENTS[icon] : undefined) ?? FolderOpenIcon
+}
 
-type EditState = { id?: string; name: string; icon: string } | null
+function countCopy(count: number) {
+  return count === 1 ? '1 Item on this collection' : `${count} Items on this collection`
+}
+
+// The list rows and the grid folder offer the same actions, so both build them here.
+function collectionActions(collection: Collection): ItemCardAction[] {
+  return [
+    { id: 'view', label: `View items in ${collection.name}`, icon: EyeIcon },
+    { id: 'rename', label: `Rename ${collection.name}`, icon: NoteEditIcon },
+    {
+      id: 'delete',
+      label: `Delete ${collection.name}`,
+      icon: Delete02Icon,
+      danger: true,
+    },
+  ]
+}
+
+// Items inside a collection offer opening, taking the item out of the collection,
+// and moving it to Trash. Files also reveal their stored copy.
+function itemActions(item: ItemSummary): ItemCardAction[] {
+  const actions: ItemCardAction[] = [
+    {
+      id: 'open',
+      label: item.kind === 'note' ? 'Open note' : item.kind === 'source' ? 'Open link' : 'Open',
+      icon: item.kind === 'note' ? Note01Icon : item.kind === 'source' ? Link02Icon : EyeIcon,
+    },
+  ]
+
+  if (item.kind === 'file') {
+    actions.push({
+      id: 'reveal',
+      label: 'Reveal',
+      icon: FolderOpenIcon,
+      isDisabled: item.fileMissing,
+    })
+  }
+
+  actions.push({ id: 'remove', label: 'Remove from collection', icon: FolderMinusIcon })
+  actions.push({ id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true })
+
+  return actions
+}
+
+function secretError(
+  protection: CollectionProtection,
+  secret: string,
+  confirmSecret: string,
+) {
+  const value = secret.trim()
+  const confirm = confirmSecret.trim()
+
+  if (protection === 'password') {
+    if (!value) return PASSWORD_REQUIRED_ERROR
+    if (value.length < 4) return PASSWORD_SHORT_ERROR
+    if (value !== confirm) return PASSWORD_MISMATCH_ERROR
+    return null
+  }
+
+  if (protection === 'pin') {
+    if (!/^\d{4}$/.test(value)) return PIN_REQUIRED_ERROR
+    if (value !== confirm) return PIN_MISMATCH_ERROR
+    return null
+  }
+
+  return null
+}
+
+type EditState = {
+  id?: string
+  name: string
+  icon: string | null
+  initialProtection: CollectionProtection
+  protection: CollectionProtection
+  secret: string
+  confirmSecret: string
+}
+
+function CollectionChip({ collection }: { collection: Collection }) {
+  const protectedCollection = collection.protection !== 'none'
+
+  return (
+    <Chip color={protectedCollection ? 'danger' : 'default'} size="sm" variant="soft">
+      {protectedCollection ? (
+        <>
+          <HugeiconsIcon aria-hidden="true" icon={LockIcon} size={14} />
+          Protected
+        </>
+      ) : (
+        'Collection'
+      )}
+    </Chip>
+  )
+}
 
 export function CollectionsPage() {
+  const navigate = useNavigate()
+  const { preferences, updatePreferences } = usePreferences()
+  const view = preferences.collectionsView
+  const [searchParams] = useSearchParams()
+
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [attempt, setAttempt] = useState(0)
   const [collections, setCollections] = useState<Collection[]>([])
 
+  const [search, setSearch] = useState('')
+  const [collectionItems, setCollectionItems] = useState<Record<string, ItemSummary[]>>({})
+
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [itemsState, setItemsState] = useState<LoadState>('ready')
   const [items, setItems] = useState<ItemSummary[]>([])
+  const [itemsAttempt, setItemsAttempt] = useState(0)
+  const [itemsView, setItemsView] = useState<'grid' | 'list'>('list')
+  const [sourceUrls, setSourceUrls] = useState<Record<string, string | null>>({})
+  const [itemMenu, setItemMenu] = useState<{
+    item: ItemSummary
+    x: number
+    y: number
+  } | null>(null)
+  const [trashItem, setTrashItem] = useState<ItemSummary | null>(null)
+  const detailRef = useRef<HTMLDivElement>(null)
+  const itemMenuAnchorRef = useRef<HTMLSpanElement>(null)
 
-  const [edit, setEdit] = useState<EditState>(null)
+  const [unlocked, setUnlocked] = useState<Set<string>>(new Set())
+  const [unlockTarget, setUnlockTarget] = useState<Collection | null>(null)
+  const pendingAction = useRef<(() => void) | null>(null)
+
+  const [edit, setEdit] = useState<EditState | null>(null)
   const [editError, setEditError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Collection | null>(null)
 
-  const [searchParams] = useSearchParams()
   const openedFromUrl = useRef(false)
 
   const loadCollections = useCallback(async () => {
@@ -113,7 +268,66 @@ export function CollectionsPage() {
     return () => {
       active = false
     }
-  }, [selectedId])
+  }, [selectedId, itemsAttempt])
+
+  // Item summaries stay lean, so the source rows read their full records for the
+  // address, the same way the Sources page fills its list.
+  useEffect(() => {
+    const sources = items.filter((item) => item.kind === 'source')
+
+    if (sources.length === 0) {
+      setSourceUrls({})
+      return
+    }
+
+    let active = true
+
+    Promise.allSettled(sources.map((source) => loadItem(source.id))).then((results) => {
+      if (!active) return
+      const entries = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [[result.value.id, result.value.url] as const] : [],
+      )
+      setSourceUrls(Object.fromEntries(entries))
+    })
+
+    return () => {
+      active = false
+    }
+  }, [items])
+
+  // Grid cards need every collection's titles up front. A locked collection is
+  // left out entirely, so no list_items call ever runs for it; it joins the load
+  // once its secret matches.
+  useEffect(() => {
+    if (loadState !== 'ready') return
+
+    const targets = collections.filter(
+      (collection) =>
+        collection.itemCount > 0 &&
+        (collection.protection === 'none' || unlocked.has(collection.id)),
+    )
+
+    let active = true
+
+    // Each collection settles on its own, so one failing list still leaves the
+    // other folders with their pills.
+    Promise.allSettled(
+      targets.map(async (collection) => {
+        const loaded = await listItems({ collectionId: collection.id })
+        return [collection.id, loaded] as const
+      }),
+    ).then((results) => {
+      if (!active) return
+      const entries = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      )
+      setCollectionItems(Object.fromEntries(entries))
+    })
+
+    return () => {
+      active = false
+    }
+  }, [collections, loadState, unlocked])
 
   // Opens a collection linked from the URL once, without re-opening after the user goes back.
   useEffect(() => {
@@ -121,20 +335,78 @@ export function CollectionsPage() {
 
     const requestedId = searchParams.get('collection')
     if (!requestedId) return
-    if (!collections.some((collection) => collection.id === requestedId)) return
+
+    const requested = collections.find((collection) => collection.id === requestedId)
+    if (!requested) return
 
     openedFromUrl.current = true
-    setSelectedId(requestedId)
+    runGated(requested, () => openCollection(requested))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collections, loadState, searchParams, selectedId])
+
+  function isLocked(collection: Collection) {
+    return collection.protection !== 'none' && !unlocked.has(collection.id)
+  }
+
+  // Every action that reads a protected collection runs through here: the action
+  // runs straight away when the collection is open or already unlocked, and waits
+  // for the dialog otherwise.
+  function runGated(collection: Collection, action: () => void) {
+    if (!isLocked(collection)) {
+      action()
+      return
+    }
+
+    pendingAction.current = action
+    setUnlockTarget(collection)
+  }
+
+  function handleUnlocked(id: string) {
+    setUnlocked((current) => {
+      const next = new Set(current)
+      next.add(id)
+      return next
+    })
+    setUnlockTarget(null)
+
+    const action = pendingAction.current
+    pendingAction.current = null
+    action?.()
+  }
+
+  function cancelUnlock() {
+    pendingAction.current = null
+    setUnlockTarget(null)
+  }
+
+  function openCollection(collection: Collection) {
+    setActionError(null)
+    setSelectedId(collection.id)
+  }
 
   function openCreate() {
     setEditError(null)
-    setEdit({ name: '', icon: '' })
+    setEdit({
+      name: '',
+      icon: 'folder',
+      initialProtection: 'none',
+      protection: 'none',
+      secret: '',
+      confirmSecret: '',
+    })
   }
 
   function openRename(collection: Collection) {
     setEditError(null)
-    setEdit({ id: collection.id, name: collection.name, icon: collection.icon ?? '' })
+    setEdit({
+      id: collection.id,
+      name: collection.name,
+      icon: collection.icon,
+      initialProtection: collection.protection,
+      protection: collection.protection,
+      secret: '',
+      confirmSecret: '',
+    })
   }
 
   async function handleSave() {
@@ -147,14 +419,42 @@ export function CollectionsPage() {
       return
     }
 
+    const isCreate = !edit.id
+    const protectionChanged = isCreate
+      ? edit.protection !== 'none'
+      : edit.protection !== edit.initialProtection
+
+    if (protectionChanged && edit.protection !== 'none') {
+      const validation = secretError(edit.protection, edit.secret, edit.confirmSecret)
+      if (validation) {
+        setEditError(validation)
+        return
+      }
+    }
+
     setEditError(null)
 
+    const payload: {
+      id?: string
+      name: string
+      icon?: string | null
+      protection?: CollectionProtection
+      secret?: string | null
+    } = {
+      id: edit.id,
+      name,
+      icon: edit.icon,
+    }
+
+    // A create always states its protection; an edit only when it changed, so a
+    // plain rename leaves the stored hash alone.
+    if (isCreate || protectionChanged) {
+      payload.protection = edit.protection
+      if (edit.protection !== 'none') payload.secret = edit.secret.trim()
+    }
+
     try {
-      await saveCollection({
-        id: edit.id,
-        name,
-        icon: edit.icon ? edit.icon : null,
-      })
+      await saveCollection(payload)
       setEdit(null)
       await loadCollections()
     } catch {
@@ -178,66 +478,151 @@ export function CollectionsPage() {
     }
   }
 
-  const heading = (
-    <PageHeader
-      description="Organize items into named collections."
-      title="Collections"
-      titleId="collections-title"
-    />
+  function handleMenuAction(collection: Collection, key: string) {
+    if (key === 'view') runGated(collection, () => openCollection(collection))
+    else if (key === 'rename') runGated(collection, () => openRename(collection))
+    else if (key === 'delete') runGated(collection, () => setDeleteTarget(collection))
+  }
+
+  async function handleItemOpen(item: ItemSummary) {
+    setActionError(null)
+
+    try {
+      if (item.kind === 'note') {
+        navigate(`/notes/${item.id}`)
+        return
+      }
+
+      if (item.kind === 'source') {
+        await openSourceUrl(item.id)
+        return
+      }
+
+      await openItemFile(item.id)
+    } catch {
+      setActionError(OPEN_ERROR)
+    }
+  }
+
+  async function handleItemReveal(item: ItemSummary) {
+    setActionError(null)
+
+    try {
+      await revealItemFile(item.id)
+    } catch {
+      setActionError(REVEAL_ERROR)
+    }
+  }
+
+  async function handleItemRemove(item: ItemSummary) {
+    setActionError(null)
+
+    try {
+      await moveItemsToCollection([item.id], null)
+      setItemsAttempt((current) => current + 1)
+      await loadCollections()
+    } catch {
+      setActionError(REMOVE_ERROR)
+    }
+  }
+
+  async function handleItemTrash() {
+    if (!trashItem) return
+
+    const target = trashItem.id
+    setTrashItem(null)
+    setActionError(null)
+
+    try {
+      await trashItems([target])
+      setItemsAttempt((current) => current + 1)
+      await loadCollections()
+    } catch {
+      setActionError(TRASH_ERROR)
+    }
+  }
+
+  function handleItemMenuAction(item: ItemSummary, key: string) {
+    if (key === 'open') void handleItemOpen(item)
+    else if (key === 'reveal') void handleItemReveal(item)
+    else if (key === 'remove') void handleItemRemove(item)
+    else if (key === 'trash') setTrashItem(item)
+  }
+
+  async function changeView(next: CollectionsView) {
+    if (next === view) return
+
+    try {
+      setActionError(null)
+      await updatePreferences({ collectionsView: next })
+    } catch {
+      setActionError(VIEW_ERROR)
+    }
+  }
+
+  const trimmedSearch = search.trim()
+  const filtered = collections.filter((collection) =>
+    collection.name.toLowerCase().includes(trimmedSearch.toLowerCase()),
   )
-
-  if (loadState === 'loading') {
-    return (
-      <section aria-labelledby="collections-title" className="grid gap-5">
-        {heading}
-        <Card aria-labelledby="collections-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-2">
-            <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
-              LOADING
-            </Typography>
-            <Typography id="collections-loading-title" type="h2">
-              Loading your collections
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading collections saved in this vault.
-            </Typography>
-          </Card.Content>
-        </Card>
-      </section>
-    )
-  }
-
-  if (loadState === 'error') {
-    return (
-      <section aria-labelledby="collections-title" className="grid gap-5">
-        {heading}
-        <Alert aria-labelledby="collections-error-title" role="alert" status="danger">
-          <Alert.Content className="grid gap-3">
-            <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
-              ERROR
-            </Typography>
-            <Typography id="collections-error-title" type="h2">
-              Your collections could not load
-            </Typography>
-            <Typography type="body">
-              Kivo could not read saved collections. Try again to reload this list.
-            </Typography>
-            <Button
-              className="justify-self-start"
-              variant="secondary"
-              onPress={() => setAttempt((value) => value + 1)}
-            >
-              Try again
-            </Button>
-          </Alert.Content>
-        </Alert>
-      </section>
-    )
-  }
+  const selected = collections.find((collection) => collection.id === selectedId) ?? null
+  const itemMenuActions = itemMenu ? itemActions(itemMenu.item) : []
 
   return (
-    <section aria-labelledby="collections-title" className="grid gap-5">
-      {heading}
+    <section
+      aria-labelledby={selected ? 'collection-detail-title' : 'collections-title'}
+      className="grid gap-8"
+    >
+      {/* An open collection is a drill-in: the chrome that belongs to the
+          collection list stays away until Back. */}
+      {!selected ? (
+        <>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <PageHeader
+              description="Organize items into named collections."
+              title="Collections"
+              titleId="collections-title"
+            />
+            <Button aria-label="New collection" onPress={openCreate}>
+              <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+              New Collection
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <TextField className="w-full max-w-md" value={search} onChange={setSearch}>
+              <Label>Search collection</Label>
+              <Input fullWidth placeholder="I am looking for..." variant="secondary" />
+            </TextField>
+
+            <Tabs
+              className="w-fit"
+              selectedKey={view}
+              onSelectionChange={(key) => {
+                if (key === 'grid' || key === 'list') void changeView(key)
+              }}
+            >
+              <Tabs.ListContainer>
+                <Tabs.List aria-label="Collection layout">
+                  <Tabs.Tab id="grid">
+                    <span className="flex items-center gap-2">
+                      <HugeiconsIcon aria-hidden="true" icon={GridViewIcon} size={16} />
+                      Grid
+                    </span>
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                  <Tabs.Tab id="list">
+                    <span className="flex items-center gap-2">
+                      <HugeiconsIcon aria-hidden="true" icon={LeftToRightListBulletIcon} size={16} />
+                      List
+                    </span>
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                </Tabs.List>
+              </Tabs.ListContainer>
+            </Tabs>
+          </div>
+        </>
+      ) : null}
 
       {actionError ? (
         <Typography className="font-semibold text-danger" role="alert" type="body">
@@ -245,12 +630,208 @@ export function CollectionsPage() {
         </Typography>
       ) : null}
 
-      {selectedId ? (
-        <div className="grid gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="secondary" onPress={() => setSelectedId(null)}>
-              Back to collections
+      {!selected && loadState === 'loading' ? (
+        <Card aria-live="polite" role="status">
+          <Card.Content className="grid gap-3">
+            <div className="flex items-center gap-3">
+              <span aria-hidden="true">
+                <Spinner size="sm" />
+              </span>
+              <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
+                LOADING
+              </Typography>
+            </div>
+            <Typography type="h2">Loading your collections</Typography>
+            <Typography color="muted" type="body">
+              Kivo is reading collections saved in this vault.
+            </Typography>
+          </Card.Content>
+        </Card>
+      ) : null}
+
+      {!selected && loadState === 'error' ? (
+        <Alert role="alert" status="danger">
+          <Alert.Content className="grid gap-3">
+            <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
+              ERROR
+            </Typography>
+            <Typography type="h2">Your collections could not load</Typography>
+            <Typography type="body">
+              Kivo could not read saved collections. Try again to reload this list.
+            </Typography>
+            <Button
+              className="justify-self-start"
+              variant="secondary"
+              onPress={() => setAttempt((current) => current + 1)}
+            >
+              Try again
             </Button>
+          </Alert.Content>
+        </Alert>
+      ) : null}
+
+      {loadState === 'ready' && !selectedId && collections.length === 0 ? (
+        <EmptyState className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center">
+          <span
+            aria-hidden="true"
+            className="flex size-14 items-center justify-center rounded-full bg-background-tertiary text-muted"
+          >
+            <HugeiconsIcon icon={FolderOpenIcon} size={24} />
+          </span>
+          <div className="grid max-w-lg gap-2">
+            <Typography align="center" type="h3">
+              No collections yet.
+            </Typography>
+            <Typography align="center" color="muted" type="body">
+              Collections you create will appear here.
+            </Typography>
+          </div>
+          <Button onPress={openCreate}>
+            <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+            Create Collection
+          </Button>
+        </EmptyState>
+      ) : null}
+
+      {loadState === 'ready' && !selectedId && collections.length > 0 && filtered.length === 0 ? (
+        <EmptyState className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center">
+          <span
+            aria-hidden="true"
+            className="flex size-14 items-center justify-center rounded-full bg-background-tertiary text-muted"
+          >
+            <HugeiconsIcon icon={FolderOpenIcon} size={24} />
+          </span>
+          <div className="grid max-w-lg gap-2">
+            <Typography align="center" type="h3">
+              No collections match your search.
+            </Typography>
+            <Typography align="center" color="muted" type="body">
+              Try a different word, or clear the search to see every collection.
+            </Typography>
+          </div>
+          <Button onPress={openCreate}>
+            <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+            Create Collection
+          </Button>
+        </EmptyState>
+      ) : null}
+
+      {loadState === 'ready' && !selectedId && filtered.length > 0 ? (
+        view === 'grid' ? (
+          <ListScrollArea>
+            {/* The top padding clears the room an open folder's pills spring into,
+                so the scroll box never cuts them off. */}
+            <ul className="grid gap-5 pt-10 [grid-template-columns:repeat(auto-fill,minmax(13rem,1fr))]">
+              {filtered.map((collection) => (
+                <li key={collection.id} className="min-w-0">
+                  <CollectionFolderFloat
+                    actions={collectionActions(collection)}
+                    collection={collection}
+                    items={collectionItems[collection.id] ?? []}
+                    locked={isLocked(collection)}
+                    onAction={(key) => handleMenuAction(collection, key)}
+                    onOpenCollection={(target) =>
+                      runGated(target, () => openCollection(target))
+                    }
+                    onOpenItem={(item) => void handleItemOpen(item)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </ListScrollArea>
+        ) : (
+          <ListScrollArea>
+            <ul className="grid gap-2">
+              {filtered.map((collection) => {
+                const actions = collectionActions(collection)
+
+                return (
+                  <li key={collection.id} className="min-w-0">
+                    <ItemCard
+                      actions={actions}
+                      chips={<CollectionChip collection={collection} />}
+                      leading={
+                        <span
+                          aria-hidden="true"
+                          className="grid size-14 place-items-center rounded-2xl bg-default"
+                        >
+                          <HugeiconsIcon
+                            icon={collectionIcon(collection.icon)}
+                            size={24}
+                            strokeWidth={1.75}
+                          />
+                        </span>
+                      }
+                      subtitle={
+                        <Typography color="muted" type="body-sm">
+                          {countCopy(collection.itemCount)}
+                        </Typography>
+                      }
+                      title={collection.name}
+                      onAction={(key) => handleMenuAction(collection, key)}
+                      onOpen={() => runGated(collection, () => openCollection(collection))}
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          </ListScrollArea>
+        )
+      ) : null}
+
+      {loadState === 'ready' && selected ? (
+        <div ref={detailRef} className="relative grid gap-4">
+          <Button
+            className="justify-self-start"
+            variant="ghost"
+            onPress={() => setSelectedId(null)}
+          >
+            <HugeiconsIcon aria-hidden="true" icon={ArrowLeft01Icon} size={18} />
+            Back
+          </Button>
+
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="grid gap-1">
+              <Typography id="collection-detail-title" type="h2">
+                {selected.name}
+              </Typography>
+              <Typography color="muted" type="body-sm">
+                {countCopy(selected.itemCount)}
+              </Typography>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Tabs
+                className="w-fit"
+                selectedKey={itemsView}
+                onSelectionChange={(key) => {
+                  if (key === 'grid' || key === 'list') setItemsView(key)
+                }}
+              >
+                <Tabs.ListContainer>
+                  <Tabs.List aria-label="Collection items layout">
+                    <Tabs.Tab id="grid">
+                      <span className="flex items-center gap-2">
+                        <HugeiconsIcon aria-hidden="true" icon={GridViewIcon} size={16} />
+                        Grid
+                      </span>
+                      <Tabs.Indicator />
+                    </Tabs.Tab>
+                    <Tabs.Tab id="list">
+                      <span className="flex items-center gap-2">
+                        <HugeiconsIcon
+                          aria-hidden="true"
+                          icon={LeftToRightListBulletIcon}
+                          size={16}
+                        />
+                        List
+                      </span>
+                      <Tabs.Indicator />
+                    </Tabs.Tab>
+                  </Tabs.List>
+                </Tabs.ListContainer>
+              </Tabs>
+            </div>
           </div>
 
           {itemsState === 'loading' ? (
@@ -271,84 +852,132 @@ export function CollectionsPage() {
           ) : null}
 
           {itemsState === 'ready' ? (
-            <ItemList
-              emptyDescription="Move items into this collection to see them here."
-              emptyTitle="No items in this collection."
-              items={items}
-              view="list"
-            />
+            items.length === 0 ? (
+              <EmptyState aria-label="Empty list" className="grid justify-items-start gap-3">
+                <Typography type="h2">No items in this collection.</Typography>
+                <Typography color="muted" type="body">
+                  Move items into this collection to see them here.
+                </Typography>
+              </EmptyState>
+            ) : (
+              <ListScrollArea>
+                <ul
+                  className={
+                    itemsView === 'grid'
+                      ? 'grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]'
+                      : 'grid gap-2'
+                  }
+                >
+                  {items.map((item) => (
+                    <li
+                      key={item.id}
+                      className="relative min-w-0"
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+
+                        const bounds = detailRef.current?.getBoundingClientRect()
+                        setItemMenu({
+                          item,
+                          x: event.clientX - (bounds?.left ?? 0),
+                          y: event.clientY - (bounds?.top ?? 0),
+                        })
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))
+                          return
+
+                        event.preventDefault()
+
+                        const row = event.currentTarget.getBoundingClientRect()
+                        const bounds = detailRef.current?.getBoundingClientRect()
+                        setItemMenu({
+                          item,
+                          x: row.left - (bounds?.left ?? 0) + 16,
+                          y: row.top - (bounds?.top ?? 0) + 16,
+                        })
+                      }}
+                    >
+                      <CollectionItemView
+                        address={sourceUrls[item.id]}
+                        item={item}
+                        view={itemsView}
+                        onOpen={() => void handleItemOpen(item)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </ListScrollArea>
+            )
           ) : null}
+
+          {/* The item menu opens where the pointer was, so it anchors to this
+              zero-size mark instead of a fixed corner of the row. */}
+          <span
+            ref={itemMenuAnchorRef}
+            aria-hidden="true"
+            className="pointer-events-none absolute z-20"
+            style={{ left: itemMenu?.x ?? 0, top: itemMenu?.y ?? 0 }}
+          />
+
+          <Dropdown
+            isOpen={itemMenu !== null}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) setItemMenu(null)
+            }}
+          >
+            <Dropdown.Trigger aria-label="Item actions" className="sr-only" />
+            <Dropdown.Popover triggerRef={itemMenuAnchorRef}>
+              <Dropdown.Menu
+                autoFocus
+                className="kivo-row-actions-menu"
+                onAction={(key) => {
+                  if (itemMenu) handleItemMenuAction(itemMenu.item, String(key))
+                }}
+              >
+                {itemMenuActions
+                  .filter((action) => action.danger !== true)
+                  .map((action) => (
+                    <Dropdown.Item
+                      key={action.id}
+                      id={action.id}
+                      isDisabled={action.isDisabled}
+                      textValue={action.label}
+                    >
+                      <HugeiconsIcon aria-hidden="true" icon={action.icon} size={16} />
+                      <Label>{action.label}</Label>
+                    </Dropdown.Item>
+                  ))}
+                {itemMenuActions.some((action) => action.danger === true) ? (
+                  <Dropdown.Section
+                    aria-label="Danger zone"
+                    className="mt-1 border-t border-separator pt-1"
+                  >
+                    {itemMenuActions
+                      .filter((action) => action.danger === true)
+                      .map((action) => (
+                        <Dropdown.Item
+                          key={action.id}
+                          id={action.id}
+                          isDisabled={action.isDisabled}
+                          textValue={action.label}
+                          variant="danger"
+                        >
+                          <HugeiconsIcon
+                            aria-hidden="true"
+                            className="text-danger"
+                            icon={action.icon}
+                            size={16}
+                          />
+                          <Label>{action.label}</Label>
+                        </Dropdown.Item>
+                      ))}
+                  </Dropdown.Section>
+                ) : null}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
         </div>
-      ) : (
-        <div className="grid gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onPress={openCreate}>New collection</Button>
-          </div>
-
-          {collections.length === 0 ? (
-            <EmptyState className="grid justify-items-start gap-3">
-              <Typography type="h2">No collections yet.</Typography>
-              <Typography color="muted" type="body">
-                Collections you create will appear here.
-              </Typography>
-            </EmptyState>
-          ) : (
-            <ul className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))]">
-              {collections.map((collection) => {
-                const icon = collection.icon ? ICON_COMPONENTS[collection.icon] : undefined
-
-                return (
-                  <li key={collection.id} className="min-w-0">
-                    <Card>
-                      <Card.Content className="grid gap-3">
-                        <span className="flex items-center gap-2">
-                          {icon ? <HugeiconsIcon aria-hidden="true" icon={icon} size={18} /> : null}
-                          <Typography className="truncate" type="h2">
-                            {collection.name}
-                          </Typography>
-                        </span>
-
-                        <Typography color="muted" type="body-xs">
-                          {collection.itemCount === 1
-                            ? '1 item'
-                            : `${collection.itemCount} items`}
-                        </Typography>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            aria-label={`View items in ${collection.name}`}
-                            size="sm"
-                            variant="secondary"
-                            onPress={() => setSelectedId(collection.id)}
-                          >
-                            View items
-                          </Button>
-                          <Button
-                            aria-label={`Rename ${collection.name}`}
-                            size="sm"
-                            variant="secondary"
-                            onPress={() => openRename(collection)}
-                          >
-                            Rename
-                          </Button>
-                          <Button
-                            aria-label={`Delete ${collection.name}`}
-                            size="sm"
-                            variant="danger"
-                            onPress={() => setDeleteTarget(collection)}
-                          >
-                            Delete
-                          </Button>
-                        </div>
-                      </Card.Content>
-                    </Card>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-      )}
+      ) : null}
 
       <Modal
         isOpen={edit !== null}
@@ -364,7 +993,7 @@ export function CollectionsPage() {
               </Modal.Header>
               <Modal.Body className="grid gap-4">
                 <TextField
-                  isInvalid={editError !== null}
+                  isInvalid={editError === NAME_REQUIRED_ERROR}
                   value={edit?.name ?? ''}
                   onChange={(value) =>
                     setEdit((current) => (current ? { ...current, name: value } : current))
@@ -372,38 +1001,145 @@ export function CollectionsPage() {
                 >
                   <Label>Collection name</Label>
                   <Input fullWidth variant="secondary" />
-                  {editError ? <FieldError>{editError}</FieldError> : null}
+                  {editError === NAME_REQUIRED_ERROR ? <FieldError>{editError}</FieldError> : null}
                 </TextField>
 
-                <Select
-                  selectedKey={edit?.icon ? edit.icon : NO_ICON}
-                  variant="secondary"
-                  onSelectionChange={(key) =>
+                <RadioGroup
+                  name="protection"
+                  value={edit?.protection ?? 'none'}
+                  onChange={(value) =>
                     setEdit((current) =>
                       current
-                        ? { ...current, icon: key === null || key === NO_ICON ? '' : String(key) }
+                        ? {
+                            ...current,
+                            protection: value as CollectionProtection,
+                            secret: '',
+                            confirmSecret: '',
+                          }
                         : current,
                     )
                   }
                 >
-                  <Label>Icon</Label>
-                  <Select.Trigger>
-                    <Select.Value />
-                    <Select.Indicator />
-                  </Select.Trigger>
-                  <Select.Popover>
-                    <ListBox>
-                      <ListBox.Item id={NO_ICON} textValue="No icon">
-                        No icon
-                      </ListBox.Item>
-                      {ICON_OPTIONS.filter((option) => option.value).map((option) => (
-                        <ListBox.Item key={option.value} id={option.value} textValue={option.label}>
-                          {option.label}
-                        </ListBox.Item>
-                      ))}
-                    </ListBox>
-                  </Select.Popover>
-                </Select>
+                  <Label>Protection</Label>
+                  <div className="mt-1 grid gap-1">
+                    <Radio className="min-h-11" value="none">
+                      <Radio.Content>
+                        <Radio.Control>
+                          <Radio.Indicator />
+                        </Radio.Control>
+                        None
+                      </Radio.Content>
+                    </Radio>
+                    <Radio className="min-h-11" value="password">
+                      <Radio.Content>
+                        <Radio.Control>
+                          <Radio.Indicator />
+                        </Radio.Control>
+                        Password
+                      </Radio.Content>
+                    </Radio>
+                    <Radio className="min-h-11" value="pin">
+                      <Radio.Content>
+                        <Radio.Control>
+                          <Radio.Indicator />
+                        </Radio.Control>
+                        PIN
+                      </Radio.Content>
+                    </Radio>
+                  </div>
+                </RadioGroup>
+
+                {edit?.protection === 'password' ? (
+                  <div className="grid gap-3">
+                    <TextField
+                      isInvalid={editError !== null}
+                      value={edit.secret}
+                      onChange={(value) =>
+                        setEdit((current) => (current ? { ...current, secret: value } : current))
+                      }
+                    >
+                      <Label>Password</Label>
+                      <Input
+                        fullWidth
+                        autoComplete="new-password"
+                        type="password"
+                        variant="secondary"
+                      />
+                    </TextField>
+
+                    <TextField
+                      isInvalid={editError !== null}
+                      value={edit.confirmSecret}
+                      onChange={(value) =>
+                        setEdit((current) =>
+                          current ? { ...current, confirmSecret: value } : current,
+                        )
+                      }
+                    >
+                      <Label>Confirm password</Label>
+                      <Input
+                        fullWidth
+                        autoComplete="new-password"
+                        type="password"
+                        variant="secondary"
+                      />
+                    </TextField>
+                  </div>
+                ) : null}
+
+                {edit?.protection === 'pin' ? (
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <Label>PIN</Label>
+                      <InputOTP
+                        aria-label="PIN"
+                        className="kivo-otp"
+                        maxLength={4}
+                        pattern={REGEXP_ONLY_DIGITS}
+                        value={edit.secret}
+                        onChange={(value) =>
+                          setEdit((current) => (current ? { ...current, secret: value } : current))
+                        }
+                      >
+                        <InputOTP.Group>
+                          <InputOTP.Slot index={0} />
+                          <InputOTP.Slot index={1} />
+                          <InputOTP.Slot index={2} />
+                          <InputOTP.Slot index={3} />
+                        </InputOTP.Group>
+                      </InputOTP>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Confirm PIN</Label>
+                      <InputOTP
+                        aria-label="Confirm PIN"
+                        className="kivo-otp"
+                        maxLength={4}
+                        pattern={REGEXP_ONLY_DIGITS}
+                        value={edit.confirmSecret}
+                        onChange={(value) =>
+                          setEdit((current) =>
+                            current ? { ...current, confirmSecret: value } : current,
+                          )
+                        }
+                      >
+                        <InputOTP.Group>
+                          <InputOTP.Slot index={0} />
+                          <InputOTP.Slot index={1} />
+                          <InputOTP.Slot index={2} />
+                          <InputOTP.Slot index={3} />
+                        </InputOTP.Group>
+                      </InputOTP>
+                    </div>
+                  </div>
+                ) : null}
+
+                {editError && editError !== NAME_REQUIRED_ERROR ? (
+                  <Typography className="font-semibold text-danger" role="alert" type="body">
+                    {editError}
+                  </Typography>
+                ) : null}
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="secondary" onPress={() => setEdit(null)}>
@@ -427,6 +1163,24 @@ export function CollectionsPage() {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void handleDelete()}
       />
+
+      <ConfirmDialog
+        confirmLabel="Move to trash"
+        description="This item leaves every list. You can restore it from Trash."
+        open={trashItem !== null}
+        title="Move this item to Trash?"
+        tone="danger"
+        onCancel={() => setTrashItem(null)}
+        onConfirm={() => void handleItemTrash()}
+      />
+
+      <UnlockDialog
+        collection={unlockTarget}
+        onCancel={cancelUnlock}
+        onUnlocked={handleUnlocked}
+      />
     </section>
   )
 }
+
+export default CollectionsPage

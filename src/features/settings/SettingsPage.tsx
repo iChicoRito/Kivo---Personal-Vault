@@ -55,6 +55,7 @@ const RESET_PREFERENCES: Preferences = {
   startAtLogin: false,
   notesView: 'grid',
   sourcesView: 'grid',
+  collectionsView: 'grid',
 }
 
 const OWNER_REQUIRED_ERROR = 'Owner name is required.'

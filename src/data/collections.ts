@@ -1,9 +1,12 @@
 import { invoke } from './runtime'
 
+export type CollectionProtection = 'none' | 'password' | 'pin'
+
 export type Collection = {
   id: string
   name: string
   icon: string | null
+  protection: CollectionProtection
   sortOrder: number
   createdAt: string
   itemCount: number
@@ -17,8 +20,14 @@ export async function saveCollection(input: {
   id?: string
   name: string
   icon?: string | null
+  protection?: CollectionProtection
+  secret?: string | null
 }): Promise<Collection> {
   return invoke<Collection>('save_collection', { input })
+}
+
+export async function verifyCollectionSecret(id: string, secret: string): Promise<boolean> {
+  return invoke<boolean>('verify_collection_secret', { id, secret })
 }
 
 export async function deleteCollection(id: string): Promise<void> {

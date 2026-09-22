@@ -8,6 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::database::DatabaseState;
+use crate::security::{hash_secret, secret_matches};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +64,7 @@ pub struct Collection {
     pub created_at: String,
     pub icon: Option<String>,
     pub item_count: i64,
+    pub protection: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -148,6 +150,8 @@ pub struct CollectionInput {
     pub id: Option<String>,
     pub name: String,
     pub icon: Option<String>,
+    pub protection: Option<String>,
+    pub secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -491,7 +495,8 @@ fn read_recent_group(
 
 const COLLECTION_SELECT: &str = "SELECT c.id, c.name, c.sort_order, c.created_at, c.icon,
             (SELECT COUNT(*) FROM items i
-             WHERE i.collection_id = c.id AND i.deleted_at IS NULL)
+             WHERE i.collection_id = c.id AND i.deleted_at IS NULL),
+            c.protection
      FROM collections c";
 
 fn read_collection(connection: &Connection, id: &str) -> rusqlite::Result<Option<Collection>> {
@@ -507,6 +512,7 @@ fn read_collection(connection: &Connection, id: &str) -> rusqlite::Result<Option
                     created_at: row.get(3)?,
                     icon: row.get(4)?,
                     item_count: row.get(5)?,
+                    protection: row.get(6)?,
                 })
             },
         )
@@ -527,6 +533,7 @@ fn read_collections(connection: &Connection) -> rusqlite::Result<Vec<Collection>
                 created_at: row.get(3)?,
                 icon: row.get(4)?,
                 item_count: row.get(5)?,
+                protection: row.get(6)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<Collection>>>()?;
@@ -1123,6 +1130,36 @@ fn write_item_opened(connection: &mut Connection, id: &str) -> Result<(), String
         .map_err(|error| format!("Could not mark the item as opened: {error}"))
 }
 
+/// Resolves the requested protection into the value to store. `None` means the
+/// caller did not mention protection, so an update leaves the stored value and
+/// hash untouched. `Some((level, hash))` writes both.
+fn resolve_collection_protection(
+    protection: Option<&str>,
+    secret: Option<&str>,
+) -> Result<Option<(String, Option<String>)>, String> {
+    match protection {
+        None => Ok(None),
+        Some("none") => Ok(Some(("none".to_string(), None))),
+        Some(level @ ("password" | "pin")) => {
+            let secret = secret.unwrap_or("").trim();
+
+            if level == "password" {
+                if secret.chars().count() < 4 {
+                    return Err("Password must be at least 4 characters".to_string());
+                }
+            } else if secret.len() != 4 || !secret.chars().all(|character| character.is_ascii_digit())
+            {
+                return Err("PIN must be 4 digits".to_string());
+            }
+
+            let hash = hash_secret(secret)?;
+
+            Ok(Some((level.to_string(), Some(hash))))
+        }
+        Some(_) => Err("Collection protection is not supported".to_string()),
+    }
+}
+
 fn write_collection(
     connection: &mut Connection,
     input: &CollectionInput,
@@ -1139,6 +1176,12 @@ fn write_collection(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+
+    // Resolved before the transaction so a bad secret never opens one.
+    let protection = resolve_collection_protection(
+        input.protection.as_deref(),
+        input.secret.as_deref(),
+    )?;
 
     let transaction = connection
         .transaction()
@@ -1174,12 +1217,26 @@ fn write_collection(
                 return Err("A collection with that name already exists".to_string());
             }
 
-            transaction
-                .execute(
-                    "UPDATE collections SET name = ?1, icon = ?2 WHERE id = ?3",
-                    params![name, icon, id],
-                )
-                .map_err(|error| format!("Could not save the collection: {error}"))?;
+            match &protection {
+                Some((level, hash)) => {
+                    transaction
+                        .execute(
+                            "UPDATE collections
+                             SET name = ?1, icon = ?2, protection = ?3, secret_hash = ?4
+                             WHERE id = ?5",
+                            params![name, icon, level, hash, id],
+                        )
+                        .map_err(|error| format!("Could not save the collection: {error}"))?;
+                }
+                None => {
+                    transaction
+                        .execute(
+                            "UPDATE collections SET name = ?1, icon = ?2 WHERE id = ?3",
+                            params![name, icon, id],
+                        )
+                        .map_err(|error| format!("Could not save the collection: {error}"))?;
+                }
+            }
 
             id.clone()
         }
@@ -1191,13 +1248,17 @@ fn write_collection(
             let id = new_id(&transaction)
                 .map_err(|error| format!("Could not save the collection: {error}"))?;
 
+            // A create always stores a level, defaulting to an open collection.
+            let (level, hash) = protection.unwrap_or_else(|| ("none".to_string(), None));
+
             transaction
                 .execute(
-                    "INSERT INTO collections (id, name, sort_order, created_at, icon)
+                    "INSERT INTO collections
+                       (id, name, sort_order, created_at, icon, protection, secret_hash)
                      VALUES (?1, ?2,
                              (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM collections),
-                             strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?3)",
-                    params![id, name, icon],
+                             strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?3, ?4, ?5)",
+                    params![id, name, icon, level, hash],
                 )
                 .map_err(|error| format!("Could not save the collection: {error}"))?;
 
@@ -1656,6 +1717,32 @@ fn delete_collection_with_state(state: &DatabaseState, id: &str) -> Result<(), S
     remove_collection(connection.as_mut().expect("checked above"), id)
 }
 
+fn verify_collection_secret_with_state(
+    state: &DatabaseState,
+    id: &str,
+    secret: &str,
+) -> Result<bool, String> {
+    let connection = state.require_connection()?;
+
+    // A missing collection and a collection without a hash both answer false, so
+    // the caller cannot tell a locked collection from a deleted one.
+    let stored: Option<Option<String>> = connection
+        .as_ref()
+        .expect("checked above")
+        .query_row(
+            "SELECT secret_hash FROM collections WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|error| format!("Could not read the collection: {error}"))?;
+
+    match stored {
+        Some(Some(hash)) => Ok(secret_matches(secret.trim(), &hash)),
+        _ => Ok(false),
+    }
+}
+
 fn list_tags_with_state(state: &DatabaseState) -> Result<Vec<Tag>, String> {
     let connection = state.require_connection()?;
 
@@ -1910,6 +1997,15 @@ pub fn save_collection(
 #[tauri::command]
 pub fn delete_collection(id: String, state: State<'_, DatabaseState>) -> Result<(), String> {
     delete_collection_with_state(state.inner(), &id)
+}
+
+#[tauri::command]
+pub fn verify_collection_secret(
+    id: String,
+    secret: String,
+    state: State<'_, DatabaseState>,
+) -> Result<bool, String> {
+    verify_collection_secret_with_state(state.inner(), &id, &secret)
 }
 
 #[tauri::command]
@@ -3012,6 +3108,8 @@ mod tests {
                 id: None,
                 name: "  Projects  ".to_string(),
                 icon: Some("  folder  ".to_string()),
+                protection: None,
+                secret: None,
             },
         )
         .expect("create collection");
@@ -3052,6 +3150,8 @@ mod tests {
                 id: None,
                 name: "Projects".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect("create collection");
@@ -3063,6 +3163,8 @@ mod tests {
                 id: None,
                 name: "Archive".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect("create second collection");
@@ -3074,6 +3176,8 @@ mod tests {
                 id: None,
                 name: "   ".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect_err("blank name rejected");
@@ -3085,6 +3189,8 @@ mod tests {
                 id: None,
                 name: "  projects  ".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect_err("duplicate name rejected");
@@ -3097,6 +3203,8 @@ mod tests {
                 id: Some(created.id.clone()),
                 name: "Projects".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect("same name rename");
@@ -3108,6 +3216,8 @@ mod tests {
                 id: Some(created.id.clone()),
                 name: "Projects renamed".to_string(),
                 icon: Some("star".to_string()),
+                protection: None,
+                secret: None,
             },
         )
         .expect("rename collection");
@@ -3120,6 +3230,8 @@ mod tests {
                 id: Some(created.id.clone()),
                 name: "archive".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect_err("duplicate rename rejected");
@@ -3131,6 +3243,8 @@ mod tests {
                 id: Some("missing".to_string()),
                 name: "Ghost".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect_err("missing collection rejected");
@@ -3148,6 +3262,8 @@ mod tests {
                 id: None,
                 name: "Temporary".to_string(),
                 icon: None,
+                protection: None,
+                secret: None,
             },
         )
         .expect("create collection");
@@ -3670,5 +3786,175 @@ mod tests {
             "trashed file bytes still occupy disk"
         );
         assert!(summary.database_bytes > 0);
+    }
+
+    fn collection_input(name: &str) -> CollectionInput {
+        CollectionInput {
+            id: None,
+            name: name.to_string(),
+            icon: None,
+            protection: None,
+            secret: None,
+        }
+    }
+
+    #[test]
+    fn created_collection_with_a_password_stores_a_hash_and_never_returns_it() {
+        let vault = TempVault::new("collection-password");
+        let state = vault.state();
+
+        let mut input = collection_input("Private");
+        input.protection = Some("password".to_string());
+        input.secret = Some("hunter2".to_string());
+        let created = save_collection_with_state(&state, &input).expect("create protected");
+
+        assert_eq!(created.protection, "password");
+
+        let stored_hash: Option<String> = {
+            let connection = state.require_connection().expect("lock connection");
+            connection
+                .as_ref()
+                .expect("connection is initialized")
+                .query_row(
+                    "SELECT secret_hash FROM collections WHERE id = ?1",
+                    params![created.id],
+                    |row| row.get(0),
+                )
+                .expect("read hash")
+        };
+        let stored_hash = stored_hash.expect("hash stored");
+        assert!(stored_hash.starts_with("$argon2id$"));
+        assert_ne!(stored_hash, "hunter2");
+        assert!(!stored_hash.contains("hunter2"));
+
+        // The serialized collection carries the level only; the hash never leaves
+        // the vault in a listing.
+        let collections = list_collections_with_state(&state).expect("list collections");
+        let json = serde_json::to_string(&collections).expect("serialize collections");
+        assert!(!json.contains(&stored_hash));
+        assert!(!json.contains("hunter2"));
+        assert!(json.contains("password"));
+    }
+
+    #[test]
+    fn verify_collection_secret_accepts_the_right_secret_only() {
+        let vault = TempVault::new("collection-verify");
+        let state = vault.state();
+
+        let mut input = collection_input("Locked");
+        input.protection = Some("pin".to_string());
+        input.secret = Some("1234".to_string());
+        let locked = save_collection_with_state(&state, &input).expect("create locked");
+
+        assert!(verify_collection_secret_with_state(&state, &locked.id, "1234").expect("verify"));
+        assert!(!verify_collection_secret_with_state(&state, &locked.id, "9999").expect("verify"));
+
+        let open =
+            save_collection_with_state(&state, &collection_input("Open")).expect("create open");
+        assert!(!verify_collection_secret_with_state(&state, &open.id, "1234").expect("verify"));
+        assert!(!verify_collection_secret_with_state(&state, "missing", "1234").expect("verify"));
+    }
+
+    #[test]
+    fn rename_without_protection_keeps_the_stored_hash() {
+        let vault = TempVault::new("collection-keep-hash");
+        let state = vault.state();
+
+        let mut input = collection_input("Kept");
+        input.protection = Some("password".to_string());
+        input.secret = Some("secret-pass".to_string());
+        let created = save_collection_with_state(&state, &input).expect("create protected");
+
+        let renamed = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: Some(created.id.clone()),
+                name: "Kept renamed".to_string(),
+                icon: None,
+                protection: None,
+                secret: None,
+            },
+        )
+        .expect("rename");
+
+        assert_eq!(renamed.name, "Kept renamed");
+        assert_eq!(renamed.protection, "password");
+        assert!(
+            verify_collection_secret_with_state(&state, &created.id, "secret-pass").expect("verify")
+        );
+    }
+
+    #[test]
+    fn clearing_protection_removes_the_hash() {
+        let vault = TempVault::new("collection-clear");
+        let state = vault.state();
+
+        let mut input = collection_input("Clear me");
+        input.protection = Some("password".to_string());
+        input.secret = Some("secret-pass".to_string());
+        let created = save_collection_with_state(&state, &input).expect("create protected");
+
+        let cleared = save_collection_with_state(
+            &state,
+            &CollectionInput {
+                id: Some(created.id.clone()),
+                name: "Clear me".to_string(),
+                icon: None,
+                protection: Some("none".to_string()),
+                secret: None,
+            },
+        )
+        .expect("clear protection");
+
+        assert_eq!(cleared.protection, "none");
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let hash: Option<String> = connection
+                .as_ref()
+                .expect("connection is initialized")
+                .query_row(
+                    "SELECT secret_hash FROM collections WHERE id = ?1",
+                    params![created.id],
+                    |row| row.get(0),
+                )
+                .expect("read hash");
+            assert_eq!(hash, None);
+        }
+
+        assert!(
+            !verify_collection_secret_with_state(&state, &created.id, "secret-pass")
+                .expect("verify")
+        );
+    }
+
+    #[test]
+    fn protection_validation_messages_are_stable() {
+        let vault = TempVault::new("collection-protection-validation");
+        let state = vault.state();
+
+        let mut unknown = collection_input("Odd");
+        unknown.protection = Some("biometric".to_string());
+        let error = save_collection_with_state(&state, &unknown).expect_err("unknown rejected");
+        assert_eq!(error, "Collection protection is not supported");
+
+        let mut short = collection_input("Short");
+        short.protection = Some("password".to_string());
+        short.secret = Some("abc".to_string());
+        let error = save_collection_with_state(&state, &short).expect_err("short password");
+        assert_eq!(error, "Password must be at least 4 characters");
+
+        for bad_pin in ["123", "12345", "12a4", ""] {
+            let mut bad = collection_input("Bad pin");
+            bad.name = format!("Bad pin {bad_pin}");
+            bad.protection = Some("pin".to_string());
+            bad.secret = Some(bad_pin.to_string());
+            let error = save_collection_with_state(&state, &bad).expect_err("bad pin rejected");
+            assert_eq!(error, "PIN must be 4 digits");
+        }
+
+        // Nothing is written when validation fails.
+        let collections = list_collections_with_state(&state).expect("list collections");
+        assert!(collections.is_empty());
     }
 }

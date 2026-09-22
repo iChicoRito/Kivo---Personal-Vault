@@ -217,6 +217,88 @@
 }
 
 /*
+ * Collection folder cards. The folder is the ReactBits FolderFloat, whose
+ * colours and geometry map to Kivo tokens through the component props. Its
+ * inner label and sublabel stay in the markup as the trigger's accessible name,
+ * but the Figma puts the collection name and count under the folder, so the
+ * CSS hides that inner copy while the outer button carries the readable text.
+ */
+@layer components {
+  .kivo-collection-folder .folder-float__label,
+  .kivo-collection-folder .folder-float__sub {
+    display: none;
+  }
+
+  /*
+   * HeroUI paints the one-time-code slots with the field surface, which lands on
+   * the dialog's own lightness, so the four boxes vanish inside a modal. The
+   * slots take the soft surface the app's tiles use instead, and step up while
+   * the user types.
+   */
+  .kivo-otp .input-otp__slot {
+    background-color: var(--default);
+  }
+
+  .kivo-otp .input-otp__slot[data-active='true'],
+  .kivo-otp .input-otp__slot[data-filled='true'] {
+    background-color: var(--default-hover);
+  }
+
+  /*
+   * HeroUI's one-time-code input is 40px wider than its slot container by
+   * design, so a dialog body holding an InputOTP becomes a horizontal scroll
+   * box; the scrollbar then eats into the helper text under the field. The body
+   * clips that overflow instead, and nothing visible is lost.
+   */
+  [data-slot="modal-body"]:has(.input-otp) {
+    overflow-x: hidden;
+  }
+
+  /*
+   * The drift wraps the title inside the pill, so it carries the ellipsis: the
+   * pill's own text overflow would cut the title's letters instead of showing
+   * the three dots.
+   */
+  .kivo-collection-folder .folder-float__item .folder-float__drift {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /*
+   * The folder takes the default outline off its trigger and its pills, and the
+   * trigger is the grid's only control that reveals them, so keyboard focus
+   * needs its own mark: the accent ring the rest of the app uses.
+   */
+  .kivo-collection-folder .folder-float__trigger:is(:focus-visible, [data-focus-visible="true"]),
+  .kivo-collection-folder .folder-float__item:is(:focus-visible, [data-focus-visible="true"]) {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * Item titles are free text, so a long one would otherwise stretch its pill
+ * across the folders beside it. The pill keeps one line when it is narrow enough
+ * for two of them to share one row of the fan, and the label the pill wraps
+ * carries the ellipsis.
+ *
+ * This block sits outside `@layer` on purpose: the vendored FolderFloat sheet is
+ * unlayered, so a layered rule would lose to the pill's own side padding.
+ */
+.kivo-collection-folder .folder-float__item {
+  max-width: var(--kivo-pill-max, 5.25rem);
+  /* A slimmer side pad leaves a long title more room before the ellipsis. */
+  padding: 0 10px;
+  overflow: hidden;
+}
+
+/* The pills fly out over the folder, so they paint above its front and its press
+   target instead of sliding out from behind the face. */
+.kivo-collection-folder .folder-float__items {
+  z-index: 4;
+}
+
+/*
  * Drag to a collection. The card under the pointer is copied into a fixed layer
  * that follows it at full strength, lifted off the page with a drop shadow,
  * while the card left in the list dims until the drop lands. Over a collection

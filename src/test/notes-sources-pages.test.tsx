@@ -162,6 +162,7 @@ function collectionSummary(overrides: Partial<Collection> = {}): Collection {
     id: 'col-1',
     name: 'Work',
     icon: null,
+    protection: 'none',
     sortOrder: 0,
     createdAt: '2026-09-10T11:20:00.000Z',
     itemCount: 1,
