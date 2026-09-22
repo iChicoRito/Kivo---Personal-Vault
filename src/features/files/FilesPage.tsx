@@ -12,7 +12,15 @@ import {
   TextField,
   Typography,
 } from '@heroui/react'
-import { Delete02Icon, EyeIcon, FolderOpenIcon, NoteEditIcon } from '@hugeicons/core-free-icons'
+import {
+  Delete02Icon,
+  EyeIcon,
+  FileAddIcon,
+  FolderOpenIcon,
+  NoteEditIcon,
+  PlusSignIcon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 
 import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
@@ -297,11 +305,25 @@ export function FilesPage() {
       ) : null}
 
       {files.length === 0 ? (
-        <EmptyState className="grid justify-items-start gap-3">
-          <Typography type="h2">No files yet.</Typography>
-          <Typography color="muted" type="body">
-            Files added to this device will appear here.
-          </Typography>
+        <EmptyState className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center">
+          <span
+            aria-hidden="true"
+            className="flex size-14 items-center justify-center rounded-full bg-background-tertiary text-muted"
+          >
+            <HugeiconsIcon icon={FileAddIcon} size={24} />
+          </span>
+          <div className="grid max-w-lg gap-2">
+            <Typography align="center" type="h3">
+              No files yet.
+            </Typography>
+            <Typography align="center" color="muted" type="body">
+              Files added to this device will appear here.
+            </Typography>
+          </div>
+          <Button isDisabled={busy} onPress={() => void handleImport()}>
+            <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+            Import Files
+          </Button>
         </EmptyState>
       ) : (
         <div className="flex gap-4">

@@ -238,11 +238,25 @@ export function SourcesPage() {
       ) : null}
 
       {loadState === 'ready' && sources.length === 0 && search.trim() === '' ? (
-        <EmptyState className="grid justify-items-start gap-3">
-          <Typography type="h2">{sourcesEmptyTitle}</Typography>
-          <Typography color="muted" type="body">
-            {sourcesEmptyDescription}
-          </Typography>
+        <EmptyState className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center">
+          <span
+            aria-hidden="true"
+            className="flex size-14 items-center justify-center rounded-full bg-background-tertiary text-muted"
+          >
+            <HugeiconsIcon icon={Link02Icon} size={24} />
+          </span>
+          <div className="grid max-w-lg gap-2">
+            <Typography align="center" type="h3">
+              {sourcesEmptyTitle}
+            </Typography>
+            <Typography align="center" color="muted" type="body">
+              {sourcesEmptyDescription}
+            </Typography>
+          </div>
+          <Button onPress={openCreate}>
+            <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+            Create Source
+          </Button>
         </EmptyState>
       ) : null}
 
