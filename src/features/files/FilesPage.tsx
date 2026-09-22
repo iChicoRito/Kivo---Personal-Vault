@@ -274,9 +274,8 @@ export function FilesPage() {
 
   return (
     <section aria-labelledby="files-title" className="grid gap-5">
-      {heading}
-
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        {heading}
         <Button isDisabled={busy} onPress={() => void handleImport()}>
           Import files
         </Button>
