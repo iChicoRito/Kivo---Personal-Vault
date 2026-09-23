@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Tooltip, Typography } from '@heroui/react'
+import { Button, Skeleton, Tooltip, Typography } from '@heroui/react'
 import {
   ChevronRightIcon,
   FolderOpenIcon,
@@ -41,6 +41,39 @@ function itemCountLabel(count: number) {
   return count === 1 ? '1 Item' : `${count} Items`
 }
 
+function CollectionFolderPanelSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-live="polite"
+      className="flex w-80 shrink-0 flex-col gap-3 self-stretch rounded-3xl border border-default bg-surface p-4"
+      role="status"
+    >
+      <span className="sr-only">Loading collection folders</span>
+      <div aria-hidden="true" className="grid gap-3">
+        <div className="flex items-center justify-between">
+          <Skeleton animationType="shimmer" className="h-4 w-28 rounded" />
+          <Skeleton animationType="shimmer" className="size-8 rounded-xl" />
+        </div>
+        <ul className="flex flex-col gap-2">
+          {Array.from({ length: 3 }, (_, index) => (
+            <li key={index}>
+              <div className="flex items-center gap-3 rounded-2xl bg-default px-3 py-2">
+                <Skeleton animationType="shimmer" className="size-10 shrink-0 rounded-xl" />
+                <span className="grid min-w-0 flex-1 gap-1.5">
+                  <Skeleton animationType="shimmer" className="h-4 w-4/5 rounded" />
+                  <Skeleton animationType="shimmer" className="h-3 w-1/3 rounded" />
+                </span>
+                <Skeleton animationType="shimmer" className="size-4 shrink-0 rounded-full" />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 const ROW_CLASS =
   'flex w-full items-center gap-3 rounded-2xl bg-default px-3 py-2 text-left transition-colors ease-out hover:bg-default-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus'
 
@@ -55,6 +88,7 @@ type MoveNotice = { tone: 'ok' | 'error'; text: string }
 export function CollectionFolderPanel() {
   const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
   const [collections, setCollections] = useState<Collection[] | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [overId, setOverId] = useState<string | null>(null)
@@ -65,10 +99,16 @@ export function CollectionFolderPanel() {
 
     listCollections()
       .then((loaded) => {
-        if (active) setCollections(loaded)
+        if (active) {
+          setCollections(loaded)
+          setIsLoading(false)
+        }
       })
       .catch(() => {
-        if (active) setCollections(null)
+        if (active) {
+          setCollections(null)
+          setIsLoading(false)
+        }
       })
 
     return () => {
@@ -136,6 +176,7 @@ export function CollectionFolderPanel() {
   // Empty collections only show up while a drag is active, so they can take a drop.
   const visible = collections?.filter((collection) => isDragging || collection.itemCount > 0) ?? []
 
+  if (isLoading) return <CollectionFolderPanelSkeleton />
   if (!collections || visible.length === 0) return null
 
   const showExpanded = isOpen || isDragging

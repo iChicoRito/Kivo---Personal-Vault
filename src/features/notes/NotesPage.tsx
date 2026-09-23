@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
-  Card,
   Chip,
   EmptyState,
   Input,
   Label,
-  Spinner,
+  Skeleton,
   Tabs,
   TextField,
   Typography,
@@ -70,6 +69,42 @@ const panelLabelClass = 'uppercase'
 
 function sortPinnedFirst(items: ItemSummary[]) {
   return [...items].sort((a, b) => Number(b.isPinned) - Number(a.isPinned))
+}
+
+function NotesLoadingSkeleton({ view }: { view: NoteView }) {
+  return (
+    <ul
+      aria-hidden="true"
+      className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' : 'grid gap-2'}
+    >
+      {Array.from({ length: 4 }, (_, index) => (
+        <li key={index} className="min-w-0">
+          {view === 'grid' ? (
+            <div className="kivo-item-card flex h-full gap-3 rounded-3xl border border-default bg-surface p-4">
+              <Skeleton className="my-auto h-1/2 w-1 shrink-0 rounded-full" />
+              <div className="flex min-w-0 flex-1 flex-col gap-3">
+                <Skeleton className="h-5 w-16 rounded-full" />
+                <div className="grid min-w-0 gap-1">
+                  <Skeleton className="h-4 w-2/3 rounded-md" />
+                  <Skeleton className="h-3 w-full rounded-md" />
+                  <Skeleton className="h-3 w-4/5 rounded-md" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="kivo-item-card flex items-center gap-3 rounded-3xl border border-default bg-surface p-3">
+              <Skeleton className="h-8 w-1 shrink-0 rounded-full" />
+              <div className="grid min-w-0 flex-1 gap-1">
+                <Skeleton className="h-3 w-12 rounded-full" />
+                <Skeleton className="h-4 w-2/3 rounded-md" />
+                <Skeleton className="h-3 w-4/5 rounded-md" />
+              </div>
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -234,22 +269,14 @@ export function NotesPage() {
       ) : null}
 
       {loadState === 'loading' ? (
-        <Card aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
-              <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-                LOADING
-              </Typography>
-            </div>
-            <Typography type="h2">{notesLoadingTitle}</Typography>
-            <Typography color="muted" type="body">
-              {notesLoadingDescription}
-            </Typography>
-          </Card.Content>
-        </Card>
+        <div aria-live="polite" className="grid gap-4" role="status">
+          <Typography className="sr-only">
+            {notesLoadingTitle}. {notesLoadingDescription}
+          </Typography>
+          <ListScrollArea>
+            <NotesLoadingSkeleton view={view} />
+          </ListScrollArea>
+        </div>
       ) : null}
 
       {loadState === 'error' ? (

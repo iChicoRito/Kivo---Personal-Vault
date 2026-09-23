@@ -5,7 +5,7 @@ import {
   Kbd,
   Label,
   Modal,
-  Spinner,
+  Skeleton,
   TextField,
   Typography,
 } from '@heroui/react'
@@ -137,13 +137,26 @@ export function NavbarSearch() {
                 </TextField>
 
                 {loadState === 'loading' ? (
-                  <div aria-live="polite" className="flex items-center gap-2 px-1 py-2">
-                    <span aria-hidden="true">
-                      <Spinner size="sm" />
-                    </span>
-                    <Typography color="muted" type="body-xs">
-                      Searching the vault...
-                    </Typography>
+                  <div
+                    aria-label="Searching the vault"
+                    aria-live="polite"
+                    className="grid gap-2 px-1 py-2"
+                    role="status"
+                  >
+                    <span className="sr-only">Searching the vault...</span>
+                    {Array.from({ length: 4 }, (_, index) => (
+                      <div
+                        key={index}
+                        aria-hidden="true"
+                        className="flex min-w-0 items-center gap-3 rounded-[calc(var(--radius)*2)] px-2 py-1.5"
+                      >
+                        <Skeleton className="size-8 shrink-0 rounded-(--radius)" />
+                        <div className="grid min-w-0 flex-1 gap-2">
+                          <Skeleton className="h-4 w-3/5" />
+                          <Skeleton className="h-3 w-1/4" />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
 

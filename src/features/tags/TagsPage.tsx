@@ -8,7 +8,7 @@ import {
   Input,
   Label,
   Modal,
-  Spinner,
+  Skeleton,
   TextField,
   Typography,
 } from '@heroui/react'
@@ -144,19 +144,47 @@ export function TagsPage() {
     return (
       <section aria-labelledby="tags-title" className="grid gap-5">
         {heading}
-        <Card aria-labelledby="tags-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-2">
-            <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
-              LOADING
-            </Typography>
-            <Typography id="tags-loading-title" type="h2">
-              Loading your tags
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading tags used in this vault.
-            </Typography>
-          </Card.Content>
-        </Card>
+        <div
+          aria-labelledby="tags-loading-title"
+          aria-live="polite"
+          className="grid gap-5"
+          role="status"
+        >
+          <Card>
+            <Card.Content className="grid gap-2">
+              <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
+                LOADING
+              </Typography>
+              <Typography id="tags-loading-title" type="h2">
+                Loading your tags
+              </Typography>
+              <Typography color="muted" type="body">
+                Kivo is reading tags used in this vault.
+              </Typography>
+            </Card.Content>
+          </Card>
+
+          <ul
+            aria-hidden="true"
+            className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(16rem,1fr))]"
+          >
+            {Array.from({ length: 4 }, (_, index) => (
+              <li key={index} className="min-w-0">
+                <Card>
+                  <Card.Content className="grid gap-3">
+                    <Skeleton className="h-6 w-24 rounded-full" />
+                    <Skeleton className="h-4 w-12 rounded-md" />
+                    <div className="flex flex-wrap gap-2">
+                      <Skeleton className="h-8 w-20 rounded-lg" />
+                      <Skeleton className="h-8 w-16 rounded-lg" />
+                      <Skeleton className="h-8 w-16 rounded-lg" />
+                    </div>
+                  </Card.Content>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
     )
   }
@@ -208,13 +236,24 @@ export function TagsPage() {
           </div>
 
           {itemsState === 'loading' ? (
-            <div className="flex items-center gap-3" role="status">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
+            <div className="grid gap-3" role="status">
               <Typography color="muted" type="body">
                 Loading items with this tag
               </Typography>
+              <ul aria-hidden="true" className="grid gap-2">
+                {Array.from({ length: 4 }, (_, index) => (
+                  <li key={index} className="min-w-0">
+                    <div className="grid gap-2 rounded-lg border border-default p-3">
+                      <div className="flex gap-2">
+                        <Skeleton className="h-5 w-12 rounded-full" />
+                        <Skeleton className="h-5 w-16 rounded-full" />
+                      </div>
+                      <Skeleton className="h-5 w-2/5 rounded-md" />
+                      <Skeleton className="h-4 w-1/4 rounded-md" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
 

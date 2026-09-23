@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Button, Card, Input, Label, TextField, Typography } from '@heroui/react'
+import { Button, Card, Input, Label, Skeleton, TextField, Typography } from '@heroui/react'
 
 import {
   hasAppLock,
@@ -197,9 +197,12 @@ export default function AppLockSettings() {
 
         <div>
           {mode === 'loading' && (
-            <Typography color="muted" role="status" type="body">
-              Checking app lock...
-            </Typography>
+            <div className="flex items-center gap-2">
+              <Typography color="muted" role="status" type="body">
+                Checking app lock...
+              </Typography>
+              <Skeleton aria-hidden="true" className="h-4 w-20 rounded" />
+            </div>
           )}
 
           {mode === 'error' && (

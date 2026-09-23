@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -136,6 +136,25 @@ beforeEach(() => {
 })
 
 describe('TrashPage', () => {
+  it('shows item-shaped placeholders while loading and keeps page actions available', async () => {
+    let resolveItems!: (items: ItemSummary[]) => void
+    itemsMock.listItems.mockReturnValue(
+      new Promise<ItemSummary[]>((resolve) => {
+        resolveItems = resolve
+      }),
+    )
+
+    renderTrash()
+
+    const loadingStatus = screen.getByRole('status', { name: 'Loading trash' })
+    expect(loadingStatus.querySelectorAll('li')).toHaveLength(5)
+    expect(screen.getByRole('heading', { name: 'Trash' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Empty Trash' })).toBeDisabled()
+
+    await act(async () => resolveItems([]))
+    expect(await screen.findByText('Trash is empty.')).toBeInTheDocument()
+  })
+
   it('lists trashed items', async () => {
     itemsMock.listItems.mockResolvedValue([TRASHED_NOTE])
 
@@ -214,5 +233,21 @@ describe('TrashPage', () => {
     renderTrash()
 
     expect(await screen.findByText('Trash is empty.')).toBeInTheDocument()
+  })
+
+  it('retries loading trashed items after an error', async () => {
+    itemsMock.listItems
+      .mockRejectedValueOnce(new Error('list failed'))
+      .mockResolvedValueOnce([TRASHED_NOTE])
+
+    renderTrash()
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Trash could not load')
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByText('Trashed note')).toBeInTheDocument()
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(2)
   })
 })

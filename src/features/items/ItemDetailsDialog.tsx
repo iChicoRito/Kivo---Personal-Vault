@@ -6,7 +6,7 @@ import {
   Input,
   Label,
   Modal,
-  Spinner,
+  Skeleton,
   Switch,
   TextArea,
   TextField,
@@ -44,7 +44,6 @@ const KIND_LABELS: Record<ItemKind, string> = {
   file: 'File',
 }
 
-const panelLabelClass = 'uppercase'
 const SAVE_ERROR = 'Kivo could not save this change. Your saved details are unchanged.'
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -245,13 +244,46 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
 
             <Modal.Body>
               {loadState === 'loading' ? (
-                <div className="flex items-center gap-3" role="status">
-                  <span aria-hidden="true">
-                    <Spinner size="sm" />
-                  </span>
-                  <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-                    LOADING
-                  </Typography>
+                <div
+                  aria-label="Loading item details"
+                  className="grid gap-3"
+                  role="status"
+                >
+                  <span className="sr-only">Loading item details</span>
+                  <div aria-hidden="true" className="grid gap-2">
+                    <Skeleton className="h-4 w-12" />
+                    <Skeleton className="h-9 w-full" />
+                  </div>
+                  <div aria-hidden="true" className="grid gap-2">
+                    <Skeleton className="h-4 w-20" />
+                    <Skeleton className="h-24 w-full" />
+                  </div>
+                  <Skeleton aria-hidden="true" className="h-9 w-28" />
+                  <div aria-hidden="true" className="flex items-center gap-3">
+                    <Skeleton className="h-5 w-9 rounded-full" />
+                    <Skeleton className="h-4 w-20" />
+                  </div>
+                  <div aria-hidden="true" className="grid gap-2">
+                    <Skeleton className="h-4 w-20" />
+                    <Skeleton className="h-9 w-full" />
+                  </div>
+                  <div aria-hidden="true" className="grid gap-2">
+                    <Skeleton className="h-4 w-8" />
+                    {[0, 1].map((index) => (
+                      <div key={index} className="flex items-center gap-2 px-2 py-1">
+                        <Skeleton className="size-4 shrink-0 rounded-sm" />
+                        <Skeleton className={index === 0 ? 'h-4 w-24' : 'h-4 w-20'} />
+                      </div>
+                    ))}
+                  </div>
+                  <dl aria-hidden="true" className="grid gap-1">
+                    {[0, 1].map((index) => (
+                      <div key={index} className="flex items-center justify-between gap-2">
+                        <Skeleton className="h-4 w-16" />
+                        <Skeleton className="h-4 w-24" />
+                      </div>
+                    ))}
+                  </dl>
                 </div>
               ) : null}
 

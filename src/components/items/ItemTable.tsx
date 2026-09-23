@@ -5,6 +5,7 @@ import {
   EmptyState,
   Label,
   Pagination,
+  Skeleton,
   Typography,
 } from '@heroui/react'
 import {
@@ -49,6 +50,32 @@ const KIND_ICONS: Record<ItemKind, IconSvgElement> = {
   note: NoteEditIcon,
   source: Link02Icon,
   file: FolderOpenIcon,
+}
+
+export function ItemTableSkeleton({ label }: { label: string }) {
+  return (
+    <div aria-label={label} aria-live="polite" className="grid gap-4" role="status">
+      <span className="sr-only">{label}</span>
+      <ListScrollArea>
+        <ul aria-hidden="true" className="grid gap-2">
+          {Array.from({ length: 5 }, (_, index) => (
+            <li key={index}>
+              <div className="relative grid grid-cols-[auto_1fr] items-center gap-3 rounded-3xl border border-default bg-surface p-3 pe-14">
+                <Skeleton animationType="shimmer" className="size-11 rounded-xl" />
+                <div className="grid min-w-0 gap-1">
+                  <Skeleton animationType="shimmer" className="h-5 w-14 rounded-full" />
+                  <Skeleton animationType="shimmer" className="h-5 w-2/3 rounded-md" />
+                </div>
+                <div className="absolute inset-y-0 right-2 flex items-center">
+                  <Skeleton animationType="shimmer" className="size-8 rounded-xl" />
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </ListScrollArea>
+    </div>
+  )
 }
 
 export function ItemTable({

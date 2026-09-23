@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   Button,
-  Card,
   Chip,
   EmptyState,
   FieldError,
   Input,
   Label,
   Modal,
+  Skeleton,
   TextField,
   Typography,
 } from '@heroui/react'
@@ -53,6 +53,29 @@ const TRASH_ERROR = 'Kivo could not move this file to Trash. Try again.'
 
 type RenameState = { id: string; title: string } | null
 type MoveState = { id: string; collectionId: string | null } | null
+
+function FilesLoadingSkeleton() {
+  return (
+    <ul aria-hidden="true" className="grid gap-2">
+      {Array.from({ length: 4 }, (_, index) => (
+        <li key={index} className="min-w-0">
+          <div className="kivo-item-card relative rounded-3xl border border-default bg-surface">
+            <div className="flex items-center gap-3 rounded-3xl p-3 pe-14">
+              <Skeleton className="size-11 shrink-0 rounded-xl" />
+              <span className="grid min-w-0 flex-1 gap-1">
+                <Skeleton className="h-4 w-2/3 rounded-md" />
+                <Skeleton className="h-3 w-16 rounded-md" />
+              </span>
+            </div>
+            <div className="absolute inset-y-0 right-2 flex items-center">
+              <Skeleton className="size-8 rounded-lg" />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 export function FilesPage() {
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -223,31 +246,18 @@ export function FilesPage() {
     />
   )
 
-  if (loadState === 'loading') {
-    return (
-      <section aria-labelledby="files-title" className="grid gap-5">
+  return (
+    <section aria-labelledby="files-title" className="grid gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         {heading}
-        <Card aria-labelledby="files-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-2">
-            <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
-              LOADING
-            </Typography>
-            <Typography id="files-loading-title" type="h2">
-              Loading your files
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading file records for this vault.
-            </Typography>
-          </Card.Content>
-        </Card>
-      </section>
-    )
-  }
+        {loadState === 'ready' ? (
+          <Button isDisabled={busy} onPress={() => void handleImport()}>
+            Import files
+          </Button>
+        ) : null}
+      </div>
 
-  if (loadState === 'error') {
-    return (
-      <section aria-labelledby="files-title" className="grid gap-5">
-        {heading}
+      {loadState === 'error' ? (
         <Alert aria-labelledby="files-error-title" role="alert" status="danger">
           <Alert.Content className="grid gap-3">
             <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
@@ -268,26 +278,15 @@ export function FilesPage() {
             </Button>
           </Alert.Content>
         </Alert>
-      </section>
-    )
-  }
+      ) : null}
 
-  return (
-    <section aria-labelledby="files-title" className="grid gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        {heading}
-        <Button isDisabled={busy} onPress={() => void handleImport()}>
-          Import files
-        </Button>
-      </div>
-
-      {actionError ? (
+      {loadState === 'ready' && actionError ? (
         <Typography className="font-semibold text-danger" role="alert" type="body">
           {actionError}
         </Typography>
       ) : null}
 
-      {files.length === 0 ? (
+      {loadState === 'ready' && files.length === 0 ? (
         <EmptyState className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center">
           <span
             aria-hidden="true"
@@ -308,58 +307,78 @@ export function FilesPage() {
             Import Files
           </Button>
         </EmptyState>
-      ) : (
+      ) : null}
+
+      {loadState === 'loading' || (loadState === 'ready' && files.length > 0) ? (
         <div className="flex gap-4">
           <CollectionFolderPanel />
           <div className="min-w-0 flex-1">
-            <ListScrollArea>
-          <ul className="grid gap-2">
-            {files.map((file) => {
-              const actions: ItemCardAction[] = [
-                { id: 'open', label: 'Open', icon: EyeIcon, isDisabled: file.fileMissing },
-                { id: 'reveal', label: 'Reveal', icon: FolderOpenIcon, isDisabled: file.fileMissing },
-                { id: 'rename', label: 'Rename', icon: NoteEditIcon },
-                { id: 'move', label: 'Move to collection', icon: FolderOpenIcon },
-                { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
-              ]
+            {loadState === 'loading' ? (
+              <div aria-live="polite" className="grid gap-4" role="status">
+                <Typography className="sr-only">
+                  Loading your files. Kivo is reading file records for this vault.
+                </Typography>
+                <ListScrollArea>
+                  <FilesLoadingSkeleton />
+                </ListScrollArea>
+              </div>
+            ) : (
+              <ListScrollArea>
+                <ul className="grid gap-2">
+                  {files.map((file) => {
+                    const actions: ItemCardAction[] = [
+                      { id: 'open', label: 'Open', icon: EyeIcon, isDisabled: file.fileMissing },
+                      {
+                        id: 'reveal',
+                        label: 'Reveal',
+                        icon: FolderOpenIcon,
+                        isDisabled: file.fileMissing,
+                      },
+                      { id: 'rename', label: 'Rename', icon: NoteEditIcon },
+                      { id: 'move', label: 'Move to collection', icon: FolderOpenIcon },
+                      { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
+                    ]
 
-              return (
-                <li key={file.id} className="min-w-0">
-                  <ItemCard
-                    actions={actions}
-                    chips={
-                      file.fileMissing ? (
-                        <Chip color="danger" size="sm" variant="soft">
-                          File is missing
-                        </Chip>
-                      ) : undefined
-                    }
-                    isOpenDisabled={file.fileMissing}
-                    leading={
-                      <span className="grid size-11 place-items-center rounded-xl bg-default">
-                        <FileTypeIcon name={file.file?.originalName ?? file.title} size={22} />
-                      </span>
-                    }
-                    subtitle={
-                      <Typography color="muted" type="body-xs">
-                        {formatSize(file.file?.byteSize)}
-                      </Typography>
-                    }
-                    title={file.title}
-                    onAction={(key) => handleFileAction(file, key)}
-                    onOpen={() => {
-                      void handleOpen(file.id)
-                    }}
-                  />
-                </li>
-              )
-            })}
-          </ul>
-            </ListScrollArea>
+                    return (
+                      <li key={file.id} className="min-w-0">
+                        <ItemCard
+                          actions={actions}
+                          chips={
+                            file.fileMissing ? (
+                              <Chip color="danger" size="sm" variant="soft">
+                                File is missing
+                              </Chip>
+                            ) : undefined
+                          }
+                          isOpenDisabled={file.fileMissing}
+                          leading={
+                            <span className="grid size-11 place-items-center rounded-xl bg-default">
+                              <FileTypeIcon name={file.file?.originalName ?? file.title} size={22} />
+                            </span>
+                          }
+                          subtitle={
+                            <Typography color="muted" type="body-xs">
+                              {formatSize(file.file?.byteSize)}
+                            </Typography>
+                          }
+                          title={file.title}
+                          onAction={(key) => handleFileAction(file, key)}
+                          onOpen={() => {
+                            void handleOpen(file.id)
+                          }}
+                        />
+                      </li>
+                    )
+                  })}
+                </ul>
+              </ListScrollArea>
+            )}
           </div>
         </div>
-      )}
+      ) : null}
 
+      {loadState === 'ready' ? (
+        <>
       <Modal
         isOpen={renameTarget !== null}
         onOpenChange={(isOpen) => {
@@ -444,6 +463,8 @@ export function FilesPage() {
         onCancel={() => setTrashTarget(null)}
         onConfirm={() => void handleTrash()}
       />
+        </>
+      ) : null}
     </section>
   )
 }

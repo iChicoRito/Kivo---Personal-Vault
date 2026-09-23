@@ -8,6 +8,7 @@ import {
   ListBox,
   Modal,
   Select,
+  Skeleton,
   TextField,
   Typography,
 } from '@heroui/react'
@@ -75,6 +76,7 @@ type TagPickerProps = {
 
 export function TagPicker({ value, onChange, label }: TagPickerProps) {
   const [tags, setTags] = useState<Tag[]>([])
+  const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState('')
 
   useEffect(() => {
@@ -85,6 +87,9 @@ export function TagPicker({ value, onChange, label }: TagPickerProps) {
         if (active) setTags(loaded)
       })
       .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoading(false)
+      })
 
     return () => {
       active = false
@@ -92,6 +97,20 @@ export function TagPicker({ value, onChange, label }: TagPickerProps) {
   }, [])
 
   const options = Array.from(new Set([...tags.map((tag) => tag.name), ...value]))
+  const optionList = options.length ? (
+    <div className="grid gap-1">
+      {options.map((name) => (
+        <Checkbox key={name} value={name}>
+          <Checkbox.Content>
+            <Checkbox.Control>
+              <Checkbox.Indicator />
+            </Checkbox.Control>
+            <span className="font-semibold">{name}</span>
+          </Checkbox.Content>
+        </Checkbox>
+      ))}
+    </div>
+  ) : null
 
   function addTag() {
     const name = draft.trim()
@@ -107,23 +126,23 @@ export function TagPicker({ value, onChange, label }: TagPickerProps) {
     <div className="grid gap-3">
       <CheckboxGroup value={value} onChange={onChange}>
         <Label className={label ? undefined : 'sr-only'}>{label ?? 'Tags'}</Label>
-        {options.length ? (
-          <div className="grid gap-1">
-            {options.map((name) => (
-              <Checkbox key={name} value={name}>
-                <Checkbox.Content>
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  <span className="font-semibold">{name}</span>
-                </Checkbox.Content>
-              </Checkbox>
-            ))}
-          </div>
-        ) : null}
+        {loading ? (
+          <>
+            {optionList}
+            <div aria-label="Loading tags" className="grid gap-1" role="status">
+              <span className="sr-only">Loading tags</span>
+              {Array.from({ length: 3 }, (_, index) => (
+                <div key={index} aria-hidden="true" className="flex items-center gap-2 px-2 py-1">
+                  <Skeleton className="size-4 shrink-0 rounded-sm" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              ))}
+            </div>
+          </>
+        ) : optionList}
       </CheckboxGroup>
 
-      {options.length === 0 ? (
+      {!loading && options.length === 0 ? (
         <Typography color="muted" type="body-xs">
           No tags yet.
         </Typography>
@@ -152,6 +171,7 @@ const NO_COLLECTION = 'kivo-no-collection'
 
 export function CollectionSelect({ value, onChange, label }: CollectionSelectProps) {
   const [collections, setCollections] = useState<Collection[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let active = true
@@ -161,6 +181,9 @@ export function CollectionSelect({ value, onChange, label }: CollectionSelectPro
         if (active) setCollections(loaded)
       })
       .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoading(false)
+      })
 
     return () => {
       active = false
@@ -168,31 +191,52 @@ export function CollectionSelect({ value, onChange, label }: CollectionSelectPro
   }, [])
 
   return (
-    <Select
-      aria-label={label ? undefined : 'Collection'}
-      selectedKey={value ?? NO_COLLECTION}
-      variant="secondary"
-      onSelectionChange={(key) =>
-        onChange(key === null || key === NO_COLLECTION ? null : String(key))
-      }
-    >
-      {label ? <Label>{label}</Label> : null}
-      <Select.Trigger>
-        <Select.Value />
-        <Select.Indicator />
-      </Select.Trigger>
-      <Select.Popover>
-        <ListBox>
-          <ListBox.Item id={NO_COLLECTION} textValue="No collection">
-            No collection
-          </ListBox.Item>
-          {collections.map((collection) => (
-            <ListBox.Item key={collection.id} id={collection.id} textValue={collection.name}>
-              {collection.name}
+    <>
+      <Select
+        aria-label={label ? undefined : 'Collection'}
+        selectedKey={value ?? NO_COLLECTION}
+        variant="secondary"
+        onSelectionChange={(key) =>
+          onChange(key === null || key === NO_COLLECTION ? null : String(key))
+        }
+      >
+        {label ? <Label>{label}</Label> : null}
+        <Select.Trigger>
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox>
+            <ListBox.Item id={NO_COLLECTION} textValue="No collection">
+              No collection
             </ListBox.Item>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
+            {loading ? (
+              <ListBox.Item
+                id="kivo-loading-collections"
+                isDisabled
+                textValue="Loading collections"
+              >
+                <span className="sr-only">Loading collections</span>
+                <div aria-hidden="true" className="grid gap-2 py-1">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              </ListBox.Item>
+            ) : (
+              collections.map((collection) => (
+                <ListBox.Item key={collection.id} id={collection.id} textValue={collection.name}>
+                  {collection.name}
+                </ListBox.Item>
+              ))
+            )}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+      {loading ? (
+        <span aria-label="Loading collections" className="sr-only" role="status">
+          Loading collections
+        </span>
+      ) : null}
+    </>
   )
 }

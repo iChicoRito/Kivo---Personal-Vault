@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Button,
   Card,
@@ -8,6 +8,7 @@ import {
   Modal,
   Radio,
   RadioGroup,
+  Skeleton,
   Switch,
   TextField,
   Typography,
@@ -67,6 +68,40 @@ const NATIVE_SAVE_ERROR = 'Kivo could not change the start at login setting on t
 const AUTOSTART_NOT_SAVED =
   'Start at login changed on this device, but Kivo could not save the change.'
 const RESET_SAVE_ERROR = 'Kivo could not reset your preferences. Your saved settings are unchanged.'
+
+function SettingsSkeleton({ className }: { className: string }) {
+  return <Skeleton aria-hidden="true" className={className} />
+}
+
+function SettingsLoadingCard({
+  children,
+  id,
+  title,
+}: {
+  children: ReactNode
+  id: string
+  title: string
+}) {
+  return (
+    <Card aria-labelledby={id}>
+      <Card.Content className="grid gap-3">
+        <Typography id={id} type="h2">
+          {title}
+        </Typography>
+        {children}
+      </Card.Content>
+    </Card>
+  )
+}
+
+function ChoiceSkeletonRows({ count }: { count: number }) {
+  return Array.from({ length: count }, (_, index) => (
+    <div key={index} className="flex min-h-11 items-center gap-3">
+      <SettingsSkeleton className="size-4 shrink-0 rounded-full" />
+      <SettingsSkeleton className="h-4 w-20 rounded" />
+    </div>
+  ))
+}
 
 export default function SettingsPage() {
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -290,19 +325,76 @@ export default function SettingsPage() {
     return (
       <section aria-labelledby="settings-title" className="grid gap-5">
         {heading}
-        <Card aria-labelledby="settings-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-2">
-            <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
-              LOADING
-            </Typography>
-            <Typography id="settings-loading-title" type="h2">
-              Loading settings
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading your saved preferences.
-            </Typography>
-          </Card.Content>
-        </Card>
+        <div
+          aria-labelledby="settings-loading-title"
+          aria-live="polite"
+          className="grid gap-5"
+          role="status"
+        >
+          <Typography id="settings-loading-title" type="body">
+            Loading settings
+          </Typography>
+
+          <SettingsLoadingCard id="settings-loading-profile-title" title="Profile">
+            <div className="grid max-w-md gap-4">
+              <div className="grid gap-2">
+                <SettingsSkeleton className="h-4 w-24 rounded" />
+                <SettingsSkeleton className="h-10 w-full rounded-md" />
+              </div>
+              <div className="grid gap-2">
+                <SettingsSkeleton className="h-4 w-20 rounded" />
+                <SettingsSkeleton className="h-10 w-full rounded-md" />
+              </div>
+            </div>
+            <SettingsSkeleton className="h-10 w-32 rounded-md" />
+          </SettingsLoadingCard>
+
+          <SettingsLoadingCard id="settings-loading-appearance-title" title="Appearance">
+            <div className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))]">
+              <div className="grid content-start gap-1">
+                <SettingsSkeleton className="mb-1 h-4 w-14 rounded" />
+                <ChoiceSkeletonRows count={3} />
+              </div>
+              <div className="grid content-start gap-1">
+                <SettingsSkeleton className="mb-1 h-4 w-16 rounded" />
+                <ChoiceSkeletonRows count={2} />
+              </div>
+            </div>
+          </SettingsLoadingCard>
+
+          <SettingsLoadingCard id="settings-loading-startup-title" title="Start at login">
+            <div className="flex min-h-11 items-center gap-3">
+              <SettingsSkeleton className="h-6 w-11 rounded-full" />
+              <SettingsSkeleton className="h-4 w-48 rounded" />
+            </div>
+          </SettingsLoadingCard>
+
+          <SettingsLoadingCard id="settings-loading-storage-title" title="Storage">
+            <div className="grid max-w-md gap-2">
+              <div className="flex flex-wrap justify-between gap-2">
+                <SettingsSkeleton className="h-4 w-16 rounded" />
+                <SettingsSkeleton className="h-4 w-24 rounded" />
+              </div>
+            </div>
+            <div className="grid max-w-xl gap-2">
+              <SettingsSkeleton className="h-4 w-full rounded" />
+              <SettingsSkeleton className="h-4 w-4/5 rounded" />
+            </div>
+          </SettingsLoadingCard>
+
+          <SettingsLoadingCard id="settings-loading-about-title" title="App information">
+            <dl className="grid max-w-md gap-2">
+              <div className="flex flex-wrap justify-between gap-2">
+                <SettingsSkeleton className="h-4 w-10 rounded" />
+                <SettingsSkeleton className="h-4 w-20 rounded" />
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <SettingsSkeleton className="h-4 w-14 rounded" />
+                <SettingsSkeleton className="h-4 w-12 rounded" />
+              </div>
+            </dl>
+          </SettingsLoadingCard>
+        </div>
       </section>
     )
   }

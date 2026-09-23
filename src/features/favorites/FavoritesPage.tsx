@@ -2,15 +2,13 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
-  Card,
   ListBox,
   Select,
-  Spinner,
   Typography,
 } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
-import { ItemTable } from '../../components/items/ItemTable'
+import { ItemTable, ItemTableSkeleton } from '../../components/items/ItemTable'
 import {
   listItems,
   setItemsFavorite,
@@ -133,24 +131,7 @@ export function FavoritesPage() {
       ) : null}
 
       {loadState === 'loading' ? (
-        <Card aria-labelledby="favorites-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
-              <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-                LOADING
-              </Typography>
-            </div>
-            <Typography id="favorites-loading-title" type="h2">
-              Loading your favorites
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading favorites marked in this vault.
-            </Typography>
-          </Card.Content>
-        </Card>
+        <ItemTableSkeleton label="Loading favorites" />
       ) : null}
 
       {loadState === 'error' ? (

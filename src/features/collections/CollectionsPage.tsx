@@ -14,7 +14,7 @@ import {
   Radio,
   RadioGroup,
   REGEXP_ONLY_DIGITS,
-  Spinner,
+  Skeleton,
   Tabs,
   TextField,
   Typography,
@@ -284,9 +284,10 @@ export function CollectionsPage() {
 
     Promise.allSettled(sources.map((source) => loadItem(source.id))).then((results) => {
       if (!active) return
-      const entries = results.flatMap((result) =>
-        result.status === 'fulfilled' ? [[result.value.id, result.value.url] as const] : [],
-      )
+      const entries = results.map((result, index) => [
+        sources[index].id,
+        result.status === 'fulfilled' ? result.value.url : null,
+      ] as const)
       setSourceUrls(Object.fromEntries(entries))
     })
 
@@ -631,22 +632,61 @@ export function CollectionsPage() {
       ) : null}
 
       {!selected && loadState === 'loading' ? (
-        <Card aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
+        <div
+          aria-labelledby="collections-loading-title"
+          aria-live="polite"
+          className="grid gap-5"
+          role="status"
+        >
+          <Card>
+            <Card.Content className="grid gap-2">
               <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
                 LOADING
               </Typography>
-            </div>
-            <Typography type="h2">Loading your collections</Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading collections saved in this vault.
-            </Typography>
-          </Card.Content>
-        </Card>
+              <Typography id="collections-loading-title" type="h2">
+                Loading your collections
+              </Typography>
+              <Typography color="muted" type="body">
+                Kivo is reading collections saved in this vault.
+              </Typography>
+            </Card.Content>
+          </Card>
+
+          <ListScrollArea>
+            <ul
+              aria-hidden="true"
+              className={
+                view === 'grid'
+                  ? 'grid gap-5 pt-10 [grid-template-columns:repeat(auto-fill,minmax(13rem,1fr))]'
+                  : 'grid gap-2'
+              }
+            >
+              {Array.from({ length: 4 }, (_, index) => (
+                <li key={index} className="min-w-0">
+                  {view === 'grid' ? (
+                    <div className="relative grid justify-items-center gap-2 rounded-3xl border border-default bg-surface p-3">
+                      <Skeleton className="absolute right-3 top-3 h-5 w-20 rounded-full" />
+                      <Skeleton className="h-[124px] w-full max-w-[168px] rounded-2xl" />
+                      <div className="grid w-full justify-items-center gap-1 px-2 py-1">
+                        <Skeleton className="h-5 w-2/3 rounded-md" />
+                        <Skeleton className="h-4 w-3/5 rounded-md" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 rounded-3xl border border-default bg-surface p-3">
+                      <Skeleton className="size-14 shrink-0 rounded-2xl" />
+                      <div className="grid min-w-0 flex-1 gap-2">
+                        <Skeleton className="h-5 w-20 rounded-full" />
+                        <Skeleton className="h-5 w-2/5 rounded-md" />
+                        <Skeleton className="h-4 w-1/4 rounded-md" />
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </ListScrollArea>
+        </div>
       ) : null}
 
       {!selected && loadState === 'error' ? (
@@ -835,13 +875,50 @@ export function CollectionsPage() {
           </div>
 
           {itemsState === 'loading' ? (
-            <div className="flex items-center gap-3" role="status">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
+            <div className="grid gap-3" role="status">
               <Typography color="muted" type="body">
                 Loading items in this collection
               </Typography>
+              <ListScrollArea>
+                <ul
+                  aria-hidden="true"
+                  className={
+                    itemsView === 'grid'
+                      ? 'grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]'
+                      : 'grid gap-2'
+                  }
+                >
+                  {Array.from({ length: 4 }, (_, index) => (
+                    <li key={index} className="min-w-0">
+                      {itemsView === 'grid' ? (
+                        <div className="grid h-full gap-3 rounded-3xl border border-default bg-surface p-4">
+                          <div className="flex gap-2">
+                            <Skeleton className="h-5 w-12 rounded-full" />
+                            <Skeleton className="h-5 w-16 rounded-full" />
+                          </div>
+                          <div className="grid gap-2">
+                            <Skeleton className="h-5 w-2/3 rounded-md" />
+                            <Skeleton className="h-4 w-full rounded-md" />
+                            <Skeleton className="h-4 w-3/5 rounded-md" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3 rounded-3xl border border-default bg-surface p-3">
+                          <Skeleton className="size-11 shrink-0 rounded-xl" />
+                          <div className="grid min-w-0 flex-1 gap-2">
+                            <div className="flex gap-2">
+                              <Skeleton className="h-5 w-12 rounded-full" />
+                              <Skeleton className="h-5 w-16 rounded-full" />
+                            </div>
+                            <Skeleton className="h-5 w-2/5 rounded-md" />
+                            <Skeleton className="h-4 w-1/4 rounded-md" />
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </ListScrollArea>
             </div>
           ) : null}
 

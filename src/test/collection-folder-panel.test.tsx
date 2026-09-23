@@ -85,12 +85,19 @@ beforeEach(() => {
 })
 
 describe('CollectionFolderPanel', () => {
-  it('renders nothing while the collections load', () => {
+  it('shows a collection-folder skeleton while the collections load', () => {
     collectionsMock.listCollections.mockReturnValue(new Promise(() => undefined))
 
     renderPanel()
 
-    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
+    const status = screen.getByRole('status')
+    const skeletons = status.querySelectorAll('.skeleton')
+
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    expect(status).toHaveClass('w-80')
+    expect(status).toHaveTextContent('Loading collection folders')
+    expect(skeletons.length).toBeGreaterThan(0)
+    expect([...skeletons].every((skeleton) => skeleton.closest('[aria-hidden="true"]'))).toBe(true)
   })
 
   it('renders nothing when every collection is empty', async () => {

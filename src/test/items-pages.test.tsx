@@ -252,7 +252,12 @@ describe('ItemsPage', () => {
   it('shows the item cards with the mocked rows and no view toggle', async () => {
     renderItemsPage()
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading your items')
+    const loadingStatus = screen.getByRole('status', { name: 'Loading items' })
+    expect(within(loadingStatus).getByText('Loading items')).toHaveClass('sr-only')
+    expect(loadingStatus.querySelector('ul')).toHaveAttribute('aria-hidden', 'true')
+    expect(loadingStatus.querySelectorAll('li')).toHaveLength(5)
+    expect(screen.getByRole('heading', { name: 'All Items' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
 
     expect(await screen.findByText('Alpha note')).toBeInTheDocument()
     expect(screen.getByText('Beta source')).toBeInTheDocument()

@@ -5,6 +5,7 @@ import {
   Input,
   Label,
   Modal,
+  Skeleton,
   TextArea,
   TextField,
   Typography,
@@ -48,6 +49,7 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
     setFormError(null)
 
     if (!itemId) {
+      setLoading(false)
       setAddress('')
       setTitle('')
       setDescription('')
@@ -135,60 +137,70 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
             </Modal.Header>
 
             <Modal.Body className="grid gap-4">
-              <form
-                className="grid gap-4"
-                id="save-source-form"
-                noValidate
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void handleSubmit()
-                }}
-              >
-                <TextField
-                  isRequired
-                  isInvalid={errors.address !== undefined}
-                  type="url"
-                  value={address}
-                  onChange={(value) => {
-                    setAddress(value)
-                    setErrors((current) => ({ ...current, address: undefined }))
-                  }}
-                >
-                  <Label>Address</Label>
-                  <Input fullWidth placeholder="https://example.com" variant="secondary" />
-                  {errors.address ? <FieldError>{errors.address}</FieldError> : null}
-                </TextField>
-
-                <TextField
-                  isRequired
-                  isInvalid={errors.title !== undefined}
-                  value={title}
-                  onChange={(value) => {
-                    setTitle(value)
-                    setErrors((current) => ({ ...current, title: undefined }))
-                  }}
-                >
-                  <Label>Title</Label>
-                  <Input fullWidth variant="secondary" />
-                  {errors.title ? <FieldError>{errors.title}</FieldError> : null}
-                </TextField>
-
-                <TextField value={description} onChange={setDescription}>
-                  <Label>Description</Label>
-                  <Input fullWidth variant="secondary" />
-                </TextField>
-
-                <TextField value={note} onChange={setNote}>
-                  <Label>Personal note</Label>
-                  <TextArea className="min-h-24" fullWidth variant="secondary" />
-                </TextField>
-              </form>
-
               {loading ? (
-                <Typography color="muted" type="body-xs">
-                  Loading source...
-                </Typography>
-              ) : null}
+                <div
+                  aria-label="Loading source fields"
+                  className="grid gap-4"
+                  role="status"
+                >
+                  <span className="sr-only">Loading source fields</span>
+                  {Array.from({ length: 4 }, (_, index) => (
+                    <div key={index} aria-hidden="true" className="grid gap-2">
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-9 w-full" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <form
+                  className="grid gap-4"
+                  id="save-source-form"
+                  noValidate
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void handleSubmit()
+                  }}
+                >
+                  <TextField
+                    isRequired
+                    isInvalid={errors.address !== undefined}
+                    type="url"
+                    value={address}
+                    onChange={(value) => {
+                      setAddress(value)
+                      setErrors((current) => ({ ...current, address: undefined }))
+                    }}
+                  >
+                    <Label>Address</Label>
+                    <Input fullWidth placeholder="https://example.com" variant="secondary" />
+                    {errors.address ? <FieldError>{errors.address}</FieldError> : null}
+                  </TextField>
+
+                  <TextField
+                    isRequired
+                    isInvalid={errors.title !== undefined}
+                    value={title}
+                    onChange={(value) => {
+                      setTitle(value)
+                      setErrors((current) => ({ ...current, title: undefined }))
+                    }}
+                  >
+                    <Label>Title</Label>
+                    <Input fullWidth variant="secondary" />
+                    {errors.title ? <FieldError>{errors.title}</FieldError> : null}
+                  </TextField>
+
+                  <TextField value={description} onChange={setDescription}>
+                    <Label>Description</Label>
+                    <Input fullWidth variant="secondary" />
+                  </TextField>
+
+                  <TextField value={note} onChange={setNote}>
+                    <Label>Personal note</Label>
+                    <TextArea className="min-h-24" fullWidth variant="secondary" />
+                  </TextField>
+                </form>
+              )}
 
               {formError ? (
                 <Typography className="font-semibold text-danger" role="alert" type="body">

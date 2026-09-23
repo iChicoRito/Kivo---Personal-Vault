@@ -1,4 +1,4 @@
-import { Checkbox, Chip, EmptyState, Typography } from '@heroui/react'
+import { Checkbox, Chip, EmptyState, Skeleton, Typography } from '@heroui/react'
 
 import type { ItemKind, ItemSummary } from '../../data/items'
 
@@ -116,6 +116,22 @@ export function ItemList({
                 ) : null}
               </span>
             </button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export function ItemListSkeleton() {
+  return (
+    <ul aria-hidden="true" className="grid gap-2">
+      {Array.from({ length: 3 }, (_, index) => (
+        <li key={index} className="min-w-0">
+          <div className="grid gap-2 rounded-lg border border-default p-3">
+            <Skeleton className="h-5 w-12 rounded-md" animationType="shimmer" />
+            <Skeleton className="h-4 w-3/5 rounded-md" animationType="shimmer" />
+            <Skeleton className="h-3 w-2/5 rounded-md" animationType="shimmer" />
           </div>
         </li>
       ))}

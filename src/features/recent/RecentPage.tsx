@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Spinner, Typography } from '@heroui/react'
+import { Alert, Button, Typography } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
-import { ItemList } from '../../components/items/ItemList'
+import { ItemList, ItemListSkeleton } from '../../components/items/ItemList'
 import { listRecentItems, type RecentItems } from '../../data/activity'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
 
@@ -53,24 +53,34 @@ export function RecentPage() {
       />
 
       {loadState === 'loading' ? (
-        <Card aria-labelledby="recent-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
-              <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-                LOADING
-              </Typography>
-            </div>
-            <Typography id="recent-loading-title" type="h2">
-              Loading recent items
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading items opened on this device.
-            </Typography>
-          </Card.Content>
-        </Card>
+        <div
+          aria-labelledby="recent-loading-title"
+          aria-live="polite"
+          className="grid gap-6"
+          role="status"
+        >
+          <Typography className="sr-only" id="recent-loading-title" type="h2">
+            Loading recent items
+          </Typography>
+          <Typography color="muted" type="body">
+            Kivo is reading items opened on this device.
+          </Typography>
+
+          <div className="grid gap-3">
+            <Typography type="h2">Opened</Typography>
+            <ItemListSkeleton />
+          </div>
+
+          <div className="grid gap-3">
+            <Typography type="h2">Modified</Typography>
+            <ItemListSkeleton />
+          </div>
+
+          <div className="grid gap-3">
+            <Typography type="h2">Created</Typography>
+            <ItemListSkeleton />
+          </div>
+        </div>
       ) : null}
 
       {loadState === 'error' ? (

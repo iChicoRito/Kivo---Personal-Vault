@@ -1,4 +1,4 @@
-import { Chip, Typography } from '@heroui/react'
+import { Chip, Skeleton, Typography } from '@heroui/react'
 import { Link02Icon, Note01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 
@@ -88,6 +88,7 @@ function itemSubtitle(item: ItemSummary, address: string | null | undefined) {
  */
 export function CollectionItemView({ item, view, address, onOpen }: CollectionItemViewProps) {
   const subtitle = itemSubtitle(item, address)
+  const isAddressPending = item.kind === 'source' && address === undefined
 
   if (view === 'grid') {
     return (
@@ -105,7 +106,9 @@ export function CollectionItemView({ item, view, address, onOpen }: CollectionIt
           <Typography className="truncate font-semibold" type="body">
             {item.title}
           </Typography>
-          {subtitle ? (
+          {isAddressPending ? (
+            <Skeleton aria-hidden="true" animationType="shimmer" className="h-5 w-4/5 rounded" />
+          ) : subtitle ? (
             <Typography className="line-clamp-2" color="muted" type="body-sm">
               {subtitle}
             </Typography>
@@ -120,7 +123,9 @@ export function CollectionItemView({ item, view, address, onOpen }: CollectionIt
       chips={<ItemChips item={item} />}
       leading={<KindTile item={item} />}
       subtitle={
-        subtitle ? (
+        isAddressPending ? (
+          <Skeleton aria-hidden="true" animationType="shimmer" className="h-5 w-4/5 rounded" />
+        ) : subtitle ? (
           <Typography className="truncate" color="muted" type="body-sm">
             {subtitle}
           </Typography>

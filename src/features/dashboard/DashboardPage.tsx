@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, EmptyState, Spinner, Typography } from '@heroui/react'
+import { Alert, Button, Card, EmptyState, Skeleton, Typography } from '@heroui/react'
 import { useNavigate } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
-import { ItemList } from '../../components/items/ItemList'
+import { ItemList, ItemListSkeleton } from '../../components/items/ItemList'
 import { listRecentItems, type RecentItems } from '../../data/activity'
 import { listCollections, type Collection } from '../../data/collections'
 import { loadVaultSummary, type VaultSummary } from '../../data/dashboard'
@@ -110,24 +110,74 @@ export default function DashboardPage() {
       </div>
 
       {loadState === 'loading' ? (
-        <Card aria-labelledby="dashboard-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
-              <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-                LOADING
-              </Typography>
+        <div
+          aria-labelledby="dashboard-loading-title"
+          aria-live="polite"
+          className="grid gap-8"
+          role="status"
+        >
+          <Typography className="sr-only" id="dashboard-loading-title" type="h2">
+            Loading your dashboard
+          </Typography>
+          <Typography color="muted" type="body">
+            Kivo is reading this vault.
+          </Typography>
+
+          <div className="grid gap-3">
+            <Typography type="h2">Recent</Typography>
+            <ItemListSkeleton />
+          </div>
+
+          <div className="grid gap-3">
+            <Typography type="h2">Favorites</Typography>
+            <ItemListSkeleton />
+          </div>
+
+          <div className="grid gap-3">
+            <Typography type="h2">Collections</Typography>
+            <div aria-hidden="true" className="flex flex-wrap gap-3">
+              {['w-24', 'w-32', 'w-28', 'w-20', 'w-36', 'w-24'].map((width, index) => (
+                <Skeleton
+                  key={`${width}-${index}`}
+                  className={`h-9 ${width} rounded-full`}
+                  animationType="shimmer"
+                />
+              ))}
             </div>
-            <Typography id="dashboard-loading-title" type="h2">
-              Loading your dashboard
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading this vault.
-            </Typography>
-          </Card.Content>
-        </Card>
+          </div>
+
+          <div className="grid gap-3">
+            <Typography type="h2">Storage</Typography>
+            <Card>
+              <Card.Content>
+                <dl aria-hidden="true" className="grid gap-2">
+                  {[
+                    ['w-12', 'w-8'],
+                    ['w-14', 'w-8'],
+                    ['w-16', 'w-8'],
+                    ['w-12', 'w-8'],
+                    ['w-16', 'w-8'],
+                    ['w-20', 'w-8'],
+                    ['w-12', 'w-8'],
+                    ['w-28', 'w-12'],
+                    ['w-24', 'w-12'],
+                  ].map(([labelWidth, valueWidth], index) => (
+                    <div key={index} className="flex flex-wrap justify-between gap-2">
+                      <Skeleton
+                        className={`h-4 ${labelWidth} rounded-md`}
+                        animationType="shimmer"
+                      />
+                      <Skeleton
+                        className={`h-4 ${valueWidth} rounded-md`}
+                        animationType="shimmer"
+                      />
+                    </div>
+                  ))}
+                </dl>
+              </Card.Content>
+            </Card>
+          </div>
+        </div>
       ) : null}
 
       {loadState === 'error' ? (

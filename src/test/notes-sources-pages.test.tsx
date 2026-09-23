@@ -180,6 +180,16 @@ function findCollectionRow(panel: HTMLElement, name: string) {
   return row
 }
 
+function findLoadingStatus(copy: string) {
+  const status = screen
+    .getAllByRole('status')
+    .find((element) => element.textContent?.includes(copy))
+
+  if (!status) throw new Error(`Loading status for "${copy}" was not found.`)
+
+  return status
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 
@@ -211,6 +221,27 @@ describe('NotesPage', () => {
     renderNotes()
 
     expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['grid', ['sm:grid-cols-2', 'xl:grid-cols-3']],
+    ['list', ['gap-2']],
+  ] as const)('shows note skeletons in the selected %s layout', (view, classes) => {
+    itemsMock.listItems.mockReturnValue(new Promise(() => undefined))
+
+    renderNotes({ notesView: view })
+
+    const status = findLoadingStatus('Loading your notes')
+    const loadingList = status.querySelector('ul')
+
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(loadingList).not.toBeNull()
+    expect(loadingList).toHaveClass(...classes)
+    expect(loadingList?.closest('[aria-hidden="true"]')).not.toBeNull()
+    expect(loadingList?.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'New Note' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Grid' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'List' })).toBeInTheDocument()
   })
 
   it('shows the empty state when there are no notes', async () => {
@@ -439,6 +470,19 @@ describe('NotesPage', () => {
 })
 
 describe('NoteEditor', () => {
+  it('shows title and body skeletons while the note loads', () => {
+    itemsMock.loadItem.mockReturnValue(new Promise(() => undefined))
+
+    renderEditor('n1')
+
+    const status = findLoadingStatus('Loading your note')
+
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(status).toHaveTextContent('Loading your note')
+    expect(status.querySelectorAll('.skeleton')).toHaveLength(2)
+    expect(status.querySelector('.min-h-\\[24rem\\]')).not.toBeNull()
+  })
+
   it('loads the note into the title field and the body editor', async () => {
     itemsMock.loadItem.mockResolvedValue(noteItem())
 
@@ -721,6 +765,41 @@ describe('SourcesPage', () => {
     ])
     itemsMock.loadItem.mockResolvedValue(sourceItem())
   }
+
+  it.each([
+    ['grid', ['sm:grid-cols-2']],
+    ['list', ['gap-2']],
+  ] as const)('shows source skeletons in the selected %s layout', (view, classes) => {
+    itemsMock.listItems.mockReturnValue(new Promise(() => undefined))
+
+    renderSources({ sourcesView: view })
+
+    const status = findLoadingStatus('Loading your sources')
+    const loadingList = status.querySelector('ul')
+
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(loadingList).not.toBeNull()
+    expect(loadingList).toHaveClass(...classes)
+    expect(loadingList?.closest('[aria-hidden="true"]')).not.toBeNull()
+    expect(loadingList?.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'New Source' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Grid' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'List' })).toBeInTheDocument()
+  })
+
+  it('keeps the collection sidebar visible while sources load', async () => {
+    itemsMock.listItems.mockReturnValue(new Promise(() => undefined))
+    collectionsMock.listCollections.mockResolvedValue([collectionSummary()])
+
+    renderSources()
+
+    expect(
+      await screen.findByRole('complementary', { name: 'Collection folders' }),
+    ).toBeInTheDocument()
+    expect(findLoadingStatus('Loading your sources').querySelector('ul')).toHaveClass(
+      'sm:grid-cols-2',
+    )
+  })
 
   it('shows the title and the address on a Source card', async () => {
     setupSource()

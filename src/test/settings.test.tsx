@@ -106,6 +106,29 @@ afterEach(() => {
 })
 
 describe('settings profile', () => {
+  it('shows settings-shaped placeholders while the saved profile loads', async () => {
+    let resolveProfile!: (profile: typeof PROFILE) => void
+    settingsMock.loadProfile.mockReturnValue(
+      new Promise<typeof PROFILE>((resolve) => {
+        resolveProfile = resolve
+      }),
+    )
+
+    await renderSettings()
+
+    const loadingStatus = screen.getByRole('status', { name: 'Loading settings' })
+    expect(loadingStatus).toBeInTheDocument()
+    for (const title of ['Profile', 'Appearance', 'Start at login', 'Storage', 'App information']) {
+      expect(screen.getByRole('heading', { level: 2, name: title })).toBeInTheDocument()
+    }
+    expect(loadingStatus.querySelector('.skeleton')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Owner name' })).not.toBeInTheDocument()
+
+    await act(async () => resolveProfile({ ...PROFILE }))
+
+    expect(await screen.findByRole('textbox', { name: 'Owner name' })).toHaveValue('Ada')
+  })
+
   it('shows the saved owner and vault names', async () => {
     await renderSettings()
 
@@ -324,8 +347,49 @@ describe('reset presentation preferences', () => {
 })
 
 describe('app lock', () => {
+  it('shows a lock-status skeleton only during the initial check, not while saving', async () => {
+    let resolveLockCheck!: (enabled: boolean) => void
+    securityMock.hasAppLock.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveLockCheck = resolve
+      }),
+    )
+    let resolveSave!: () => void
+    securityMock.setAppLock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSave = resolve
+      }),
+    )
+
+    await renderSettings()
+
+    const heading = await screen.findByRole('heading', { level: 2, name: 'App lock', exact: true })
+    const section = heading.closest('section') as HTMLElement
+    const loadingStatus = within(section).getByRole('status')
+    expect(loadingStatus).toHaveTextContent('Checking app lock...')
+    expect(section.querySelector('.skeleton')).toBeInTheDocument()
+
+    await act(async () => resolveLockCheck(false))
+    expect(await within(section).findByText('App lock is off.')).toBeInTheDocument()
+    expect(section.querySelector('.skeleton')).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Master Password'), {
+      target: { value: 'new password' },
+    })
+    fireEvent.change(screen.getByLabelText('Confirm Master Password'), {
+      target: { value: 'new password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Turn on app lock' }))
+
+    expect(await screen.findByRole('button', { name: 'Saving...' })).toBeInTheDocument()
+    expect(section.querySelector('.skeleton')).toBeNull()
+
+    await act(async () => resolveSave())
+  })
+
   it('renders the shared app lock section on the settings page', async () => {
     await renderSettings()
+    await screen.findByRole('heading', { level: 2, name: 'App lock', exact: true })
 
     const headings = screen.getAllByRole('heading', { level: 2, name: 'App lock', exact: true })
     expect(headings).toHaveLength(1)

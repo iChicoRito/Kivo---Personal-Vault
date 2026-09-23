@@ -3,11 +3,9 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Button,
-  Card,
   Input,
   Label,
   Modal,
-  Spinner,
   TextField,
   Typography,
 } from '@heroui/react'
@@ -15,7 +13,7 @@ import {
 import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { FilterMenu, type KindFilter } from '../../components/items/FilterMenu'
-import { ItemTable } from '../../components/items/ItemTable'
+import { ItemTable, ItemTableSkeleton } from '../../components/items/ItemTable'
 import { listCollections, type Collection } from '../../data/collections'
 import {
   listItems,
@@ -233,24 +231,7 @@ export function ItemsPage() {
       ) : null}
 
       {loadState === 'loading' ? (
-        <Card aria-labelledby="items-loading-title" aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
-              <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-                LOADING
-              </Typography>
-            </div>
-            <Typography id="items-loading-title" type="h2">
-              Loading your items
-            </Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading saved items on this device.
-            </Typography>
-          </Card.Content>
-        </Card>
+        <ItemTableSkeleton label="Loading items" />
       ) : null}
 
       {loadState === 'error' ? (

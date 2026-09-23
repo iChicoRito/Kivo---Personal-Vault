@@ -3,9 +3,8 @@ import {
   Alert,
   Button,
   ButtonGroup,
-  Card,
+  Skeleton,
   Separator,
-  Spinner,
   Typography,
 } from '@heroui/react'
 import {
@@ -299,22 +298,15 @@ export function NoteEditor() {
     return (
       <section aria-labelledby="note-editor-title" className="grid gap-8">
         <PageHeader title="Note" titleId="note-editor-title" />
-        <Card aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
-              <Typography className="uppercase" color="muted" type="body-xs" weight="bold">
-                LOADING
-              </Typography>
-            </div>
-            <Typography type="h2">Loading your note</Typography>
-            <Typography color="muted" type="body">
-              Kivo is reading this note on this device.
-            </Typography>
-          </Card.Content>
-        </Card>
+        <div aria-live="polite" className="grid gap-5" role="status">
+          <Typography className="sr-only">
+            Loading your note. Kivo is reading this note on this device.
+          </Typography>
+          <div aria-hidden="true" className="grid gap-5">
+            <Skeleton className="h-12 w-3/4 rounded-md" />
+            <Skeleton className="h-[60vh] min-h-[24rem] rounded-3xl" />
+          </div>
+        </div>
       </section>
     )
   }

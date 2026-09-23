@@ -1,9 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { RecentItems } from '../data/activity'
 import type { Collection } from '../data/collections'
 import type { ItemSummary, VaultItem } from '../data/items'
 
@@ -158,6 +159,15 @@ function renderRoute(path: string) {
       <AppRoutes />
     </MemoryRouter>,
   )
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+
+  return { promise, resolve }
 }
 
 // The type picker opens a HeroUI Select popover. React Aria names the trigger after
@@ -327,14 +337,29 @@ describe('FavoritesPage', () => {
 })
 
 describe('RecentPage', () => {
-  it('renders the Opened, Modified, and Created groups with their items', async () => {
-    activityMock.listRecentItems.mockResolvedValue({
-      opened: [RECENT_OPENED],
-      modified: [RECENT_MODIFIED],
-      created: [RECENT_CREATED],
-    })
+  it('shows placeholders while loading, then renders the Opened, Modified, and Created groups', async () => {
+    const pendingRecent = deferred<RecentItems>()
+    activityMock.listRecentItems.mockReturnValue(pendingRecent.promise)
 
     renderRoute('/recent')
+
+    const loadingStatus = screen.getByRole('status', { name: 'Loading recent items' })
+    expect(screen.getByRole('heading', { level: 1, name: 'Recent' })).toBeInTheDocument()
+
+    for (const groupName of ['Opened', 'Modified', 'Created']) {
+      const heading = screen.getByRole('heading', { level: 2, name: groupName })
+      expect(heading.parentElement?.querySelector('[aria-hidden="true"]')).toBeInTheDocument()
+    }
+    expect(loadingStatus.querySelector('ul[aria-hidden="true"] li')).toBeInTheDocument()
+    expect(screen.queryByText('Opened note')).not.toBeInTheDocument()
+
+    await act(async () => {
+      pendingRecent.resolve({
+        opened: [RECENT_OPENED],
+        modified: [RECENT_MODIFIED],
+        created: [RECENT_CREATED],
+      })
+    })
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Opened' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Modified' })).toBeInTheDocument()
@@ -343,6 +368,7 @@ describe('RecentPage', () => {
     expect(screen.getByText('Opened note')).toBeInTheDocument()
     expect(screen.getByText('Modified note')).toBeInTheDocument()
     expect(screen.getByText('Created note')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading recent items' })).not.toBeInTheDocument()
   })
 
   it('shows an empty state when nothing is recent', async () => {
@@ -352,9 +378,86 @@ describe('RecentPage', () => {
       await screen.findByRole('heading', { level: 2, name: 'Nothing recent yet.', exact: true }),
     ).toBeInTheDocument()
   })
+
+  it('keeps the error state and retries loading recent items', async () => {
+    activityMock.listRecentItems
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ opened: [], modified: [], created: [] })
+
+    renderRoute('/recent')
+
+    const alert = await screen.findByRole('alert')
+    expect(
+      within(alert).getByRole('heading', { name: 'Recent items could not load' }),
+    ).toBeInTheDocument()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Nothing recent yet.', exact: true }),
+    ).toBeInTheDocument()
+    expect(activityMock.listRecentItems).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('DashboardPage', () => {
+  it('keeps dashboard sections visible as placeholders until data loads', async () => {
+    const pendingSummary = deferred<typeof POPULATED_SUMMARY>()
+    const pendingRecent = deferred<RecentItems>()
+    const pendingFavorites = deferred<ItemSummary[]>()
+    const pendingCollections = deferred<Collection[]>()
+    dashboardMock.loadVaultSummary.mockReturnValue(pendingSummary.promise)
+    activityMock.listRecentItems.mockReturnValue(pendingRecent.promise)
+    itemsMock.listItems.mockReturnValue(pendingFavorites.promise)
+    collectionsMock.listCollections.mockReturnValue(pendingCollections.promise)
+
+    renderRoute('/dashboard')
+
+    const loadingStatus = screen.getByRole('status', { name: 'Loading your dashboard' })
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Quick Add' })).toBeInTheDocument()
+
+    for (const sectionName of ['Recent', 'Favorites', 'Collections', 'Storage']) {
+      const heading = screen.getByRole('heading', { level: 2, name: sectionName })
+      expect(heading.parentElement?.querySelector('[aria-hidden="true"]')).toBeInTheDocument()
+    }
+    expect(loadingStatus.querySelector('ul[aria-hidden="true"] li')).toBeInTheDocument()
+    expect(screen.queryByText('Opened note')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Work (3)' })).not.toBeInTheDocument()
+
+    await act(async () => {
+      pendingSummary.resolve({ ...POPULATED_SUMMARY })
+      pendingRecent.resolve({ opened: [RECENT_OPENED], modified: [], created: [] })
+      pendingFavorites.resolve([FAVORITE_NOTE])
+      pendingCollections.resolve([{ ...COLLECTION }])
+    })
+
+    expect(await screen.findByText('Opened note')).toBeInTheDocument()
+    expect(screen.getByText('Starred note')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Work (3)' })).toBeInTheDocument()
+    expect(screen.getByText('42')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading your dashboard' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the error state and retries dashboard loading', async () => {
+    dashboardMock.loadVaultSummary
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ ...POPULATED_SUMMARY })
+
+    renderRoute('/dashboard')
+
+    const alert = await screen.findByRole('alert')
+    expect(
+      within(alert).getByRole('heading', { name: 'Your dashboard could not load' }),
+    ).toBeInTheDocument()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'No favorites yet.' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(dashboardMock.loadVaultSummary).toHaveBeenCalledTimes(2)
+  })
+
   it('shows the Recent, Favorites, Collections, and Storage sections for a populated vault', async () => {
     dashboardMock.loadVaultSummary.mockResolvedValue({ ...POPULATED_SUMMARY })
     activityMock.listRecentItems.mockResolvedValue({
@@ -367,12 +470,12 @@ describe('DashboardPage', () => {
 
     renderRoute('/dashboard')
 
+    expect(await screen.findByText('Opened note')).toBeInTheDocument()
     expect(await screen.findByRole('heading', { level: 2, name: 'Recent' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Favorites' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Collections' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Storage' })).toBeInTheDocument()
 
-    expect(screen.getByText('Opened note')).toBeInTheDocument()
     expect(screen.getByText('Starred note')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Work (3)' })).toBeInTheDocument()
 

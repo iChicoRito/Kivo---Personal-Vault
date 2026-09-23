@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
-  Card,
   Chip,
   EmptyState,
   Input,
   Label,
-  Spinner,
+  Skeleton,
   Tabs,
   TextField,
   Typography,
@@ -57,6 +56,48 @@ const panelLabelClass = 'uppercase'
 async function loadSources(query?: string) {
   const summaries = await listItems({ kind: 'source', query })
   return Promise.all(summaries.map((summary) => loadItem(summary.id)))
+}
+
+function SourcesLoadingSkeleton({ view }: { view: SourceView }) {
+  return (
+    <ul
+      aria-hidden="true"
+      className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-2'}
+    >
+      {Array.from({ length: 4 }, (_, index) => (
+        <li key={index} className="min-w-0">
+          {view === 'grid' ? (
+            <div className="kivo-item-card flex h-full flex-col gap-2 rounded-3xl border border-default bg-surface p-4">
+              <div className="flex items-center justify-between gap-2">
+                <Skeleton className="h-5 w-16 rounded-full" />
+                <Skeleton className="size-8 rounded-lg" />
+              </div>
+              <div className="grid min-w-0 gap-0.5">
+                <Skeleton className="h-4 w-2/3 rounded-md" />
+                <Skeleton className="h-3 w-full rounded-md" />
+                <Skeleton className="h-3 w-4/5 rounded-md" />
+              </div>
+              <Skeleton className="mt-auto h-9 w-24 rounded-lg" />
+            </div>
+          ) : (
+            <div className="kivo-item-card relative rounded-3xl border border-default bg-surface">
+              <div className="flex items-center gap-3 rounded-3xl p-3 pe-14">
+                <Skeleton className="size-11 shrink-0 rounded-xl" />
+                <span className="grid min-w-0 flex-1 gap-1">
+                  <Skeleton className="h-3 w-14 rounded-full" />
+                  <Skeleton className="h-4 w-2/3 rounded-md" />
+                  <Skeleton className="h-3 w-4/5 rounded-md" />
+                </span>
+              </div>
+              <div className="absolute inset-y-0 right-2 flex items-center">
+                <Skeleton className="size-8 rounded-lg" />
+              </div>
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -199,25 +240,6 @@ export function SourcesPage() {
         </Typography>
       ) : null}
 
-      {loadState === 'loading' ? (
-        <Card aria-live="polite" role="status">
-          <Card.Content className="grid gap-3">
-            <div className="flex items-center gap-3">
-              <span aria-hidden="true">
-                <Spinner size="sm" />
-              </span>
-              <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-                LOADING
-              </Typography>
-            </div>
-            <Typography type="h2">{sourcesLoadingTitle}</Typography>
-            <Typography color="muted" type="body">
-              {sourcesLoadingDescription}
-            </Typography>
-          </Card.Content>
-        </Card>
-      ) : null}
-
       {loadState === 'error' ? (
         <Alert role="alert" status="danger">
           <Alert.Content className="grid gap-3">
@@ -269,12 +291,22 @@ export function SourcesPage() {
         </EmptyState>
       ) : null}
 
-      {loadState === 'ready' && sources.length > 0 ? (
+      {loadState === 'loading' || (loadState === 'ready' && sources.length > 0) ? (
         <div className="flex gap-4">
           <CollectionFolderPanel />
           <div className="min-w-0 flex-1">
-            <ListScrollArea>
-          <ul className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-2'}>
+            {loadState === 'loading' ? (
+              <div aria-live="polite" className="grid gap-4" role="status">
+                <Typography className="sr-only">
+                  {sourcesLoadingTitle}. {sourcesLoadingDescription}
+                </Typography>
+                <ListScrollArea>
+                  <SourcesLoadingSkeleton view={view} />
+                </ListScrollArea>
+              </div>
+            ) : (
+              <ListScrollArea>
+                <ul className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-2'}>
             {sources.map((source) => {
               const actions: ItemCardAction[] = [
                 {
@@ -340,8 +372,9 @@ export function SourcesPage() {
                 </li>
               )
             })}
-          </ul>
-            </ListScrollArea>
+                </ul>
+              </ListScrollArea>
+            )}
           </div>
         </div>
       ) : null}
