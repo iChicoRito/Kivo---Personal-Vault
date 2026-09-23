@@ -143,10 +143,16 @@ function renderSources(preferences: Partial<Preferences> = {}) {
   )
 }
 
+// Rows open their action menu on a right click. A title can repeat in the
+// collection panel, so pick the first match inside an item card.
 async function openRowMenu(title: string) {
-  const trigger = screen.getByRole('button', { name: `Actions for ${title}` })
-  fireEvent.click(trigger)
-  return trigger
+  const titleElement = screen
+    .getAllByText(title)
+    .find((element) => element.closest('.kivo-item-card') !== null)
+
+  if (!titleElement) throw new Error(`The row for "${title}" is missing.`)
+
+  fireEvent.contextMenu(titleElement)
 }
 
 function findCardRow(title: string) {
@@ -934,6 +940,8 @@ describe('SaveSourceDialog', () => {
     const onSaved = vi.fn()
 
     render(<SaveSourceDialog itemId={null} open onClose={onClose} onSaved={onSaved} />)
+
+    expect(screen.queryByRole('textbox', { name: 'Personal note' })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
       target: { value: 'Example' },

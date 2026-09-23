@@ -110,7 +110,7 @@ describe('dialog loading skeletons', () => {
     )
 
     const status = screen.getByRole('status', { name: 'Loading source fields' })
-    expect(status.querySelectorAll('.skeleton')).toHaveLength(8)
+    expect(status.querySelectorAll('.skeleton')).toHaveLength(6)
     expect(screen.queryByRole('textbox', { name: 'Address' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })

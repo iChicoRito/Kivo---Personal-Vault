@@ -1,5 +1,5 @@
+import { useRef, useState } from 'react'
 import {
-  Button,
   Chip,
   Dropdown,
   EmptyState,
@@ -15,7 +15,6 @@ import {
   FolderOpenIcon,
   InboxIcon,
   Link02Icon,
-  MoreVerticalIcon,
   NoteEditIcon,
   StarIcon,
   StarOffIcon,
@@ -60,14 +59,11 @@ export function ItemTableSkeleton({ label }: { label: string }) {
         <ul aria-hidden="true" className="grid gap-2">
           {Array.from({ length: 5 }, (_, index) => (
             <li key={index}>
-              <div className="relative grid grid-cols-[auto_1fr] items-center gap-3 rounded-3xl border border-default bg-surface p-3 pe-14">
+              <div className="relative grid grid-cols-[auto_1fr] items-center gap-3 rounded-3xl border border-default bg-surface p-3">
                 <Skeleton animationType="shimmer" className="size-11 rounded-xl" />
                 <div className="grid min-w-0 gap-1">
                   <Skeleton animationType="shimmer" className="h-5 w-14 rounded-full" />
                   <Skeleton animationType="shimmer" className="h-5 w-2/3 rounded-md" />
-                </div>
-                <div className="absolute inset-y-0 right-2 flex items-center">
-                  <Skeleton animationType="shimmer" className="size-8 rounded-xl" />
                 </div>
               </div>
             </li>
@@ -96,6 +92,10 @@ export function ItemTable({
   const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1
   const end = Math.min(page * pageSize, totalItems)
   const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1)
+  const [menuItem, setMenuItem] = useState<ItemSummary | null>(null)
+  const [menuPoint, setMenuPoint] = useState({ x: 0, y: 0 })
+  const tableRef = useRef<HTMLDivElement>(null)
+  const menuAnchorRef = useRef<HTMLSpanElement>(null)
 
   function handleRowAction(item: ItemSummary, key: string) {
     if (key === 'open') onOpen?.(item.id)
@@ -107,7 +107,7 @@ export function ItemTable({
   }
 
   return (
-    <div className="grid gap-4">
+    <div ref={tableRef} className="relative grid gap-4">
       {items.length === 0 ? (
         <EmptyState className="flex min-h-[200px] w-full flex-col items-center justify-center gap-4 text-center">
           <HugeiconsIcon aria-hidden="true" className="text-muted" icon={InboxIcon} size={24} />
@@ -117,13 +117,36 @@ export function ItemTable({
         <ListScrollArea>
           <ul aria-label="All items" className="grid gap-2">
             {items.map((item) => (
-              <li key={item.id}>
-                {/* The row menu floats over one full-card button, so a click
-                    anywhere opens the item while the menu keeps its own layer. */}
+              <li
+                key={item.id}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+
+                  const bounds = tableRef.current?.getBoundingClientRect()
+                  setMenuItem(item)
+                  setMenuPoint({
+                    x: event.clientX - (bounds?.left ?? 0),
+                    y: event.clientY - (bounds?.top ?? 0),
+                  })
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+
+                  event.preventDefault()
+
+                  const row = event.currentTarget.getBoundingClientRect()
+                  const bounds = tableRef.current?.getBoundingClientRect()
+                  setMenuItem(item)
+                  setMenuPoint({
+                    x: row.left - (bounds?.left ?? 0) + 16,
+                    y: row.top - (bounds?.top ?? 0) + 16,
+                  })
+                }}
+              >
                 <div className="kivo-item-card relative rounded-3xl border border-default bg-surface transition-[background-color,scale] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover">
                   <button
                     aria-label={item.title}
-                    className="grid w-full grid-cols-[auto_1fr] items-center gap-3 rounded-3xl p-3 pe-14 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    className="grid w-full grid-cols-[auto_1fr] items-center gap-3 rounded-3xl p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     type="button"
                     onClick={() => onOpen?.(item.id)}
                   >
@@ -152,97 +175,102 @@ export function ItemTable({
                       </Typography>
                     </span>
                   </button>
-
-                  <div className="absolute inset-y-0 right-2 flex items-center">
-                    <Dropdown>
-                      <Button
-                        aria-label={`Actions for ${item.title}`}
-                        className="kivo-row-actions-trigger"
-                        isIconOnly
-                        size="sm"
-                        variant="ghost"
-                      >
-                        <HugeiconsIcon aria-hidden="true" icon={MoreVerticalIcon} size={18} />
-                      </Button>
-                      <Dropdown.Popover>
-                        <Dropdown.Menu
-                          className="kivo-row-actions-menu"
-                          onAction={(key) => handleRowAction(item, String(key))}
-                        >
-                          {onOpen ? (
-                            <Dropdown.Item id="open" textValue="Open details">
-                              <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
-                              <Label>Open details</Label>
-                            </Dropdown.Item>
-                          ) : null}
-                          {onToggleFavorite ? (
-                            <Dropdown.Item
-                              id="favorite"
-                              textValue={item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
-                            >
-                              <HugeiconsIcon
-                                aria-hidden="true"
-                                icon={item.isFavorite ? StarOffIcon : StarIcon}
-                                size={16}
-                              />
-                              <Label>
-                                {item.isFavorite ? 'Remove favorite' : 'Add to favorites'}
-                              </Label>
-                            </Dropdown.Item>
-                          ) : null}
-                          {onMove ? (
-                            <Dropdown.Item id="move" textValue="Move to collection">
-                              <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
-                              <Label>Move to collection</Label>
-                            </Dropdown.Item>
-                          ) : null}
-                          {onRestore ? (
-                            <Dropdown.Item id="restore" textValue="Restore">
-                              <HugeiconsIcon aria-hidden="true" icon={DeletePutBackIcon} size={16} />
-                              <Label>Restore</Label>
-                            </Dropdown.Item>
-                          ) : null}
-                          <Dropdown.Section
-                            aria-label="Danger zone"
-                            className="mt-1 border-t border-separator pt-1"
-                          >
-                            {onTrash ? (
-                              <Dropdown.Item id="trash" textValue="Move to trash" variant="danger">
-                                <HugeiconsIcon
-                                  aria-hidden="true"
-                                  className="text-danger"
-                                  icon={Delete02Icon}
-                                  size={16}
-                                />
-                                <Label>Move to trash</Label>
-                              </Dropdown.Item>
-                            ) : null}
-                            {onDeletePermanently ? (
-                              <Dropdown.Item
-                                id="delete-permanently"
-                                textValue="Delete permanently"
-                                variant="danger"
-                              >
-                                <HugeiconsIcon
-                                  aria-hidden="true"
-                                  className="text-danger"
-                                  icon={Delete02Icon}
-                                  size={16}
-                                />
-                                <Label>Delete permanently</Label>
-                              </Dropdown.Item>
-                            ) : null}
-                          </Dropdown.Section>
-                        </Dropdown.Menu>
-                      </Dropdown.Popover>
-                    </Dropdown>
-                  </div>
                 </div>
               </li>
             ))}
           </ul>
         </ListScrollArea>
       )}
+
+      {/* The row menu opens where the pointer was, so it anchors to this
+          zero-size mark instead of a fixed corner of the row. */}
+      <span
+        ref={menuAnchorRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute z-20"
+        style={{ left: menuPoint.x, top: menuPoint.y }}
+      />
+
+      <Dropdown
+        isOpen={menuItem !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setMenuItem(null)
+        }}
+      >
+        <Dropdown.Trigger aria-label="Item actions" className="sr-only" />
+        <Dropdown.Popover triggerRef={menuAnchorRef}>
+          <Dropdown.Menu
+            autoFocus
+            className="kivo-row-actions-menu"
+            onAction={(key) => {
+              if (menuItem) handleRowAction(menuItem, String(key))
+            }}
+          >
+            {onOpen ? (
+              <Dropdown.Item id="open" textValue="Open details">
+                <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
+                <Label>Open details</Label>
+              </Dropdown.Item>
+            ) : null}
+            {onToggleFavorite ? (
+              <Dropdown.Item
+                id="favorite"
+                textValue={menuItem?.isFavorite ? 'Remove favorite' : 'Add to favorites'}
+              >
+                <HugeiconsIcon
+                  aria-hidden="true"
+                  icon={menuItem?.isFavorite ? StarOffIcon : StarIcon}
+                  size={16}
+                />
+                <Label>{menuItem?.isFavorite ? 'Remove favorite' : 'Add to favorites'}</Label>
+              </Dropdown.Item>
+            ) : null}
+            {onMove ? (
+              <Dropdown.Item id="move" textValue="Move to collection">
+                <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
+                <Label>Move to collection</Label>
+              </Dropdown.Item>
+            ) : null}
+            {onRestore ? (
+              <Dropdown.Item id="restore" textValue="Restore">
+                <HugeiconsIcon aria-hidden="true" icon={DeletePutBackIcon} size={16} />
+                <Label>Restore</Label>
+              </Dropdown.Item>
+            ) : null}
+            <Dropdown.Section
+              aria-label="Danger zone"
+              className="mt-1 border-t border-separator pt-1"
+            >
+              {onTrash ? (
+                <Dropdown.Item id="trash" textValue="Move to trash" variant="danger">
+                  <HugeiconsIcon
+                    aria-hidden="true"
+                    className="text-danger"
+                    icon={Delete02Icon}
+                    size={16}
+                  />
+                  <Label>Move to trash</Label>
+                </Dropdown.Item>
+              ) : null}
+              {onDeletePermanently ? (
+                <Dropdown.Item
+                  id="delete-permanently"
+                  textValue="Delete permanently"
+                  variant="danger"
+                >
+                  <HugeiconsIcon
+                    aria-hidden="true"
+                    className="text-danger"
+                    icon={Delete02Icon}
+                    size={16}
+                  />
+                  <Label>Delete permanently</Label>
+                </Dropdown.Item>
+              ) : null}
+            </Dropdown.Section>
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
 
       {totalItems > 0 ? (
         <Pagination size="sm">

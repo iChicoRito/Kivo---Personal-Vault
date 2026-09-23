@@ -1147,9 +1147,9 @@ fn resolve_collection_protection(
                 if secret.chars().count() < 4 {
                     return Err("Password must be at least 4 characters".to_string());
                 }
-            } else if secret.len() != 4 || !secret.chars().all(|character| character.is_ascii_digit())
+            } else if secret.len() != 6 || !secret.chars().all(|character| character.is_ascii_digit())
             {
-                return Err("PIN must be 4 digits".to_string());
+                return Err("PIN must be 6 digits".to_string());
             }
 
             let hash = hash_secret(secret)?;
@@ -3843,15 +3843,17 @@ mod tests {
 
         let mut input = collection_input("Locked");
         input.protection = Some("pin".to_string());
-        input.secret = Some("1234".to_string());
+        input.secret = Some("123456".to_string());
         let locked = save_collection_with_state(&state, &input).expect("create locked");
 
-        assert!(verify_collection_secret_with_state(&state, &locked.id, "1234").expect("verify"));
-        assert!(!verify_collection_secret_with_state(&state, &locked.id, "9999").expect("verify"));
+        assert!(
+            verify_collection_secret_with_state(&state, &locked.id, "123456").expect("verify")
+        );
+        assert!(!verify_collection_secret_with_state(&state, &locked.id, "999999").expect("verify"));
 
         let open =
             save_collection_with_state(&state, &collection_input("Open")).expect("create open");
-        assert!(!verify_collection_secret_with_state(&state, &open.id, "1234").expect("verify"));
+        assert!(!verify_collection_secret_with_state(&state, &open.id, "123456").expect("verify"));
         assert!(!verify_collection_secret_with_state(&state, "missing", "1234").expect("verify"));
     }
 
@@ -3944,13 +3946,13 @@ mod tests {
         let error = save_collection_with_state(&state, &short).expect_err("short password");
         assert_eq!(error, "Password must be at least 4 characters");
 
-        for bad_pin in ["123", "12345", "12a4", ""] {
+        for bad_pin in ["123", "12345", "1234567", "12a456", ""] {
             let mut bad = collection_input("Bad pin");
             bad.name = format!("Bad pin {bad_pin}");
             bad.protection = Some("pin".to_string());
             bad.secret = Some(bad_pin.to_string());
             let error = save_collection_with_state(&state, &bad).expect_err("bad pin rejected");
-            assert_eq!(error, "PIN must be 4 digits");
+            assert_eq!(error, "PIN must be 6 digits");
         }
 
         // Nothing is written when validation fails.

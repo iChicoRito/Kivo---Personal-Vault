@@ -10,10 +10,10 @@ import {
   Input,
   InputOTP,
   Label,
+  ListBox,
   Modal,
-  Radio,
-  RadioGroup,
   REGEXP_ONLY_DIGITS,
+  Select,
   Skeleton,
   Tabs,
   TextField,
@@ -71,9 +71,7 @@ const stateLabelClass = 'uppercase'
 const NAME_REQUIRED_ERROR = 'Collection name is required.'
 const PASSWORD_REQUIRED_ERROR = 'Enter a password for this collection.'
 const PASSWORD_SHORT_ERROR = 'Password must be at least 4 characters.'
-const PASSWORD_MISMATCH_ERROR = 'Passwords do not match.'
-const PIN_REQUIRED_ERROR = 'Enter a 4-digit PIN.'
-const PIN_MISMATCH_ERROR = 'PINs do not match.'
+const PIN_REQUIRED_ERROR = 'Enter a 6-digit PIN.'
 const SAVE_ERROR = 'Kivo could not save this collection. Try again.'
 const DELETE_ERROR = 'Kivo could not delete this collection. Try again.'
 const ITEMS_ERROR = 'Kivo could not load items in this collection. Try again.'
@@ -140,24 +138,17 @@ function itemActions(item: ItemSummary): ItemCardAction[] {
   return actions
 }
 
-function secretError(
-  protection: CollectionProtection,
-  secret: string,
-  confirmSecret: string,
-) {
+function secretError(protection: CollectionProtection, secret: string) {
   const value = secret.trim()
-  const confirm = confirmSecret.trim()
 
   if (protection === 'password') {
     if (!value) return PASSWORD_REQUIRED_ERROR
     if (value.length < 4) return PASSWORD_SHORT_ERROR
-    if (value !== confirm) return PASSWORD_MISMATCH_ERROR
     return null
   }
 
   if (protection === 'pin') {
-    if (!/^\d{4}$/.test(value)) return PIN_REQUIRED_ERROR
-    if (value !== confirm) return PIN_MISMATCH_ERROR
+    if (!/^\d{6}$/.test(value)) return PIN_REQUIRED_ERROR
     return null
   }
 
@@ -171,7 +162,6 @@ type EditState = {
   initialProtection: CollectionProtection
   protection: CollectionProtection
   secret: string
-  confirmSecret: string
 }
 
 function CollectionChip({ collection }: { collection: Collection }) {
@@ -394,7 +384,6 @@ export function CollectionsPage() {
       initialProtection: 'none',
       protection: 'none',
       secret: '',
-      confirmSecret: '',
     })
   }
 
@@ -407,7 +396,6 @@ export function CollectionsPage() {
       initialProtection: collection.protection,
       protection: collection.protection,
       secret: '',
-      confirmSecret: '',
     })
   }
 
@@ -427,7 +415,7 @@ export function CollectionsPage() {
       : edit.protection !== edit.initialProtection
 
     if (protectionChanged && edit.protection !== 'none') {
-      const validation = secretError(edit.protection, edit.secret, edit.confirmSecret)
+      const validation = secretError(edit.protection, edit.secret)
       if (validation) {
         setEditError(validation)
         return
@@ -1056,10 +1044,13 @@ export function CollectionsPage() {
         <Modal.Backdrop>
           <Modal.Container>
             <Modal.Dialog>
+              <Modal.CloseTrigger className="size-8 rounded-full" />
               <Modal.Header>
-                <Modal.Heading>{edit?.id ? 'Rename collection' : 'New collection'}</Modal.Heading>
+                <Modal.Heading className="pr-8 text-xl font-semibold">
+                  {edit?.id ? 'Edit Collection' : 'New Collection'}
+                </Modal.Heading>
               </Modal.Header>
-              <Modal.Body className="grid gap-4">
+              <Modal.Body className="grid gap-6">
                 <TextField
                   isInvalid={editError === NAME_REQUIRED_ERROR}
                   value={edit?.name ?? ''}
@@ -1067,139 +1058,91 @@ export function CollectionsPage() {
                     setEdit((current) => (current ? { ...current, name: value } : current))
                   }
                 >
-                  <Label>Collection name</Label>
-                  <Input fullWidth variant="secondary" />
+                  <Label>Collection Name</Label>
+                  <Input fullWidth placeholder="Enter collection name" variant="secondary" />
                   {editError === NAME_REQUIRED_ERROR ? <FieldError>{editError}</FieldError> : null}
                 </TextField>
 
-                <RadioGroup
-                  name="protection"
-                  value={edit?.protection ?? 'none'}
-                  onChange={(value) =>
+                <Select
+                  fullWidth
+                  placeholder="Select one"
+                  selectedKey={edit && edit.protection !== 'none' ? edit.protection : null}
+                  variant="secondary"
+                  onSelectionChange={(key) =>
                     setEdit((current) =>
                       current
                         ? {
                             ...current,
-                            protection: value as CollectionProtection,
+                            protection: (key === null
+                              ? 'none'
+                              : String(key)) as CollectionProtection,
                             secret: '',
-                            confirmSecret: '',
                           }
                         : current,
                     )
                   }
                 >
-                  <Label>Protection</Label>
-                  <div className="mt-1 grid gap-1">
-                    <Radio className="min-h-11" value="none">
-                      <Radio.Content>
-                        <Radio.Control>
-                          <Radio.Indicator />
-                        </Radio.Control>
+                  <Label>Password Type (Optional)</Label>
+                  <Select.Trigger>
+                    <Select.Value />
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      <ListBox.Item id="none" textValue="None">
                         None
-                      </Radio.Content>
-                    </Radio>
-                    <Radio className="min-h-11" value="password">
-                      <Radio.Content>
-                        <Radio.Control>
-                          <Radio.Indicator />
-                        </Radio.Control>
+                      </ListBox.Item>
+                      <ListBox.Item id="password" textValue="Password">
                         Password
-                      </Radio.Content>
-                    </Radio>
-                    <Radio className="min-h-11" value="pin">
-                      <Radio.Content>
-                        <Radio.Control>
-                          <Radio.Indicator />
-                        </Radio.Control>
+                      </ListBox.Item>
+                      <ListBox.Item id="pin" textValue="PIN">
                         PIN
-                      </Radio.Content>
-                    </Radio>
-                  </div>
-                </RadioGroup>
+                      </ListBox.Item>
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
 
                 {edit?.protection === 'password' ? (
-                  <div className="grid gap-3">
-                    <TextField
-                      isInvalid={editError !== null}
+                  <TextField
+                    isInvalid={editError !== null}
+                    value={edit.secret}
+                    onChange={(value) =>
+                      setEdit((current) => (current ? { ...current, secret: value } : current))
+                    }
+                  >
+                    <Label>Password</Label>
+                    <Input
+                      fullWidth
+                      autoComplete="new-password"
+                      placeholder="Enter Password"
+                      type="password"
+                      variant="secondary"
+                    />
+                  </TextField>
+                ) : null}
+
+                {edit?.protection === 'pin' ? (
+                  <div className="grid gap-2">
+                    <Label>Enter 6 Digit PIN</Label>
+                    <InputOTP
+                      aria-label="PIN"
+                      className="kivo-otp"
+                      maxLength={6}
+                      pattern={REGEXP_ONLY_DIGITS}
                       value={edit.secret}
                       onChange={(value) =>
                         setEdit((current) => (current ? { ...current, secret: value } : current))
                       }
                     >
-                      <Label>Password</Label>
-                      <Input
-                        fullWidth
-                        autoComplete="new-password"
-                        type="password"
-                        variant="secondary"
-                      />
-                    </TextField>
-
-                    <TextField
-                      isInvalid={editError !== null}
-                      value={edit.confirmSecret}
-                      onChange={(value) =>
-                        setEdit((current) =>
-                          current ? { ...current, confirmSecret: value } : current,
-                        )
-                      }
-                    >
-                      <Label>Confirm password</Label>
-                      <Input
-                        fullWidth
-                        autoComplete="new-password"
-                        type="password"
-                        variant="secondary"
-                      />
-                    </TextField>
-                  </div>
-                ) : null}
-
-                {edit?.protection === 'pin' ? (
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label>PIN</Label>
-                      <InputOTP
-                        aria-label="PIN"
-                        className="kivo-otp"
-                        maxLength={4}
-                        pattern={REGEXP_ONLY_DIGITS}
-                        value={edit.secret}
-                        onChange={(value) =>
-                          setEdit((current) => (current ? { ...current, secret: value } : current))
-                        }
-                      >
-                        <InputOTP.Group>
-                          <InputOTP.Slot index={0} />
-                          <InputOTP.Slot index={1} />
-                          <InputOTP.Slot index={2} />
-                          <InputOTP.Slot index={3} />
-                        </InputOTP.Group>
-                      </InputOTP>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label>Confirm PIN</Label>
-                      <InputOTP
-                        aria-label="Confirm PIN"
-                        className="kivo-otp"
-                        maxLength={4}
-                        pattern={REGEXP_ONLY_DIGITS}
-                        value={edit.confirmSecret}
-                        onChange={(value) =>
-                          setEdit((current) =>
-                            current ? { ...current, confirmSecret: value } : current,
-                          )
-                        }
-                      >
-                        <InputOTP.Group>
-                          <InputOTP.Slot index={0} />
-                          <InputOTP.Slot index={1} />
-                          <InputOTP.Slot index={2} />
-                          <InputOTP.Slot index={3} />
-                        </InputOTP.Group>
-                      </InputOTP>
-                    </div>
+                      <InputOTP.Group>
+                        <InputOTP.Slot index={0} />
+                        <InputOTP.Slot index={1} />
+                        <InputOTP.Slot index={2} />
+                        <InputOTP.Slot index={3} />
+                        <InputOTP.Slot index={4} />
+                        <InputOTP.Slot index={5} />
+                      </InputOTP.Group>
+                    </InputOTP>
                   </div>
                 ) : null}
 
@@ -1209,12 +1152,12 @@ export function CollectionsPage() {
                   </Typography>
                 ) : null}
               </Modal.Body>
-              <Modal.Footer>
-                <Button variant="secondary" onPress={() => setEdit(null)}>
-                  Cancel
+              <Modal.Footer className="mt-8 flex flex-col gap-3">
+                <Button fullWidth onPress={() => void handleSave()}>
+                  {edit?.id ? 'Save Changes' : 'Create Collection'}
                 </Button>
-                <Button onPress={() => void handleSave()}>
-                  {edit?.id ? 'Save changes' : 'Create collection'}
+                <Button fullWidth variant="secondary" onPress={() => setEdit(null)}>
+                  Cancel
                 </Button>
               </Modal.Footer>
             </Modal.Dialog>

@@ -96,6 +96,18 @@ function renderTrash() {
   )
 }
 
+// Rows open their action menu on a right click. A title can repeat on the page,
+// so pick the first match that sits inside an item card.
+function openRowMenu(title: string) {
+  const titleElement = screen
+    .getAllByText(title)
+    .find((element) => element.closest('.kivo-item-card') !== null)
+
+  if (!titleElement) throw new Error(`The row for "${title}" is missing.`)
+
+  fireEvent.contextMenu(titleElement)
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   itemsMock.listItems.mockResolvedValue([])
@@ -171,7 +183,7 @@ describe('TrashPage', () => {
     renderTrash()
     await screen.findByText('Trashed note')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Trashed note' }))
+    openRowMenu('Trashed note')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Restore' }))
 
     await waitFor(() => expect(itemsMock.restoreItems).toHaveBeenCalledWith([TRASHED_NOTE.id]))
@@ -184,7 +196,7 @@ describe('TrashPage', () => {
     renderTrash()
     await screen.findByText('Trashed note')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Trashed note' }))
+    openRowMenu('Trashed note')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete permanently' }))
 
     const heading = await screen.findByRole('heading', {

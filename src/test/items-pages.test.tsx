@@ -200,6 +200,18 @@ function renderItemsPage() {
   )
 }
 
+// Rows open their action menu on a right click. A title can repeat on the page,
+// so pick the first match that sits inside an item card.
+function openRowMenu(title: string) {
+  const titleElement = screen
+    .getAllByText(title)
+    .find((element) => element.closest('.kivo-item-card') !== null)
+
+  if (!titleElement) throw new Error(`The row for "${title}" is missing.`)
+
+  fireEvent.contextMenu(titleElement)
+}
+
 async function openFiltersMenu() {
   fireEvent.click(screen.getByRole('button', { name: 'Filters' }))
   await screen.findByRole('menuitem', { name: 'Kind' })
@@ -427,7 +439,7 @@ describe('ItemsPage', () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Alpha note' }))
+    openRowMenu('Alpha note')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
 
     const dialog = await screen.findByRole('dialog')
@@ -440,14 +452,15 @@ describe('ItemsPage', () => {
     renderItemsPage()
     await screen.findByText('Alpha note')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Alpha note' }))
+    openRowMenu('Alpha note')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Add to favorites' }))
 
     await waitFor(() =>
       expect(itemsMock.setItemsFavorite).toHaveBeenCalledWith(['note-1'], true),
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Beta source' }))
+    await screen.findByText('Beta source')
+    openRowMenu('Beta source')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove favorite' }))
 
     await waitFor(() =>

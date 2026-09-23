@@ -182,19 +182,11 @@
 }
 
 /*
- * Row action menus in the items table. The trigger is a quiet ghost icon button,
- * but HeroUI still paints the accent focus ring on it and on the menu items,
- * which reads as a primary halo in a dense table. Both mark focus the way hover
- * is marked instead: a soft surface, plus a hairline on the trigger.
+ * Row action menus in the items table. HeroUI paints the accent focus ring on
+ * the menu items, which reads as a primary halo in a dense table. The rule
+ * marks focus the way hover is marked instead: a soft surface.
  */
 @layer utilities {
-  .kivo-row-actions-trigger:is(:focus-visible, [data-focus-visible="true"]) {
-    --button-bg: var(--default);
-    box-shadow: none;
-    outline: 1px solid var(--border);
-    outline-offset: 0;
-  }
-
   .kivo-row-actions-menu .menu-item:is(:focus-visible, [data-focus-visible="true"]) {
     box-shadow: none;
     background-color: var(--default);
@@ -231,12 +223,25 @@
 
   /*
    * HeroUI paints the one-time-code slots with the field surface, which lands on
-   * the dialog's own lightness, so the four boxes vanish inside a modal. The
-   * slots take the soft surface the app's tiles use instead, and step up while
-   * the user types.
+   * the dialog's own lightness, so the boxes vanish inside a modal. The slots
+   * take the soft surface the app's tiles use instead, and step up while the
+   * user types. They also stand taller than the default field, matching the
+   * large squares the collection dialogs use.
    */
   .kivo-otp .input-otp__slot {
+    height: 3rem;
+    border-radius: 1rem;
     background-color: var(--default);
+  }
+
+  /*
+   * HeroUI lays the slot group out at its content width, so six slots sit at
+   * the base slot width and leave the rest of the row empty. Letting the group
+   * take the free space makes the slots share the full width evenly.
+   */
+  .kivo-otp .input-otp__group {
+    flex: 1;
+    gap: 0.75rem;
   }
 
   .kivo-otp .input-otp__slot[data-active='true'],
@@ -313,6 +318,14 @@
  */
 .kivo-collection-menu.branched-menu {
   width: 100%;
+  /*
+   * The drop ring sits 4px outside its section, and the panel's scroll box
+   * clips anything past its edge, so the ring lost its top and right sides and
+   * showed as two loose lines. These edges keep the ring the room it needs.
+   */
+  padding-top: 6px;
+  padding-right: 6px;
+  padding-bottom: 6px;
 }
 
 .kivo-collection-menu.branched-menu::before {

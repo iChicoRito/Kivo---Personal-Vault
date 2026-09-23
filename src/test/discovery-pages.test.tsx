@@ -170,6 +170,18 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+// Rows open their action menu on a right click. A title can repeat on the page,
+// so pick the first match that sits inside an item card.
+function openRowMenu(title: string) {
+  const titleElement = screen
+    .getAllByText(title)
+    .find((element) => element.closest('.kivo-item-card') !== null)
+
+  if (!titleElement) throw new Error(`The row for "${title}" is missing.`)
+
+  fireEvent.contextMenu(titleElement)
+}
+
 // The type picker opens a HeroUI Select popover. React Aria names the trigger after
 // its current value, so match the default "All types" label. Drive the popover with
 // plain clicks so the page's onSelectionChange wiring stays under test.
@@ -327,7 +339,7 @@ describe('FavoritesPage', () => {
 
     itemsMock.listItems.mockClear()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Starred note' }))
+    openRowMenu('Starred note')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove favorite' }))
 
     await waitFor(() => expect(itemsMock.setItemsFavorite).toHaveBeenCalledWith([FAVORITE_NOTE.id], false))

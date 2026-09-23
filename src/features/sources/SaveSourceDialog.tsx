@@ -6,7 +6,6 @@ import {
   Label,
   Modal,
   Skeleton,
-  TextArea,
   TextField,
   Typography,
 } from '@heroui/react'
@@ -35,7 +34,6 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
   const [address, setAddress] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [note, setNote] = useState('')
   const [errors, setErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -53,7 +51,6 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
       setAddress('')
       setTitle('')
       setDescription('')
-      setNote('')
       setLoaded(null)
       return
     }
@@ -67,7 +64,6 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
         setAddress(item.url ?? '')
         setTitle(item.title)
         setDescription(item.description)
-        setNote(item.content ?? '')
         setLoaded(item)
       })
       .catch(() => {
@@ -108,7 +104,8 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
         title: title.trim(),
         description: description.trim(),
         url: address.trim(),
-        content: note,
+        // The personal note is no longer edited here, so a save keeps it as it is.
+        content: loaded?.content ?? '',
         collectionId: loaded?.collectionId ?? null,
         isFavorite: loaded?.isFavorite ?? false,
         isPinned: loaded?.isPinned ?? false,
@@ -144,7 +141,7 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
                   role="status"
                 >
                   <span className="sr-only">Loading source fields</span>
-                  {Array.from({ length: 4 }, (_, index) => (
+                  {Array.from({ length: 3 }, (_, index) => (
                     <div key={index} aria-hidden="true" className="grid gap-2">
                       <Skeleton className="h-4 w-24" />
                       <Skeleton className="h-9 w-full" />
@@ -193,11 +190,6 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
                   <TextField value={description} onChange={setDescription}>
                     <Label>Description</Label>
                     <Input fullWidth variant="secondary" />
-                  </TextField>
-
-                  <TextField value={note} onChange={setNote}>
-                    <Label>Personal note</Label>
-                    <TextArea className="min-h-24" fullWidth variant="secondary" />
                   </TextField>
                 </form>
               )}

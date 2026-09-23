@@ -171,6 +171,18 @@ function renderInRouter(node: ReactNode) {
   return render(<MemoryRouter>{node}</MemoryRouter>)
 }
 
+// Rows open their action menu on a right click. A title can repeat on the page,
+// so pick the first match that sits inside an item card.
+function openItemMenu(title: string) {
+  const titleElement = screen
+    .getAllByText(title)
+    .find((element) => element.closest('.kivo-item-card') !== null)
+
+  if (!titleElement) throw new Error(`The row for "${title}" is missing.`)
+
+  fireEvent.contextMenu(titleElement)
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   itemsMock.listItems.mockResolvedValue([])
@@ -261,11 +273,11 @@ describe('FilesPage', () => {
     renderInRouter(<FilesPage />)
     await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    openItemMenu('Budget 2026.pdf')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Open' }))
     await waitFor(() => expect(filesMock.openItemFile).toHaveBeenCalledWith(FILE.id))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    openItemMenu('Budget 2026.pdf')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal' }))
     await waitFor(() => expect(filesMock.revealItemFile).toHaveBeenCalledWith(FILE.id))
   })
@@ -276,7 +288,7 @@ describe('FilesPage', () => {
     renderInRouter(<FilesPage />)
     await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    openItemMenu('Budget 2026.pdf')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
 
     const dialog = await screen.findByRole('dialog')
@@ -305,7 +317,7 @@ describe('FilesPage', () => {
     renderInRouter(<FilesPage />)
     await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    openItemMenu('Budget 2026.pdf')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to collection' }))
 
     const dialog = await screen.findByRole('dialog')
@@ -322,7 +334,7 @@ describe('FilesPage', () => {
     renderInRouter(<FilesPage />)
     await screen.findByRole('button', { name: 'Budget 2026.pdf' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for Budget 2026.pdf' }))
+    openItemMenu('Budget 2026.pdf')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
 
     const dialog = await screen.findByRole('dialog')
@@ -386,7 +398,13 @@ describe('CollectionsPage', () => {
   }
 
   async function openRowMenu(name: string, action: string) {
-    fireEvent.click(screen.getByRole('button', { name: `Actions for ${name}` }))
+    const titleElement = screen
+      .getAllByText(name)
+      .find((element) => element.closest('.kivo-item-card') !== null)
+
+    if (!titleElement) throw new Error(`The row for "${name}" is missing.`)
+
+    fireEvent.contextMenu(titleElement)
     fireEvent.click(await screen.findByRole('menuitem', { name: action }))
   }
 
@@ -413,10 +431,10 @@ describe('CollectionsPage', () => {
     renderCollections()
     const dialog = await openNewCollectionDialog()
 
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection name' }), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection Name' }), {
       target: { value: 'Work' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create collection' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Collection' }))
 
     await waitFor(() =>
       expect(collectionsMock.saveCollection).toHaveBeenCalledWith({
@@ -433,18 +451,16 @@ describe('CollectionsPage', () => {
     renderCollections()
     const dialog = await openNewCollectionDialog()
 
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection name' }), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection Name' }), {
       target: { value: 'Private' },
     })
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Password' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /Password Type/ }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Password' }))
     fireEvent.change(
       within(dialog).getByLabelText('Password', { selector: 'input[type="password"]' }),
       { target: { value: 'hunter2' } },
     )
-    fireEvent.change(within(dialog).getByLabelText('Confirm password'), {
-      target: { value: 'hunter2' },
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create collection' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Collection' }))
 
     await waitFor(() =>
       expect(collectionsMock.saveCollection).toHaveBeenCalledWith({
@@ -457,57 +473,47 @@ describe('CollectionsPage', () => {
     )
   })
 
-  it('reports a short or mismatched password and does not save', async () => {
+  it('reports a short password and does not save', async () => {
     renderCollections()
     const dialog = await openNewCollectionDialog()
 
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection name' }), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection Name' }), {
       target: { value: 'Private' },
     })
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Password' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /Password Type/ }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Password' }))
 
     const secret = within(dialog).getByLabelText('Password', {
       selector: 'input[type="password"]',
     })
-    const confirm = within(dialog).getByLabelText('Confirm password')
 
     fireEvent.change(secret, { target: { value: 'abc' } })
-    fireEvent.change(confirm, { target: { value: 'abc' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create collection' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Collection' }))
 
     expect(await screen.findByText('Password must be at least 4 characters.')).toBeInTheDocument()
-
-    fireEvent.change(secret, { target: { value: 'abcd' } })
-    fireEvent.change(confirm, { target: { value: 'abce' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create collection' }))
-
-    expect(await screen.findByText('Passwords do not match.')).toBeInTheDocument()
     expect(collectionsMock.saveCollection).not.toHaveBeenCalled()
   })
 
-  it('creates a collection with a PIN and rejects a mismatch', async () => {
+  it('creates a collection with a 6-digit PIN and rejects a short one', async () => {
     renderCollections()
     const dialog = await openNewCollectionDialog()
 
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection name' }), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection Name' }), {
       target: { value: 'Secret' },
     })
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'PIN' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /Password Type/ }))
+    fireEvent.click(await screen.findByRole('option', { name: 'PIN' }))
 
     const pin = within(dialog).getByLabelText('PIN', { selector: 'input[data-input-otp]' })
-    const confirmPin = within(dialog).getByLabelText('Confirm PIN', {
-      selector: 'input[data-input-otp]',
-    })
 
     fireEvent.change(pin, { target: { value: '1234' } })
-    fireEvent.change(confirmPin, { target: { value: '4321' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create collection' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Collection' }))
 
-    expect(await screen.findByText('PINs do not match.')).toBeInTheDocument()
+    expect(await screen.findByText('Enter a 6-digit PIN.')).toBeInTheDocument()
     expect(collectionsMock.saveCollection).not.toHaveBeenCalled()
 
-    fireEvent.change(confirmPin, { target: { value: '1234' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create collection' }))
+    fireEvent.change(pin, { target: { value: '123456' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Collection' }))
 
     await waitFor(() =>
       expect(collectionsMock.saveCollection).toHaveBeenCalledWith({
@@ -515,7 +521,7 @@ describe('CollectionsPage', () => {
         name: 'Secret',
         icon: 'folder',
         protection: 'pin',
-        secret: '1234',
+        secret: '123456',
       }),
     )
   })
@@ -528,10 +534,10 @@ describe('CollectionsPage', () => {
     await openRowMenu('Work', 'Rename Work')
 
     const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection name' }), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Collection Name' }), {
       target: { value: 'Archive' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }))
 
     await waitFor(() =>
       expect(collectionsMock.saveCollection).toHaveBeenCalledWith({

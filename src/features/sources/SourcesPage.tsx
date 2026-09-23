@@ -68,9 +68,8 @@ function SourcesLoadingSkeleton({ view }: { view: SourceView }) {
         <li key={index} className="min-w-0">
           {view === 'grid' ? (
             <div className="kivo-item-card flex h-full flex-col gap-2 rounded-3xl border border-default bg-surface p-4">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 <Skeleton className="h-5 w-16 rounded-full" />
-                <Skeleton className="size-8 rounded-lg" />
               </div>
               <div className="grid min-w-0 gap-0.5">
                 <Skeleton className="h-4 w-2/3 rounded-md" />
@@ -81,16 +80,13 @@ function SourcesLoadingSkeleton({ view }: { view: SourceView }) {
             </div>
           ) : (
             <div className="kivo-item-card relative rounded-3xl border border-default bg-surface">
-              <div className="flex items-center gap-3 rounded-3xl p-3 pe-14">
+              <div className="flex items-center gap-3 rounded-3xl p-3">
                 <Skeleton className="size-11 shrink-0 rounded-xl" />
                 <span className="grid min-w-0 flex-1 gap-1">
                   <Skeleton className="h-3 w-14 rounded-full" />
                   <Skeleton className="h-4 w-2/3 rounded-md" />
                   <Skeleton className="h-3 w-4/5 rounded-md" />
                 </span>
-              </div>
-              <div className="absolute inset-y-0 right-2 flex items-center">
-                <Skeleton className="size-8 rounded-lg" />
               </div>
             </div>
           )}

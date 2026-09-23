@@ -20,19 +20,19 @@ export type UnlockDialogProps = {
 }
 
 const EMPTY_PASSWORD_MESSAGE = 'Enter the password.'
-const EMPTY_PIN_MESSAGE = 'Enter the 4-digit PIN.'
+const EMPTY_PIN_MESSAGE = 'Enter the PIN.'
 const WRONG_PASSWORD_MESSAGE = 'That password did not match. Try again.'
 const WRONG_PIN_MESSAGE = 'That PIN did not match. Try again.'
 const CHECK_ERROR_MESSAGE = 'We could not check the password. Try again.'
 
-const PIN_SLOTS = [0, 1, 2, 3]
+const PIN_SLOTS = [0, 1, 2, 3, 4, 5]
 
 /**
  * Asks for a protected collection's secret before a blocked action runs. One
- * dialog serves every collection: a password field or a 4-digit PIN field. A
- * correct secret calls `onUnlocked`; a wrong or empty one leaves an inline
- * message. The field and the message reset whenever the collection changes or
- * the dialog closes, so the next collection never starts with the last secret.
+ * dialog serves every collection: a password field or a PIN field. A correct
+ * secret calls `onUnlocked`; a wrong or empty one leaves an inline message. The
+ * field and the message reset whenever the collection changes or the dialog
+ * closes, so the next collection never starts with the last secret.
  */
 export function UnlockDialog({ collection, onCancel, onUnlocked }: UnlockDialogProps) {
   const [secret, setSecret] = useState('')
@@ -135,7 +135,7 @@ export function UnlockDialog({ collection, onCancel, onUnlocked }: UnlockDialogP
                       aria-label="Collection PIN"
                       className="kivo-otp"
                       inputMode="numeric"
-                      maxLength={4}
+                      maxLength={6}
                       pattern={REGEXP_ONLY_DIGITS}
                       ref={otpRef}
                       value={secret}
@@ -170,7 +170,7 @@ export function UnlockDialog({ collection, onCancel, onUnlocked }: UnlockDialogP
 
                 <Typography color="muted" type="body">
                   {isPin
-                    ? 'This collection is protected. Enter the 4-digit PIN.'
+                    ? 'This collection is protected. Enter the PIN.'
                     : 'This collection is protected. Enter the password.'}
                 </Typography>
               </form>
