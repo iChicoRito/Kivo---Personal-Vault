@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { AppRoutes } from './app/router'
 import { PreferencesProvider } from './app/preferences'
 import StatusScreen from './app/StatusScreen'
+import { FeedbackToastRegion } from './components/ui/FeedbackToast'
 import { initializeDatabase } from './data/database'
 import { loadBootState, type BootState } from './data/setup'
 import OnboardingPage from './features/onboarding/OnboardingPage'
@@ -92,6 +93,7 @@ function ReadyApplication() {
       <BrowserRouter>
         <AppRoutes />
       </BrowserRouter>
+      <FeedbackToastRegion />
     </PreferencesProvider>
   )
 }

@@ -31,6 +31,7 @@ import {
 } from '../../data/settings'
 import { usePreferences } from '../../app/preferences'
 import PageHeader from '../../app/PageHeader'
+import { notifyError, notifySuccess } from '../../lib/feedback'
 import AppLockSettings from '../security/AppLockSettings'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -213,6 +214,7 @@ export default function SettingsPage() {
       await updatePreferences({ ...patch, startAtLogin })
     } catch {
       setAppearanceError(APPEARANCE_SAVE_ERROR)
+      notifyError(APPEARANCE_SAVE_ERROR)
     }
   }
 
@@ -238,8 +240,10 @@ export default function SettingsPage() {
       setOwnerName(trimmedOwner)
       setVaultName(nextVault)
       setProfileSaved(true)
+      notifySuccess('Profile saved')
     } catch {
       setProfileSaveError(PROFILE_SAVE_ERROR)
+      notifyError(PROFILE_SAVE_ERROR)
     } finally {
       setProfileSaving(false)
     }
@@ -261,6 +265,7 @@ export default function SettingsPage() {
     } catch {
       setStartAtLogin(previous)
       setStartAtLoginError(NATIVE_SAVE_ERROR)
+      notifyError(NATIVE_SAVE_ERROR)
       setStartAtLoginBusy(false)
       return
     }
@@ -279,6 +284,7 @@ export default function SettingsPage() {
 
       setStartAtLogin(reconciled)
       setStartAtLoginError(AUTOSTART_NOT_SAVED)
+      notifyError(AUTOSTART_NOT_SAVED)
       setStartAtLoginBusy(false)
       return
     }
@@ -306,8 +312,10 @@ export default function SettingsPage() {
       await updatePreferences({ ...RESET_PREFERENCES, startAtLogin: nextStartAtLogin })
       setAppearanceError(null)
       resetDialog.close()
+      notifySuccess('Preferences reset')
     } catch {
       setResetError(RESET_SAVE_ERROR)
+      notifyError(RESET_SAVE_ERROR)
     } finally {
       setResetBusy(false)
     }

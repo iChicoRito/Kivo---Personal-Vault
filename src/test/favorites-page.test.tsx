@@ -1,17 +1,48 @@
 import '@testing-library/jest-dom/vitest'
 
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ItemSummary } from '../data/items'
+import { VAULT_CHANGED_EVENT } from '../data/events'
 
 const itemsMock = vi.hoisted(() => ({
   listItems: vi.fn(),
   setItemsFavorite: vi.fn(),
+  moveItemsToCollection: vi.fn(),
+}))
+
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
 }))
 
 vi.mock('../data/items', () => itemsMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 vi.mock('../features/items/ItemDetailsDialog', () => ({ ItemDetailsDialog: () => null }))
+
+// The picker opens a HeroUI Select popover that is awkward to drive in jsdom.
+// A native select keeps the page wiring under test.
+vi.mock('../components/items/dialogs', () => ({
+  CollectionSelect: ({
+    value,
+    onChange,
+    label,
+  }: {
+    value: string | null
+    onChange: (next: string | null) => void
+    label?: string
+  }) => (
+    <select
+      aria-label={label ?? 'Collection'}
+      value={value ?? ''}
+      onChange={(event) => onChange(event.target.value === '' ? null : event.target.value)}
+    >
+      <option value="">No collection</option>
+      <option value="collection-1">Collection One</option>
+    </select>
+  ),
+}))
 
 import { FavoritesPage } from '../features/favorites/FavoritesPage'
 
@@ -32,6 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   itemsMock.listItems.mockResolvedValue([FAVORITE_ITEM])
   itemsMock.setItemsFavorite.mockResolvedValue(undefined)
+  itemsMock.moveItemsToCollection.mockResolvedValue(undefined)
 })
 
 describe('FavoritesPage', () => {
@@ -79,5 +111,63 @@ describe('FavoritesPage', () => {
     expect(
       await screen.findByText('No favorites yet. Items marked as favorites will appear here.'),
     ).toBeInTheDocument()
+  })
+
+  it('moves a favorite to a collection from its row menu', async () => {
+    render(<FavoritesPage />)
+    await screen.findByText('Favorite note')
+
+    fireEvent.contextMenu(screen.getByText('Favorite note'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to collection' }))
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Collection'), {
+      target: { value: 'collection-1' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+
+    await waitFor(() =>
+      expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['favorite-1'], 'collection-1'),
+    )
+    await waitFor(() =>
+      expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Item moved to collection'),
+    )
+  })
+
+  it('shows a danger toast when a favorite toggle fails', async () => {
+    itemsMock.setItemsFavorite.mockRejectedValueOnce(new Error('favorite failed'))
+
+    render(<FavoritesPage />)
+    await screen.findByText('Favorite note')
+
+    fireEvent.contextMenu(screen.getByText('Favorite note'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove favorite' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not update this favorite. Your items are unchanged. Try again.',
+      ),
+    )
+  })
+
+  it('refetches favorites when the vault changes', async () => {
+    const restored: ItemSummary = {
+      ...FAVORITE_ITEM,
+      id: 'favorite-2',
+      title: 'Restored note',
+    }
+    itemsMock.listItems
+      .mockResolvedValueOnce([FAVORITE_ITEM])
+      .mockResolvedValueOnce([restored])
+
+    render(<FavoritesPage />)
+    await screen.findByText('Favorite note')
+
+    act(() => {
+      window.dispatchEvent(new Event(VAULT_CHANGED_EVENT))
+    })
+
+    expect(await screen.findByText('Restored note')).toBeInTheDocument()
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(2)
   })
 })

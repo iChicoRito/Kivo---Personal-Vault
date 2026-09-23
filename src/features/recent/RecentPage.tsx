@@ -4,6 +4,7 @@ import { Alert, Button, Typography } from '@heroui/react'
 import PageHeader from '../../app/PageHeader'
 import { ItemList, ItemListSkeleton } from '../../components/items/ItemList'
 import { listRecentItems, type RecentItems } from '../../data/activity'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -18,9 +19,11 @@ export function RecentPage() {
   const [attempt, setAttempt] = useState(0)
   const [openItemId, setOpenItemId] = useState<string | null>(null)
 
+  useVaultChanged(() => setAttempt((value) => value + 1))
+
   useEffect(() => {
     let active = true
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     listRecentItems()
       .then((loaded) => {

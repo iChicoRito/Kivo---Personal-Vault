@@ -1,3 +1,4 @@
+import { notifyVaultChanged } from './events'
 import { invoke } from './runtime'
 
 export type CollectionProtection = 'none' | 'password' | 'pin'
@@ -23,7 +24,9 @@ export async function saveCollection(input: {
   protection?: CollectionProtection
   secret?: string | null
 }): Promise<Collection> {
-  return invoke<Collection>('save_collection', { input })
+  const collection = await invoke<Collection>('save_collection', { input })
+  notifyVaultChanged()
+  return collection
 }
 
 export async function verifyCollectionSecret(id: string, secret: string): Promise<boolean> {
@@ -31,5 +34,6 @@ export async function verifyCollectionSecret(id: string, secret: string): Promis
 }
 
 export async function deleteCollection(id: string): Promise<void> {
-  return invoke<void>('delete_collection', { id })
+  await invoke<void>('delete_collection', { id })
+  notifyVaultChanged()
 }

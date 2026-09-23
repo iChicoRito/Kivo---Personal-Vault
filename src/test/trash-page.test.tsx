@@ -51,12 +51,19 @@ const dashboardMock = vi.hoisted(() => ({
   loadVaultSummary: vi.fn(),
 }))
 
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+  trashWithUndo: vi.fn(),
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/activity', () => activityMock)
 vi.mock('../data/dashboard', () => dashboardMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 
 import { AppRoutes } from '../app/router'
 
@@ -188,6 +195,25 @@ describe('TrashPage', () => {
 
     await waitFor(() => expect(itemsMock.restoreItems).toHaveBeenCalledWith([TRASHED_NOTE.id]))
     await waitFor(() => expect(itemsMock.listItems).toHaveBeenCalledTimes(2))
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Restored from Trash')
+  })
+
+  it('shows an error toast when restore fails', async () => {
+    itemsMock.listItems.mockResolvedValue([TRASHED_NOTE])
+    itemsMock.restoreItems.mockRejectedValue(new Error('restore failed'))
+
+    renderTrash()
+    await screen.findByText('Trashed note')
+
+    openRowMenu('Trashed note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Restore' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not restore this item. Try again.',
+      ),
+    )
+    expect(feedbackMock.notifySuccess).not.toHaveBeenCalled()
   })
 
   it('deletes an item permanently only after the confirmation', async () => {
@@ -211,6 +237,31 @@ describe('TrashPage', () => {
     await waitFor(() =>
       expect(itemsMock.deleteItemsPermanently).toHaveBeenCalledWith([TRASHED_NOTE.id]),
     )
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Deleted forever')
+  })
+
+  it('shows an error toast when a permanent delete fails', async () => {
+    itemsMock.listItems.mockResolvedValue([TRASHED_NOTE])
+    itemsMock.deleteItemsPermanently.mockRejectedValue(new Error('delete failed'))
+
+    renderTrash()
+    await screen.findByText('Trashed note')
+
+    openRowMenu('Trashed note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete permanently' }))
+
+    const heading = await screen.findByRole('heading', {
+      name: 'Permanently delete this item?',
+    })
+    const dialog = heading.closest('[role="dialog"]') as HTMLElement
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete permanently' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not delete this item. Try again.',
+      ),
+    )
+    expect(feedbackMock.notifySuccess).not.toHaveBeenCalled()
   })
 
   it('disables Empty Trash when the trash is empty', async () => {
@@ -239,6 +290,28 @@ describe('TrashPage', () => {
         TRASHED_SOURCE.id,
       ]),
     )
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Trash emptied')
+  })
+
+  it('shows an error toast when emptying the trash fails', async () => {
+    itemsMock.listItems.mockResolvedValue([TRASHED_NOTE, TRASHED_SOURCE])
+    itemsMock.deleteItemsPermanently.mockRejectedValue(new Error('empty failed'))
+
+    renderTrash()
+    await screen.findByText('Trashed note')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Empty Trash' }))
+
+    const heading = await screen.findByRole('heading', { name: 'Empty Trash?' })
+    const dialog = heading.closest('[role="dialog"]') as HTMLElement
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Empty Trash' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not empty the Trash. Try again.',
+      ),
+    )
+    expect(feedbackMock.notifySuccess).not.toHaveBeenCalled()
   })
 
   it('shows the empty message for an empty trash', async () => {

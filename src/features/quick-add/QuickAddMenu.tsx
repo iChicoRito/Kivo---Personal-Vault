@@ -10,7 +10,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { useNavigate } from 'react-router-dom'
 
-import { importFile, saveItem } from '../../data/items'
+import { importFile } from '../../data/items'
 import { pickFile } from '../../data/files'
 import SaveSourceDialog from '../sources/SaveSourceDialog'
 import QuickAddDialog from './QuickAddDialog'
@@ -19,7 +19,6 @@ type QuickAddMenuProps = {
   onAdded?: () => void
 }
 
-const NOTE_ERROR = 'Kivo could not create a note. Try again.'
 const IMPORT_ERROR = 'Kivo could not import that file. Try again.'
 
 export function QuickAddMenu({ onAdded }: QuickAddMenuProps) {
@@ -29,19 +28,9 @@ export function QuickAddMenu({ onAdded }: QuickAddMenuProps) {
   const [sourceOpen, setSourceOpen] = useState(false)
   const [collectionOpen, setCollectionOpen] = useState(false)
 
-  async function handleNewNote() {
-    setError(null)
-    setBusy(true)
-
-    try {
-      const note = await saveItem({ kind: 'note', title: 'Untitled note' })
-      onAdded?.()
-      navigate(`/notes/${note.id}`)
-    } catch {
-      setError(NOTE_ERROR)
-    } finally {
-      setBusy(false)
-    }
+  function handleNewNote() {
+    onAdded?.()
+    navigate('/notes/new')
   }
 
   async function handleImport() {
@@ -73,7 +62,7 @@ export function QuickAddMenu({ onAdded }: QuickAddMenuProps) {
 
   function handleAction(key: string) {
     if (key === 'note') {
-      void handleNewNote()
+      handleNewNote()
       return
     }
 

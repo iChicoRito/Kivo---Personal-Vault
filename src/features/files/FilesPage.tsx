@@ -34,10 +34,11 @@ import {
   loadItem,
   moveItemsToCollection,
   saveItem,
-  trashItems,
   type ItemSummary,
 } from '../../data/items'
 import { openItemFile, pickFiles, revealItemFile } from '../../data/files'
+import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import { CollectionFolderPanel } from '../collections/CollectionFolderPanel'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -49,7 +50,6 @@ const OPEN_ERROR = 'Kivo could not open this file. It may be missing from this d
 const REVEAL_ERROR = 'Kivo could not reveal this file. It may be missing from this device.'
 const RENAME_ERROR = 'Kivo could not rename this file. Try again.'
 const MOVE_ERROR = 'Kivo could not move this file. Try again.'
-const TRASH_ERROR = 'Kivo could not move this file to Trash. Try again.'
 
 type RenameState = { id: string; title: string } | null
 type MoveState = { id: string; collectionId: string | null } | null
@@ -85,11 +85,12 @@ export function FilesPage() {
   const [renameTarget, setRenameTarget] = useState<RenameState>(null)
   const [renameError, setRenameError] = useState<string | null>(null)
   const [moveTarget, setMoveTarget] = useState<MoveState>(null)
-  const [moveError, setMoveError] = useState<string | null>(null)
   const [trashTarget, setTrashTarget] = useState<string | null>(null)
 
+  useVaultChanged(() => setAttempt((value) => value + 1))
+
   const loadFiles = useCallback(async () => {
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     try {
       const loaded = await listItems({ kind: 'file' })
@@ -112,7 +113,7 @@ export function FilesPage() {
     try {
       paths = await pickFiles()
     } catch {
-      setActionError(IMPORT_ERROR)
+      notifyError(IMPORT_ERROR)
       return
     }
 
@@ -133,7 +134,8 @@ export function FilesPage() {
 
       await loadFiles()
 
-      if (failed > 0) setActionError(IMPORT_ERROR)
+      if (failed > 0) notifyError(IMPORT_ERROR)
+      else notifySuccess('File imported')
     } finally {
       setBusy(false)
     }
@@ -164,7 +166,6 @@ export function FilesPage() {
     else if (key === 'reveal') void handleReveal(file.id)
     else if (key === 'rename') openRename(file)
     else if (key === 'move') {
-      setMoveError(null)
       setMoveTarget({ id: file.id, collectionId: file.collectionId })
     } else if (key === 'trash') setTrashTarget(file.id)
   }
@@ -203,20 +204,20 @@ export function FilesPage() {
       await loadFiles()
     } catch {
       setRenameError(RENAME_ERROR)
+      notifyError(RENAME_ERROR)
     }
   }
 
   async function handleMove() {
     if (!moveTarget) return
 
-    setMoveError(null)
-
     try {
       await moveItemsToCollection([moveTarget.id], moveTarget.collectionId)
       setMoveTarget(null)
       await loadFiles()
+      notifySuccess('File moved to collection')
     } catch {
-      setMoveError(MOVE_ERROR)
+      notifyError(MOVE_ERROR)
     }
   }
 
@@ -227,12 +228,9 @@ export function FilesPage() {
     setTrashTarget(null)
     setActionError(null)
 
-    try {
-      await trashItems([id])
-      await loadFiles()
-    } catch {
-      setActionError(TRASH_ERROR)
-    }
+    const moved = await trashWithUndo({ ids: [id], label: 'File' })
+
+    if (moved) await loadFiles()
   }
 
   const heading = (
@@ -424,7 +422,7 @@ export function FilesPage() {
               <Modal.Header>
                 <Modal.Heading>Move file to collection</Modal.Heading>
               </Modal.Header>
-              <Modal.Body className="grid gap-3">
+              <Modal.Body>
                 <CollectionSelect
                   label="Collection"
                   value={moveTarget?.collectionId ?? null}
@@ -434,11 +432,6 @@ export function FilesPage() {
                     )
                   }
                 />
-                {moveError ? (
-                  <Typography className="font-semibold text-danger" role="alert" type="body">
-                    {moveError}
-                  </Typography>
-                ) : null}
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="secondary" onPress={() => setMoveTarget(null)}>

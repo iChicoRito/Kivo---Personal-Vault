@@ -5,6 +5,7 @@ import { Outlet } from 'react-router-dom'
 
 import { GradualBlur } from '../components/ui/GradualBlur'
 import { AnimatedThemeToggler } from '../components/ui/animated-theme-toggler'
+import { notifyError } from '../lib/feedback'
 import { cn } from '../lib/utils'
 import AppDock from './AppDock'
 import NavbarSearch from './NavbarSearch'
@@ -23,7 +24,9 @@ function ThemeToggle() {
       onThemeChange={(theme) => {
         // The toggler runs its own view transition, so the provider applies the
         // palette without starting a second one.
-        void updatePreferences({ theme }, { transition: false }).catch(() => {})
+        void updatePreferences({ theme }, { transition: false }).catch(() => {
+          notifyError('Kivo could not change the theme. Try again.')
+        })
       }}
     />
   )

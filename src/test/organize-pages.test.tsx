@@ -64,6 +64,12 @@ const sourceDialogMock = vi.hoisted(() =>
   vi.fn((_props: { open: boolean; itemId: string | null }) => null),
 )
 
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+  trashWithUndo: vi.fn(),
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
@@ -71,6 +77,7 @@ vi.mock('../data/settings', () => settingsMock)
 vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/activity', () => activityMock)
 vi.mock('../data/dashboard', () => dashboardMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 vi.mock('../features/sources/SaveSourceDialog', () => ({ default: sourceDialogMock }))
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -190,6 +197,7 @@ beforeEach(() => {
   itemsMock.loadItem.mockResolvedValue({ ...LOADED_FILE })
   itemsMock.moveItemsToCollection.mockResolvedValue(undefined)
   itemsMock.trashItems.mockResolvedValue(undefined)
+  feedbackMock.trashWithUndo.mockResolvedValue(true)
   itemsMock.importFile.mockResolvedValue({ ...LOADED_FILE })
   filesMock.pickFile.mockResolvedValue(null)
   filesMock.pickFiles.mockResolvedValue(null)
@@ -263,7 +271,11 @@ describe('FilesPage', () => {
     await waitFor(() =>
       expect(itemsMock.importFile).toHaveBeenCalledWith('C:\\Docs\\Report.pdf'),
     )
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not import')
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not import one or more files. Try again.',
+      ),
+    )
     await waitFor(() => expect(itemsMock.listItems).toHaveBeenCalledTimes(2))
   })
 
@@ -340,7 +352,9 @@ describe('FilesPage', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))
 
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith([FILE.id]))
+    await waitFor(() =>
+      expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: [FILE.id], label: 'File' }),
+    )
   })
 
   it('marks a missing file and disables its open action', async () => {
@@ -685,7 +699,9 @@ describe('CollectionsPage', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }))
 
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith([NOTE.id]))
+    await waitFor(() =>
+      expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: [NOTE.id], label: 'Item' }),
+    )
     await waitFor(() => expect(itemsMock.listItems.mock.calls.length).toBeGreaterThan(loads))
   })
 
@@ -863,18 +879,15 @@ describe('TagsPage', () => {
 })
 
 describe('QuickAddDialog', () => {
-  it('creates a note and navigates to the editor', async () => {
+  it('starts the draft note flow without saving', async () => {
     const onClose = vi.fn()
-    itemsMock.saveItem.mockResolvedValue({ ...NOTE_ITEM })
 
     renderInRouter(<QuickAddDialog open onClose={onClose} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'New note' }))
 
-    await waitFor(() =>
-      expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
-    )
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(`/notes/${NOTE_ITEM.id}`))
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/notes/new'))
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 

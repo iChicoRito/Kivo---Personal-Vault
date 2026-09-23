@@ -515,25 +515,14 @@ describe('DashboardPage', () => {
   })
 
   it('starts the note flow from the empty vault action', async () => {
-    itemsMock.saveItem.mockResolvedValue({
-      ...SEARCH_NOTE_ITEM,
-      id: 'start-note-1',
-      title: 'Untitled note',
-    })
-    itemsMock.loadItem.mockResolvedValue({
-      ...SEARCH_NOTE_ITEM,
-      id: 'start-note-1',
-      title: 'Untitled note',
-    })
-
     renderRoute('/dashboard')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add Note' }))
 
-    await waitFor(() =>
-      expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
-    )
-    expect(await screen.findByDisplayValue('Untitled note')).toBeInTheDocument()
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('')
+    expect(screen.getByPlaceholderText('Untitled note')).toBeInTheDocument()
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
+    expect(itemsMock.loadItem).not.toHaveBeenCalled()
   })
 
   it('opens a collection shortcut with its filter in All Items', async () => {

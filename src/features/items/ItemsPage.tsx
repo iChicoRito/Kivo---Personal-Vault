@@ -19,11 +19,12 @@ import {
   listItems,
   moveItemsToCollection,
   setItemsFavorite,
-  trashItems,
   type ItemFilter,
   type ItemSummary,
 } from '../../data/items'
 import { listTags, type Tag } from '../../data/tags'
+import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import { QuickAddMenu } from '../quick-add/QuickAddMenu'
 import { ItemDetailsDialog } from './ItemDetailsDialog'
 
@@ -76,7 +77,8 @@ export function ItemsPage() {
   const [trashId, setTrashId] = useState<string | null>(null)
   const [trashOpen, setTrashOpen] = useState(false)
   const [openItemId, setOpenItemId] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
+
+  useVaultChanged(() => setAttempt((value) => value + 1))
 
   useEffect(() => {
     let active = true
@@ -100,7 +102,7 @@ export function ItemsPage() {
 
   useEffect(() => {
     let active = true
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     listItems(buildFilter(kind, collectionId, tagId, favorite, query))
       .then((loaded) => {
@@ -131,21 +133,13 @@ export function ItemsPage() {
     setAttempt((value) => value + 1)
   }
 
-  async function runAction(action: () => Promise<void>) {
-    setActionError(null)
-
-    try {
-      await action()
-    } catch {
-      setActionError('Kivo could not finish that action. Your items are unchanged. Try again.')
-    }
-  }
-
   async function handleRowFavorite(id: string, nextFavorite: boolean) {
-    await runAction(async () => {
+    try {
       await setItemsFavorite([id], nextFavorite)
       reload()
-    })
+    } catch {
+      notifyError('Kivo could not finish that action. Your items are unchanged. Try again.')
+    }
   }
 
   function openMove(id: string) {
@@ -162,24 +156,28 @@ export function ItemsPage() {
   async function handleMove() {
     if (!moveId) return
 
-    await runAction(async () => {
+    try {
       await moveItemsToCollection([moveId], targetCollectionId)
       setMoveOpen(false)
       setMoveId(null)
       setTargetCollectionId(null)
       reload()
-    })
+      notifySuccess('Item moved to collection')
+    } catch {
+      notifyError('Kivo could not move this item. Try again.')
+    }
   }
 
   async function handleTrash() {
     if (!trashId) return
 
-    await runAction(async () => {
-      await trashItems([trashId])
-      setTrashOpen(false)
-      setTrashId(null)
-      reload()
-    })
+    const id = trashId
+    setTrashOpen(false)
+    setTrashId(null)
+
+    const moved = await trashWithUndo({ ids: [id], label: 'Item' })
+
+    if (moved) reload()
   }
 
   return (
@@ -219,16 +217,6 @@ export function ItemsPage() {
           <QuickAddMenu onAdded={() => setAttempt((value) => value + 1)} />
         </div>
       </div>
-
-      {actionError ? (
-        <Alert role="alert" status="danger">
-          <Alert.Content className="grid gap-2">
-            <Typography className="font-semibold text-danger" type="body">
-              {actionError}
-            </Typography>
-          </Alert.Content>
-        </Alert>
-      ) : null}
 
       {loadState === 'loading' ? (
         <ItemTableSkeleton label="Loading items" />

@@ -18,6 +18,7 @@ import { ConfirmDialog } from '../../components/items/dialogs'
 import { ItemList } from '../../components/items/ItemList'
 import { listItems, type ItemSummary } from '../../data/items'
 import { deleteTag, listTags, saveTag, type Tag } from '../../data/tags'
+import { notifyError, notifySuccess } from '../../lib/feedback'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
@@ -41,7 +42,6 @@ export function TagsPage() {
 
   const [edit, setEdit] = useState<EditState>(null)
   const [editError, setEditError] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null)
 
   const loadTags = useCallback(async () => {
@@ -111,8 +111,10 @@ export function TagsPage() {
       await saveTag({ id: edit.id, name })
       setEdit(null)
       await loadTags()
+      notifySuccess('Tag saved')
     } catch {
       setEditError(SAVE_ERROR)
+      notifyError(SAVE_ERROR)
     }
   }
 
@@ -121,14 +123,14 @@ export function TagsPage() {
 
     const id = deleteTarget.id
     setDeleteTarget(null)
-    setActionError(null)
 
     try {
       await deleteTag(id)
       if (selectedId === id) setSelectedId(null)
       await loadTags()
+      notifySuccess('Tag deleted')
     } catch {
-      setActionError(DELETE_ERROR)
+      notifyError(DELETE_ERROR)
     }
   }
 
@@ -220,12 +222,6 @@ export function TagsPage() {
   return (
     <section aria-labelledby="tags-title" className="grid gap-5">
       {heading}
-
-      {actionError ? (
-        <Typography className="font-semibold text-danger" role="alert" type="body">
-          {actionError}
-        </Typography>
-      ) : null}
 
       {selectedId ? (
         <div className="grid gap-3">

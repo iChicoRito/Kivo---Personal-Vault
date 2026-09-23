@@ -3,18 +3,23 @@ import {
   Alert,
   Button,
   ListBox,
+  Modal,
   Select,
   Typography,
 } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
+import { CollectionSelect } from '../../components/items/dialogs'
 import { ItemTable, ItemTableSkeleton } from '../../components/items/ItemTable'
 import {
   listItems,
+  moveItemsToCollection,
   setItemsFavorite,
   type ItemKind,
   type ItemSummary,
 } from '../../data/items'
+import { notifyError, notifySuccess } from '../../lib/feedback'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -64,11 +69,15 @@ export function FavoritesPage() {
   const [kind, setKind] = useState<Kind>('all')
   const [page, setPage] = useState(1)
   const [openItemId, setOpenItemId] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [moveId, setMoveId] = useState<string | null>(null)
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [targetCollectionId, setTargetCollectionId] = useState<string | null>(null)
+
+  useVaultChanged(() => setAttempt((value) => value + 1))
 
   useEffect(() => {
     let active = true
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     listItems(kind === 'all' ? { favorite: true } : { favorite: true, kind })
       .then((loaded) => {
@@ -98,13 +107,32 @@ export function FavoritesPage() {
   }
 
   async function handleToggleFavorite(id: string, next: boolean) {
-    setActionError(null)
-
     try {
       await setItemsFavorite([id], next)
       reload()
     } catch {
-      setActionError('Kivo could not update this favorite. Your items are unchanged. Try again.')
+      notifyError('Kivo could not update this favorite. Your items are unchanged. Try again.')
+    }
+  }
+
+  function openMove(id: string) {
+    setMoveId(id)
+    setTargetCollectionId(null)
+    setMoveOpen(true)
+  }
+
+  async function handleMove() {
+    if (!moveId) return
+
+    try {
+      await moveItemsToCollection([moveId], targetCollectionId)
+      setMoveOpen(false)
+      setMoveId(null)
+      setTargetCollectionId(null)
+      reload()
+      notifySuccess('Item moved to collection')
+    } catch {
+      notifyError('Kivo could not move this item. Try again.')
     }
   }
 
@@ -119,16 +147,6 @@ export function FavoritesPage() {
       <div className="flex flex-wrap items-end gap-3">
         <KindSelect value={kind} onChange={setKind} />
       </div>
-
-      {actionError ? (
-        <Alert role="alert" status="danger">
-          <Alert.Content className="grid gap-2">
-            <Typography className="font-semibold text-danger" type="body">
-              {actionError}
-            </Typography>
-          </Alert.Content>
-        </Alert>
-      ) : null}
 
       {loadState === 'loading' ? (
         <ItemTableSkeleton label="Loading favorites" />
@@ -160,6 +178,7 @@ export function FavoritesPage() {
           page={currentPage}
           pageSize={PAGE_SIZE}
           totalItems={items.length}
+          onMove={openMove}
           onOpen={setOpenItemId}
           onPageChange={setPage}
           onToggleFavorite={(id, next) => {
@@ -167,6 +186,39 @@ export function FavoritesPage() {
           }}
         />
       ) : null}
+
+      <Modal
+        isOpen={moveOpen}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            setMoveOpen(false)
+            setMoveId(null)
+          }
+        }}
+      >
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Move to collection</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body>
+                <CollectionSelect
+                  label="Collection"
+                  value={targetCollectionId}
+                  onChange={setTargetCollectionId}
+                />
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onPress={() => setMoveOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onPress={() => void handleMove()}>Move</Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
 
       <ItemDetailsDialog
         itemId={openItemId}

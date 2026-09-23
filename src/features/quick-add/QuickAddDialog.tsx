@@ -11,8 +11,9 @@ import {
 import { useNavigate } from 'react-router-dom'
 
 import { saveCollection } from '../../data/collections'
-import { importFile, saveItem } from '../../data/items'
+import { importFile } from '../../data/items'
 import { pickFile } from '../../data/files'
+import { notifyError, notifySuccess } from '../../lib/feedback'
 import SaveSourceDialog from '../sources/SaveSourceDialog'
 
 type QuickAddDialogProps = {
@@ -22,7 +23,6 @@ type QuickAddDialogProps = {
   initialAction?: 'note' | 'file' | 'source' | 'collection' | null
 }
 
-const NOTE_ERROR = 'Kivo could not create a note. Try again.'
 const IMPORT_ERROR = 'Kivo could not import that file. Try again.'
 const COLLECTION_ERROR = 'Kivo could not create the collection. Try again.'
 const COLLECTION_REQUIRED = 'Collection name is required.'
@@ -47,19 +47,9 @@ export function QuickAddDialog({
     onClose()
   }
 
-  async function handleNewNote() {
-    setError(null)
-    setBusy(true)
-
-    try {
-      const note = await saveItem({ kind: 'note', title: 'Untitled note' })
-      close()
-      navigate(`/notes/${note.id}`)
-    } catch {
-      setError(NOTE_ERROR)
-    } finally {
-      setBusy(false)
-    }
+  function handleNewNote() {
+    close()
+    navigate('/notes/new')
   }
 
   function handleNewSource() {
@@ -77,6 +67,7 @@ export function QuickAddDialog({
       path = await pickFile()
     } catch {
       setError(IMPORT_ERROR)
+      notifyError(IMPORT_ERROR)
       return
     }
 
@@ -89,10 +80,12 @@ export function QuickAddDialog({
 
     try {
       await importFile(path)
+      notifySuccess('File imported')
       close()
       navigate('/files')
     } catch {
       setError(IMPORT_ERROR)
+      notifyError(IMPORT_ERROR)
     } finally {
       setBusy(false)
     }
@@ -111,10 +104,12 @@ export function QuickAddDialog({
 
     try {
       await saveCollection({ name })
+      notifySuccess('Collection saved')
       close()
       navigate('/collections')
     } catch {
       setError(COLLECTION_ERROR)
+      notifyError(COLLECTION_ERROR)
     } finally {
       setBusy(false)
     }
@@ -123,7 +118,7 @@ export function QuickAddDialog({
   useEffect(() => {
     if (!open || !initialAction) return
 
-    if (initialAction === 'note') void handleNewNote()
+    if (initialAction === 'note') handleNewNote()
     else if (initialAction === 'file') void handleImport()
     else if (initialAction === 'source') handleNewSource()
     else if (initialAction === 'collection') setMode('collection')
@@ -152,7 +147,7 @@ export function QuickAddDialog({
 
                 {mode === 'menu' ? (
                   <div className="grid gap-2">
-                    <Button isDisabled={busy} onPress={() => void handleNewNote()}>
+                    <Button isDisabled={busy} onPress={handleNewNote}>
                       New note
                     </Button>
                     <Button isDisabled={busy} variant="secondary" onPress={handleNewSource}>

@@ -6,6 +6,7 @@ import {
   EmptyState,
   Input,
   Label,
+  Modal,
   Skeleton,
   Tabs,
   TextField,
@@ -13,6 +14,7 @@ import {
 } from '@heroui/react'
 import {
   Delete02Icon,
+  FolderOpenIcon,
   GridViewIcon,
   LeftToRightListBulletIcon,
   Note01Icon,
@@ -29,14 +31,15 @@ import PageHeader from '../../app/PageHeader'
 import { usePreferences } from '../../app/preferences'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
-import { ConfirmDialog } from '../../components/items/dialogs'
+import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
+import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import type { NoteView } from '../../data/settings'
 import {
   listItems,
-  saveItem,
+  moveItemsToCollection,
   setItemPinned,
   setItemsFavorite,
-  trashItems,
   type ItemSummary,
 } from '../../data/items'
 import { NoteGridCard } from './NoteGridCard'
@@ -109,6 +112,8 @@ function NotesLoadingSkeleton({ view }: { view: NoteView }) {
 
 type LoadState = 'loading' | 'ready' | 'error'
 
+type MoveState = { id: string; collectionId: string | null; initialCollectionId: string | null }
+
 export function NotesPage() {
   const navigate = useNavigate()
   const { preferences, updatePreferences } = usePreferences()
@@ -118,13 +123,14 @@ export function NotesPage() {
   const [items, setItems] = useState<ItemSummary[]>([])
   const [search, setSearch] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const [creating, setCreating] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
   const [trashTarget, setTrashTarget] = useState<ItemSummary | null>(null)
+  const [moveTarget, setMoveTarget] = useState<MoveState | null>(null)
+
+  useVaultChanged(() => setAttempt((value) => value + 1))
 
   useEffect(() => {
     let active = true
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     listItems({ kind: 'note', query: search.trim() || undefined })
       .then((loaded) => {
@@ -141,18 +147,8 @@ export function NotesPage() {
     }
   }, [search, attempt])
 
-  async function handleCreate() {
-    setCreating(true)
-    setActionError(null)
-
-    try {
-      const created = await saveItem({ kind: 'note', title: 'Untitled note' })
-      navigate(`/notes/${created.id}`)
-    } catch {
-      setActionError('Kivo could not create a new note. Try again.')
-    } finally {
-      setCreating(false)
-    }
+  function handleCreate() {
+    navigate('/notes/new')
   }
 
   async function toggleFavorite(item: ItemSummary) {
@@ -164,7 +160,7 @@ export function NotesPage() {
         ),
       )
     } catch {
-      setActionError('Kivo could not change the favorite. Try again.')
+      notifyError('Kivo could not change the favorite. Try again.')
     }
   }
 
@@ -179,7 +175,7 @@ export function NotesPage() {
         ),
       )
     } catch {
-      setActionError('Kivo could not change the pin. Try again.')
+      notifyError('Kivo could not change the pin. Try again.')
     }
   }
 
@@ -187,30 +183,52 @@ export function NotesPage() {
     const target = trashTarget
     if (!target) return
 
-    try {
-      await trashItems([target.id])
-      setItems((current) => current.filter((entry) => entry.id !== target.id))
-      setTrashTarget(null)
-    } catch {
-      setActionError('Kivo could not move this note to Trash. Try again.')
-      setTrashTarget(null)
-    }
+    const moved = await trashWithUndo({ ids: [target.id], label: 'Note' })
+    if (moved) setItems((current) => current.filter((entry) => entry.id !== target.id))
+    setTrashTarget(null)
   }
 
   async function changeView(next: NoteView) {
     if (next === view) return
 
     try {
-      setActionError(null)
       await updatePreferences({ notesView: next })
     } catch {
-      setActionError('Kivo could not remember the note layout. Try again.')
+      notifyError('Kivo could not remember the note layout. Try again.')
+    }
+  }
+
+  function openMove(item: ItemSummary) {
+    setMoveTarget({
+      id: item.id,
+      collectionId: item.collectionId,
+      initialCollectionId: item.collectionId,
+    })
+  }
+
+  async function handleMove() {
+    if (!moveTarget) return
+
+    const target = moveTarget
+
+    if (target.collectionId === target.initialCollectionId) {
+      setMoveTarget(null)
+      return
+    }
+
+    try {
+      await moveItemsToCollection([target.id], target.collectionId)
+      setMoveTarget(null)
+      notifySuccess('Note moved to collection')
+    } catch {
+      notifyError('Kivo could not move this note. Try again.')
     }
   }
 
   function handleMenuAction(item: ItemSummary, key: string) {
     if (key === 'favorite') void toggleFavorite(item)
     if (key === 'pin') void togglePin(item)
+    if (key === 'move') openMove(item)
     if (key === 'trash') setTrashTarget(item)
   }
 
@@ -222,7 +240,7 @@ export function NotesPage() {
           title={notesTitle}
           titleId="notes-title"
         />
-        <Button isDisabled={creating} onPress={() => void handleCreate()}>
+        <Button onPress={() => void handleCreate()}>
           <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
           New Note
         </Button>
@@ -261,12 +279,6 @@ export function NotesPage() {
           </Tabs.ListContainer>
         </Tabs>
       </div>
-
-      {actionError ? (
-        <Typography className="font-semibold text-danger" role="alert" type="body">
-          {actionError}
-        </Typography>
-      ) : null}
 
       {loadState === 'loading' ? (
         <div aria-live="polite" className="grid gap-4" role="status">
@@ -314,7 +326,7 @@ export function NotesPage() {
               {notesEmptyDescription}
             </Typography>
           </div>
-          <Button isDisabled={creating} onPress={() => void handleCreate()}>
+          <Button onPress={() => void handleCreate()}>
             <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
             Create Note
           </Button>
@@ -354,6 +366,7 @@ export function NotesPage() {
                   label: item.isPinned ? 'Unpin' : 'Pin',
                   icon: item.isPinned ? PinOffIcon : PinIcon,
                 },
+                { id: 'move', label: 'Move to collection', icon: FolderOpenIcon },
                 { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
               ]
 
@@ -423,6 +436,40 @@ export function NotesPage() {
           </div>
         </div>
       ) : null}
+
+      <Modal
+        isOpen={moveTarget !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setMoveTarget(null)
+        }}
+      >
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Move note to collection</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="grid gap-3">
+                <CollectionSelect
+                  label="Collection"
+                  value={moveTarget?.collectionId ?? null}
+                  onChange={(value) =>
+                    setMoveTarget((current) =>
+                      current ? { ...current, collectionId: value } : current,
+                    )
+                  }
+                />
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onPress={() => setMoveTarget(null)}>
+                  Cancel
+                </Button>
+                <Button onPress={() => void handleMove()}>Move</Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
 
       <ConfirmDialog
         confirmLabel="Move to Trash"

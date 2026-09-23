@@ -43,7 +43,7 @@ import PageHeader from '../../app/PageHeader'
 import { usePreferences } from '../../app/preferences'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
-import { ConfirmDialog } from '../../components/items/dialogs'
+import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import {
   deleteCollection,
   listCollections,
@@ -56,10 +56,11 @@ import {
   listItems,
   loadItem,
   moveItemsToCollection,
-  trashItems,
   type ItemSummary,
 } from '../../data/items'
 import type { CollectionsView } from '../../data/settings'
+import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import { CollectionFolderFloat } from './CollectionFolderFloat'
 import { CollectionItemView } from './CollectionItemView'
 import { openItemByKind } from './itemOpen'
@@ -78,7 +79,6 @@ const ITEMS_ERROR = 'Kivo could not load items in this collection. Try again.'
 const OPEN_ERROR = 'Kivo could not open this item. Try again.'
 const REVEAL_ERROR = 'Kivo could not reveal this file. It may be missing from this device.'
 const REMOVE_ERROR = 'Kivo could not remove this item from the collection. Try again.'
-const TRASH_ERROR = 'Kivo could not move this item to Trash. Try again.'
 const VIEW_ERROR = 'Kivo could not remember the collection layout. Try again.'
 
 // Kept so collections saved before the icon picker was removed still show the
@@ -132,6 +132,7 @@ function itemActions(item: ItemSummary): ItemCardAction[] {
     })
   }
 
+  actions.push({ id: 'move', label: 'Move to collection', icon: FolderOpenIcon })
   actions.push({ id: 'remove', label: 'Remove from collection', icon: FolderMinusIcon })
   actions.push({ id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true })
 
@@ -206,6 +207,10 @@ export function CollectionsPage() {
     y: number
   } | null>(null)
   const [trashItem, setTrashItem] = useState<ItemSummary | null>(null)
+  const [moveTarget, setMoveTarget] = useState<{
+    id: string
+    collectionId: string | null
+  } | null>(null)
   const detailRef = useRef<HTMLDivElement>(null)
   const itemMenuAnchorRef = useRef<HTMLSpanElement>(null)
 
@@ -219,6 +224,9 @@ export function CollectionsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Collection | null>(null)
 
   const openedFromUrl = useRef(false)
+  const loadedCollectionIdRef = useRef<string | null>(null)
+
+  useVaultChanged(() => setItemsAttempt((current) => current + 1))
 
   const loadCollections = useCallback(async () => {
     setLoadState('loading')
@@ -240,11 +248,17 @@ export function CollectionsPage() {
     if (!selectedId) {
       setItems([])
       setItemsState('ready')
+      loadedCollectionIdRef.current = null
       return
     }
 
+    // A vault-change refresh bumps itemsAttempt with the same selection, so the
+    // rows stay on screen; opening a different collection shows the skeleton again.
+    const collectionChanged = loadedCollectionIdRef.current !== selectedId
+    loadedCollectionIdRef.current = selectedId
+
     let active = true
-    setItemsState('loading')
+    if (collectionChanged) setItemsState('loading')
 
     listItems({ collectionId: selectedId })
       .then((loaded) => {
@@ -447,8 +461,10 @@ export function CollectionsPage() {
       await saveCollection(payload)
       setEdit(null)
       await loadCollections()
+      notifySuccess('Collection saved')
     } catch {
       setEditError(SAVE_ERROR)
+      notifyError(SAVE_ERROR)
     }
   }
 
@@ -463,8 +479,9 @@ export function CollectionsPage() {
       await deleteCollection(id)
       if (selectedId === id) setSelectedId(null)
       await loadCollections()
+      notifySuccess('Collection deleted')
     } catch {
-      setActionError(DELETE_ERROR)
+      notifyError(DELETE_ERROR)
     }
   }
 
@@ -513,18 +530,36 @@ export function CollectionsPage() {
     setTrashItem(null)
     setActionError(null)
 
-    try {
-      await trashItems([target])
+    const moved = await trashWithUndo({ ids: [target], label: 'Item' })
+
+    if (moved) {
       setItemsAttempt((current) => current + 1)
       await loadCollections()
+    }
+  }
+
+  function openItemMove(item: ItemSummary) {
+    setMoveTarget({ id: item.id, collectionId: item.collectionId })
+  }
+
+  async function handleItemMove() {
+    if (!moveTarget) return
+
+    try {
+      await moveItemsToCollection([moveTarget.id], moveTarget.collectionId)
+      setMoveTarget(null)
+      setItemsAttempt((current) => current + 1)
+      await loadCollections()
+      notifySuccess('Item moved to collection')
     } catch {
-      setActionError(TRASH_ERROR)
+      notifyError('Kivo could not move this item. Try again.')
     }
   }
 
   function handleItemMenuAction(item: ItemSummary, key: string) {
     if (key === 'open') void handleItemOpen(item)
     else if (key === 'reveal') void handleItemReveal(item)
+    else if (key === 'move') openItemMove(item)
     else if (key === 'remove') void handleItemRemove(item)
     else if (key === 'trash') setTrashItem(item)
   }
@@ -1159,6 +1194,40 @@ export function CollectionsPage() {
                 <Button fullWidth variant="secondary" onPress={() => setEdit(null)}>
                   Cancel
                 </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+
+      <Modal
+        isOpen={moveTarget !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setMoveTarget(null)
+        }}
+      >
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Move item to collection</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="grid gap-3">
+                <CollectionSelect
+                  label="Collection"
+                  value={moveTarget?.collectionId ?? null}
+                  onChange={(value) =>
+                    setMoveTarget((current) =>
+                      current ? { ...current, collectionId: value } : current,
+                    )
+                  }
+                />
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onPress={() => setMoveTarget(null)}>
+                  Cancel
+                </Button>
+                <Button onPress={() => void handleItemMove()}>Move</Button>
               </Modal.Footer>
             </Modal.Dialog>
           </Modal.Container>

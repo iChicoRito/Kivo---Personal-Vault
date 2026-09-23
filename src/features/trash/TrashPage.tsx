@@ -10,26 +10,27 @@ import {
   restoreItems,
   type ItemSummary,
 } from '../../data/items'
+import { notifyError, notifySuccess } from '../../lib/feedback'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 const PAGE_SIZE = 50
 const panelLabelClass = 'uppercase'
-const ACTION_ERROR =
-  'Kivo could not finish that action. The Trash is unchanged. Try again.'
 
 export function TrashPage() {
   const [items, setItems] = useState<ItemSummary[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [attempt, setAttempt] = useState(0)
 
-  const [actionError, setActionError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [emptyOpen, setEmptyOpen] = useState(false)
 
+  useVaultChanged(() => setAttempt((value) => value + 1))
+
   useEffect(() => {
     let active = true
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     listItems({ trashed: true })
       .then((loaded) => {
@@ -50,21 +51,28 @@ export function TrashPage() {
     setAttempt((value) => value + 1)
   }
 
-  async function runAction(action: () => Promise<void>) {
-    setActionError(null)
-
+  async function runAction(
+    action: () => Promise<void>,
+    successMessage: string,
+    failureMessage: string,
+  ) {
     try {
       await action()
+      notifySuccess(successMessage)
     } catch {
-      setActionError(ACTION_ERROR)
+      notifyError(failureMessage)
     }
   }
 
   async function handleRestore(id: string) {
-    await runAction(async () => {
-      await restoreItems([id])
-      reload()
-    })
+    await runAction(
+      async () => {
+        await restoreItems([id])
+        reload()
+      },
+      'Restored from Trash',
+      'Kivo could not restore this item. Try again.',
+    )
   }
 
   async function handleDeletePermanently() {
@@ -72,21 +80,29 @@ export function TrashPage() {
 
     const id = deleteTarget
 
-    await runAction(async () => {
-      await deleteItemsPermanently([id])
-      setDeleteTarget(null)
-      reload()
-    })
+    await runAction(
+      async () => {
+        await deleteItemsPermanently([id])
+        setDeleteTarget(null)
+        reload()
+      },
+      'Deleted forever',
+      'Kivo could not delete this item. Try again.',
+    )
   }
 
   async function handleEmptyTrash() {
     const ids = items.map((item) => item.id)
 
-    await runAction(async () => {
-      await deleteItemsPermanently(ids)
-      setEmptyOpen(false)
-      reload()
-    })
+    await runAction(
+      async () => {
+        await deleteItemsPermanently(ids)
+        setEmptyOpen(false)
+        reload()
+      },
+      'Trash emptied',
+      'Kivo could not empty the Trash. Try again.',
+    )
   }
 
   return (
@@ -105,16 +121,6 @@ export function TrashPage() {
           Empty Trash
         </Button>
       </div>
-
-      {actionError ? (
-        <Alert role="alert" status="danger">
-          <Alert.Content className="grid gap-2">
-            <Typography className="font-semibold text-danger" type="body">
-              {actionError}
-            </Typography>
-          </Alert.Content>
-        </Alert>
-      ) : null}
 
       {loadState === 'loading' ? (
         <ItemTableSkeleton label="Loading trash" />

@@ -9,6 +9,7 @@ import type { ItemSummary } from '../data/items'
 
 const collectionsMock = vi.hoisted(() => ({
   listCollections: vi.fn(),
+  deleteCollection: vi.fn(),
 }))
 
 const itemsMock = vi.hoisted(() => ({
@@ -21,11 +22,19 @@ const filesMock = vi.hoisted(() => ({
   openSourceUrl: vi.fn(),
 }))
 
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+  trashWithUndo: vi.fn().mockResolvedValue(true),
+}))
+
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 
 import { CollectionFolderPanel } from '../features/collections/CollectionFolderPanel'
+import { VAULT_CHANGED_EVENT } from '../data/events'
 import {
   ITEM_DROPPED_EVENT,
   ITEM_DRAG_END_EVENT,
@@ -116,10 +125,12 @@ function renderPanel() {
 beforeEach(() => {
   vi.clearAllMocks()
   collectionsMock.listCollections.mockResolvedValue([])
+  collectionsMock.deleteCollection.mockResolvedValue(undefined)
   itemsMock.listItems.mockResolvedValue([])
   itemsMock.moveItemsToCollection.mockResolvedValue(undefined)
   filesMock.openItemFile.mockResolvedValue(undefined)
   filesMock.openSourceUrl.mockResolvedValue(undefined)
+  feedbackMock.trashWithUndo.mockResolvedValue(true)
 })
 
 describe('CollectionFolderPanel', () => {
@@ -162,7 +173,9 @@ describe('CollectionFolderPanel', () => {
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
 
-    expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: 'col-2' })
+    await waitFor(() =>
+      expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: 'col-2' }),
+    )
     expect(itemsMock.listItems).not.toHaveBeenCalledWith({ collectionId: 'col-1' })
     expect(within(panel).getByRole('button', { name: 'Work 1 Item' })).toHaveAttribute(
       'aria-expanded',
@@ -465,5 +478,70 @@ describe('CollectionFolderPanel', () => {
     )
     expect(within(panel).getByRole('button', { name: 'Work 1 Item' })).toBeInTheDocument()
     expect(section).not.toHaveClass('outline-focus')
+  })
+
+  it('reloads an open branch on a vault change without folding it', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
+    ])
+    itemsMock.listItems.mockResolvedValue([item({ title: 'Alpha' })])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+    const work = within(panel).getByRole('button', { name: 'Work 1 Item' })
+
+    expect(work).toHaveAttribute('aria-expanded', 'true')
+    expect(await within(panel).findByRole('button', { name: 'Alpha' })).toBeInTheDocument()
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(1)
+
+    itemsMock.listItems.mockResolvedValue([item({ title: 'Beta' })])
+
+    await act(async () => {
+      window.dispatchEvent(new Event(VAULT_CHANGED_EVENT))
+    })
+
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(2)
+    expect(itemsMock.listItems).toHaveBeenLastCalledWith({ collectionId: 'col-1' })
+    // The branch stays unfolded and swaps its rows in place.
+    expect(work).toHaveAttribute('aria-expanded', 'true')
+    expect(await within(panel).findByRole('button', { name: 'Beta' })).toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: 'Alpha' })).not.toBeInTheDocument()
+  })
+
+  it('opens the folder menu on a right click on a collection row', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 0 }),
+    ])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    fireEvent.contextMenu(within(panel).getByRole('button', { name: 'Work 0 Items' }))
+
+    expect(await screen.findByRole('menuitem', { name: 'Open collection' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Delete collection' })).toBeInTheDocument()
+  })
+
+  it('opens the item menu on a right click on an item row', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
+    ])
+    itemsMock.listItems.mockResolvedValue([item()])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+    const row = await within(panel).findByRole('button', { name: 'Alpha' })
+
+    fireEvent.contextMenu(row)
+
+    expect(await screen.findByRole('menuitem', { name: 'Open' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Move to Collection…' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to Trash' }))
+
+    expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: ['n1'], label: 'Item' })
   })
 })

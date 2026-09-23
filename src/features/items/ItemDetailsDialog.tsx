@@ -24,11 +24,11 @@ import {
   loadItem,
   saveItem,
   setItemTags,
-  trashItems,
   type ItemInput,
   type ItemKind,
   type VaultItem,
 } from '../../data/items'
+import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
 
 type ItemDetailsDialogProps = {
   itemId: string | null
@@ -153,6 +153,7 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
       return true
     } catch {
       setSaveError(SAVE_ERROR)
+      notifyError(SAVE_ERROR)
       if (syncForm) applyFields(item)
       return false
     }
@@ -188,6 +189,7 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
     } catch {
       setTags(previous)
       setSaveError(SAVE_ERROR)
+      notifyError(SAVE_ERROR)
     }
   }
 
@@ -199,33 +201,46 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
       return
     }
 
-    await persist({ title: trimmedTitle, description }, true)
+    const saved = await persist({ title: trimmedTitle, description }, true)
+    if (saved) notifySuccess('Item saved')
   }
 
   async function handleTrash() {
     if (!item) return
 
-    try {
-      await trashItems([item.id])
-    } catch {
-      setSaveError(SAVE_ERROR)
-      setConfirmOpen(false)
+    const id = item.id
+
+    setConfirmOpen(false)
+
+    const moved = await trashWithUndo({ ids: [id], label: 'Item' })
+
+    if (moved) {
+      onChanged()
+      onClose()
       return
     }
 
-    setConfirmOpen(false)
-    onChanged()
-    onClose()
+    setSaveError(SAVE_ERROR)
   }
 
   function handleOpenFile() {
     if (!item) return
-    void openItemFile(item.id).catch(() => setSaveError('Kivo could not open this file.'))
+
+    void openItemFile(item.id).catch(() => {
+      const message = 'Kivo could not open this file.'
+      setSaveError(message)
+      notifyError(message)
+    })
   }
 
   function handleRevealFile() {
     if (!item) return
-    void revealItemFile(item.id).catch(() => setSaveError('Kivo could not reveal this file.'))
+
+    void revealItemFile(item.id).catch(() => {
+      const message = 'Kivo could not reveal this file.'
+      setSaveError(message)
+      notifyError(message)
+    })
   }
 
   return (

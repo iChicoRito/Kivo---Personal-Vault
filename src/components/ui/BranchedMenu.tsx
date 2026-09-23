@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
@@ -37,6 +38,12 @@ export type BranchedMenuProps = {
   defaultActive?: string
   onSelect?: (value: string, item: BranchedMenuItem | BranchedMenuChild) => void
   onToggle?: (index: number, open: boolean) => void
+  /** Right click on a head or a child row. The row that was clicked is passed
+   * back so the caller can open its own menu without guessing from the event. */
+  onContextMenu?: (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    node: BranchedMenuItem | BranchedMenuChild,
+  ) => void
   color?: string
   accentColor?: string
   lineColor?: string
@@ -63,6 +70,7 @@ export function BranchedMenu({
   defaultActive,
   onSelect,
   onToggle,
+  onContextMenu,
   color = '#f5f5f5',
   accentColor = '#f5f5f5',
   lineColor = '#3f3f46',
@@ -189,7 +197,9 @@ export function BranchedMenu({
               aria-label={item.ariaLabel}
               aria-current={leafActive ? 'true' : undefined}
               data-active={leafActive ? '' : undefined}
+              data-bm-row={leafValue}
               onClick={() => (kids ? toggle(i) : select(leafValue, item))}
+              onContextMenu={onContextMenu ? (event) => onContextMenu(event, item) : undefined}
             >
               {item.icon ? (
                 <span className="branched-menu__icon" aria-hidden="true">
@@ -232,7 +242,9 @@ export function BranchedMenu({
                         data-active={kid.value === active ? '' : undefined}
                         disabled={kid.disabled}
                         tabIndex={isOpen ? 0 : -1}
+                        data-bm-row={kid.value}
                         onClick={() => select(kid.value, kid)}
+                        onContextMenu={onContextMenu ? (event) => onContextMenu(event, kid) : undefined}
                       >
                         {kid.icon ? (
                           <span className="branched-menu__icon" aria-hidden="true">

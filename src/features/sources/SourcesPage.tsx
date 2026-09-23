@@ -2,19 +2,17 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
-  Chip,
   EmptyState,
   Input,
   Label,
+  Modal,
   Skeleton,
-  Tabs,
   TextField,
   Typography,
 } from '@heroui/react'
 import {
   Delete02Icon,
-  GridViewIcon,
-  LeftToRightListBulletIcon,
+  FolderOpenIcon,
   Link02Icon,
   NoteEditIcon,
   PlusSignIcon,
@@ -22,18 +20,17 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 
 import PageHeader from '../../app/PageHeader'
-import { usePreferences } from '../../app/preferences'
+import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
-import { ConfirmDialog } from '../../components/items/dialogs'
-import type { SourceView } from '../../data/settings'
+import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import { openSourceUrl } from '../../data/files'
-import { listItems, loadItem, trashItems, type VaultItem } from '../../data/items'
+import { listItems, loadItem, moveItemsToCollection, type VaultItem } from '../../data/items'
 import { moduleRoutes } from '../modules/ModulePage'
 import { CollectionFolderPanel } from '../collections/CollectionFolderPanel'
 import { startItemDrag } from '../collections/itemDrag'
 import { SaveSourceDialog } from './SaveSourceDialog'
-import { SourceGridCard } from './SourceGridCard'
 
 const sourcesModule = moduleRoutes.find((route) => route.path === 'sources')
 
@@ -52,44 +49,29 @@ const {
 
 const panelLabelClass = 'uppercase'
 
+const OPEN_ERROR = 'Kivo could not open this address.'
+const MOVE_ERROR = 'Kivo could not move this source. Try again.'
+
 // Item summaries stay lean, so each row reads its full record for the address.
 async function loadSources(query?: string) {
   const summaries = await listItems({ kind: 'source', query })
   return Promise.all(summaries.map((summary) => loadItem(summary.id)))
 }
 
-function SourcesLoadingSkeleton({ view }: { view: SourceView }) {
+function SourcesLoadingSkeleton() {
   return (
-    <ul
-      aria-hidden="true"
-      className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-2'}
-    >
+    <ul aria-hidden="true" className="grid gap-2">
       {Array.from({ length: 4 }, (_, index) => (
         <li key={index} className="min-w-0">
-          {view === 'grid' ? (
-            <div className="kivo-item-card flex h-full flex-col gap-2 rounded-3xl border border-default bg-surface p-4">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-5 w-16 rounded-full" />
-              </div>
-              <div className="grid min-w-0 gap-0.5">
+          <div className="kivo-item-card relative rounded-3xl border border-default bg-surface">
+            <div className="flex items-center gap-3 rounded-3xl p-3">
+              <Skeleton className="size-11 shrink-0 rounded-xl" />
+              <span className="grid min-w-0 flex-1 gap-1">
                 <Skeleton className="h-4 w-2/3 rounded-md" />
-                <Skeleton className="h-3 w-full rounded-md" />
                 <Skeleton className="h-3 w-4/5 rounded-md" />
-              </div>
-              <Skeleton className="mt-auto h-9 w-24 rounded-lg" />
+              </span>
             </div>
-          ) : (
-            <div className="kivo-item-card relative rounded-3xl border border-default bg-surface">
-              <div className="flex items-center gap-3 rounded-3xl p-3">
-                <Skeleton className="size-11 shrink-0 rounded-xl" />
-                <span className="grid min-w-0 flex-1 gap-1">
-                  <Skeleton className="h-3 w-14 rounded-full" />
-                  <Skeleton className="h-4 w-2/3 rounded-md" />
-                  <Skeleton className="h-3 w-4/5 rounded-md" />
-                </span>
-              </div>
-            </div>
-          )}
+          </div>
         </li>
       ))}
     </ul>
@@ -97,11 +79,9 @@ function SourcesLoadingSkeleton({ view }: { view: SourceView }) {
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
+type MoveState = { id: string; collectionId: string | null } | null
 
 export function SourcesPage() {
-  const { preferences, updatePreferences } = usePreferences()
-  const view = preferences.sourcesView
-
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [sources, setSources] = useState<VaultItem[]>([])
   const [search, setSearch] = useState('')
@@ -109,11 +89,13 @@ export function SourcesPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [trashTarget, setTrashTarget] = useState<VaultItem | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [moveTarget, setMoveTarget] = useState<MoveState>(null)
+
+  useVaultChanged(() => setAttempt((value) => value + 1))
 
   useEffect(() => {
     let active = true
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     loadSources(search.trim() || undefined)
       .then((loaded) => {
@@ -142,12 +124,11 @@ export function SourcesPage() {
 
   async function handleOpen(source: VaultItem) {
     if (!source.url) return
-    setActionError(null)
 
     try {
       await openSourceUrl(source.id)
     } catch {
-      setActionError('Kivo could not open this address.')
+      notifyError(OPEN_ERROR)
     }
   }
 
@@ -155,30 +136,30 @@ export function SourcesPage() {
     const target = trashTarget
     if (!target) return
 
-    try {
-      await trashItems([target.id])
+    setTrashTarget(null)
+    const moved = await trashWithUndo({ ids: [target.id], label: 'Source' })
+
+    if (moved) {
       setSources((current) => current.filter((entry) => entry.id !== target.id))
-      setTrashTarget(null)
-    } catch {
-      setActionError('Kivo could not move this source to Trash. Try again.')
-      setTrashTarget(null)
     }
   }
 
-  async function changeView(next: SourceView) {
-    if (next === view) return
+  async function handleMove() {
+    if (!moveTarget) return
 
     try {
-      setActionError(null)
-      await updatePreferences({ sourcesView: next })
+      await moveItemsToCollection([moveTarget.id], moveTarget.collectionId)
+      setMoveTarget(null)
+      notifySuccess('Source moved to collection')
     } catch {
-      setActionError('Kivo could not remember the source layout. Try again.')
+      notifyError(MOVE_ERROR)
     }
   }
 
   function handleMenuAction(source: VaultItem, key: string) {
     if (key === 'open') void handleOpen(source)
     if (key === 'edit') openEdit(source.id)
+    if (key === 'move') setMoveTarget({ id: source.id, collectionId: source.collectionId })
     if (key === 'trash') setTrashTarget(source)
   }
 
@@ -201,40 +182,7 @@ export function SourcesPage() {
           <Label>Search link</Label>
           <Input fullWidth placeholder="I am looking for..." variant="secondary" />
         </TextField>
-
-        <Tabs
-          className="w-fit"
-          selectedKey={view}
-          onSelectionChange={(key) => {
-            if (key === 'grid' || key === 'list') void changeView(key)
-          }}
-        >
-          <Tabs.ListContainer>
-            <Tabs.List aria-label="Source layout">
-              <Tabs.Tab id="grid">
-                <span className="flex items-center gap-2">
-                  <HugeiconsIcon aria-hidden="true" icon={GridViewIcon} size={16} />
-                  Grid
-                </span>
-                <Tabs.Indicator />
-              </Tabs.Tab>
-              <Tabs.Tab id="list">
-                <span className="flex items-center gap-2">
-                  <HugeiconsIcon aria-hidden="true" icon={LeftToRightListBulletIcon} size={16} />
-                  List
-                </span>
-                <Tabs.Indicator />
-              </Tabs.Tab>
-            </Tabs.List>
-          </Tabs.ListContainer>
-        </Tabs>
       </div>
-
-      {actionError ? (
-        <Typography className="font-semibold text-danger" role="alert" type="body">
-          {actionError}
-        </Typography>
-      ) : null}
 
       {loadState === 'error' ? (
         <Alert role="alert" status="danger">
@@ -297,77 +245,57 @@ export function SourcesPage() {
                   {sourcesLoadingTitle}. {sourcesLoadingDescription}
                 </Typography>
                 <ListScrollArea>
-                  <SourcesLoadingSkeleton view={view} />
+                  <SourcesLoadingSkeleton />
                 </ListScrollArea>
               </div>
             ) : (
               <ListScrollArea>
-                <ul className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-2'}>
-            {sources.map((source) => {
-              const actions: ItemCardAction[] = [
-                {
-                  id: 'open',
-                  label: 'Open link',
-                  icon: Link02Icon,
-                  isDisabled: !source.url,
-                },
-                { id: 'edit', label: 'Edit source', icon: NoteEditIcon },
-                { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
-              ]
+                <ul className="grid gap-2">
+                  {sources.map((source) => {
+                    const actions: ItemCardAction[] = [
+                      {
+                        id: 'open',
+                        label: 'Open link',
+                        icon: Link02Icon,
+                        isDisabled: !source.url,
+                      },
+                      { id: 'edit', label: 'Edit source', icon: NoteEditIcon },
+                      { id: 'move', label: 'Move to collection', icon: FolderOpenIcon },
+                      { id: 'trash', label: 'Move to trash', icon: Delete02Icon, danger: true },
+                    ]
 
-              if (view === 'grid') {
-                return (
-                  <li
-                    key={source.id}
-                    className="min-w-0 select-none"
-                    onPointerDown={(event) => startItemDrag(event, source.id)}
-                  >
-                    <SourceGridCard
-                      item={source}
-                      onAction={(key) => handleMenuAction(source, key)}
-                      onOpen={() => void handleOpen(source)}
-                    />
-                  </li>
-                )
-              }
-
-              return (
-                <li
-                  key={source.id}
-                  className="min-w-0 select-none"
-                  onPointerDown={(event) => startItemDrag(event, source.id)}
-                >
-                  <ItemCard
-                    actions={actions}
-                    chips={
-                      <Chip color="accent" size="sm" variant="secondary">
-                        Source
-                      </Chip>
-                    }
-                    isOpenDisabled={!source.url}
-                    leading={
-                      <span className="grid size-11 place-items-center rounded-xl bg-default">
-                        <HugeiconsIcon
-                          aria-hidden="true"
-                          className="text-muted"
-                          icon={Link02Icon}
-                          size={18}
-                          strokeWidth={1.75}
+                    return (
+                      <li
+                        key={source.id}
+                        className="min-w-0 select-none"
+                        onPointerDown={(event) => startItemDrag(event, source.id)}
+                      >
+                        <ItemCard
+                          actions={actions}
+                          isOpenDisabled={!source.url}
+                          leading={
+                            <span className="grid size-11 place-items-center rounded-xl bg-default">
+                              <HugeiconsIcon
+                                aria-hidden="true"
+                                className="text-muted"
+                                icon={Link02Icon}
+                                size={18}
+                                strokeWidth={1.75}
+                              />
+                            </span>
+                          }
+                          subtitle={
+                            <Typography className="truncate" color="muted" type="body-sm">
+                              {source.url ?? 'No address saved.'}
+                            </Typography>
+                          }
+                          title={source.title}
+                          onAction={(key) => handleMenuAction(source, key)}
+                          onOpen={() => void handleOpen(source)}
                         />
-                      </span>
-                    }
-                    subtitle={
-                      <Typography className="truncate" color="muted" type="body-sm">
-                        {source.url ?? 'No address saved.'}
-                      </Typography>
-                    }
-                    title={source.title}
-                    onAction={(key) => handleMenuAction(source, key)}
-                    onOpen={() => void handleOpen(source)}
-                  />
-                </li>
-              )
-            })}
+                      </li>
+                    )
+                  })}
                 </ul>
               </ListScrollArea>
             )}
@@ -381,6 +309,40 @@ export function SourcesPage() {
         onClose={() => setDialogOpen(false)}
         onSaved={() => setAttempt((current) => current + 1)}
       />
+
+      <Modal
+        isOpen={moveTarget !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setMoveTarget(null)
+        }}
+      >
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Move source to collection</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="grid gap-3">
+                <CollectionSelect
+                  label="Collection"
+                  value={moveTarget?.collectionId ?? null}
+                  onChange={(value) =>
+                    setMoveTarget((current) =>
+                      current ? { ...current, collectionId: value } : current,
+                    )
+                  }
+                />
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onPress={() => setMoveTarget(null)}>
+                  Cancel
+                </Button>
+                <Button onPress={() => void handleMove()}>Move</Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
 
       <ConfirmDialog
         confirmLabel="Move to Trash"

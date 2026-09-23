@@ -30,10 +30,16 @@ const securityMock = vi.hoisted(() => ({
   verifyPassword: vi.fn(),
 }))
 
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+}))
+
 vi.mock('../data/settings', () => settingsMock)
 vi.mock('../data/security', () => securityMock)
 vi.mock('@tauri-apps/plugin-autostart', () => autostartMock)
 vi.mock('@tauri-apps/api/app', () => appMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 
 import SettingsPage from '../features/settings/SettingsPage'
 import { PreferencesProvider } from '../app/preferences'
@@ -166,6 +172,23 @@ describe('settings profile', () => {
       }),
     )
     expect(await screen.findByText('Profile saved.')).toBeInTheDocument()
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Profile saved')
+  })
+
+  it('shows a toast when saving the profile fails', async () => {
+    settingsMock.saveProfile.mockRejectedValue(new Error('save failed'))
+    await renderSettings()
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Owner name' }), {
+      target: { value: 'Grace' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save profile' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not save your profile. Your changes are still here. Try again.',
+      ),
+    )
   })
 })
 
@@ -204,6 +227,7 @@ describe('appearance preferences', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }))
 
     expect(await screen.findByText(APPEARANCE_SAVE_ERROR)).toBeInTheDocument()
+    expect(feedbackMock.notifyError).toHaveBeenCalledWith(APPEARANCE_SAVE_ERROR)
     expect(settingsMock.savePreferences).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('radio', { name: 'Light' })).toBeChecked()
     expect(screen.getByRole('radio', { name: 'Dark' })).not.toBeChecked()
@@ -282,6 +306,7 @@ describe('start at login', () => {
     fireEvent.click(screen.getByRole('switch'))
 
     expect(await screen.findByText(NATIVE_SAVE_ERROR)).toBeInTheDocument()
+    expect(feedbackMock.notifyError).toHaveBeenCalledWith(NATIVE_SAVE_ERROR)
     expect(screen.getByRole('switch')).not.toBeChecked()
     expect(settingsMock.saveStartAtLogin).not.toHaveBeenCalled()
   })
@@ -340,6 +365,7 @@ describe('reset presentation preferences', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, reset preferences' }))
 
     await waitFor(() => expect(settingsMock.savePreferences).toHaveBeenLastCalledWith(RESET_PREFERENCES))
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Preferences reset')
     expect(settingsMock.saveProfile).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(document.documentElement.dataset.theme).toBe('dark')

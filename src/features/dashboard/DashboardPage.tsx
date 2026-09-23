@@ -8,6 +8,7 @@ import { listRecentItems, type RecentItems } from '../../data/activity'
 import { listCollections, type Collection } from '../../data/collections'
 import { loadVaultSummary, type VaultSummary } from '../../data/dashboard'
 import { listItems, type ItemSummary } from '../../data/items'
+import { useVaultChanged } from '../../lib/useVaultChanged'
 import { QuickAddDialog } from '../quick-add/QuickAddDialog'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
 
@@ -49,9 +50,11 @@ export default function DashboardPage() {
   const [quickAddOpen, setQuickAddOpen] = useState(false)
   const [initialAction, setInitialAction] = useState<InitialAction | null>(null)
 
+  useVaultChanged(() => setAttempt((value) => value + 1))
+
   useEffect(() => {
     let active = true
-    setLoadState('loading')
+    setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
     Promise.all([
       loadVaultSummary(),

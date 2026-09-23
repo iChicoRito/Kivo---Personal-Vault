@@ -2,7 +2,20 @@ import '@testing-library/jest-dom/vitest'
 
 import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const settingsMock = vi.hoisted(() => ({
+  loadPreferences: vi.fn(),
+  savePreferences: vi.fn(),
+}))
+
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+}))
+
+vi.mock('../data/settings', () => settingsMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 
 import AppShell from '../app/AppShell'
 import { DEFAULT_PREFERENCES, PreferencesProvider } from '../app/preferences'
@@ -61,6 +74,10 @@ function renderShell(initialPath = '/dashboard', preferences: Partial<Preference
 function dock() {
   return screen.getByRole('navigation', { name: 'Primary navigation' })
 }
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 async function activateWithEnter(element: HTMLElement) {
   let keyDown: KeyboardEvent | undefined
@@ -206,6 +223,20 @@ describe('AppShell', () => {
     fireEvent.click(toggler)
 
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'))
+  })
+
+  it('shows an error toast when the theme change cannot be saved', async () => {
+    settingsMock.savePreferences.mockRejectedValueOnce(new Error('save failed'))
+
+    renderShell()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle theme' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not change the theme. Try again.',
+      ),
+    )
   })
 
   it('switches a resolved system theme to an explicit one', async () => {

@@ -8,6 +8,7 @@ import {
   setAppLock,
   verifyPassword,
 } from '../../data/security'
+import { notifyError, notifySuccess } from '../../lib/feedback'
 
 type Mode = 'loading' | 'off' | 'on' | 'error'
 
@@ -81,8 +82,10 @@ export default function AppLockSettings() {
       resetFields()
       setMode('on')
       setStatusMessage('App lock is on. Kivo will ask for your Master Password when it opens.')
+      notifySuccess('App lock is on')
     } catch {
       setError(SAVE_ERROR_MESSAGE)
+      notifyError(SAVE_ERROR_MESSAGE)
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -122,8 +125,10 @@ export default function AppLockSettings() {
       await setAppLock(newPassword)
       resetFields()
       setStatusMessage('Your Master Password was changed.')
+      notifySuccess('Master password changed')
     } catch {
       setError(SAVE_ERROR_MESSAGE)
+      notifyError(SAVE_ERROR_MESSAGE)
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -171,8 +176,10 @@ export default function AppLockSettings() {
       setConfirmingRemoval(false)
       setMode('off')
       setStatusMessage('App lock is off. Kivo will open without a password.')
+      notifySuccess('App lock is off')
     } catch {
       setRemoveError(REMOVE_ERROR_MESSAGE)
+      notifyError(REMOVE_ERROR_MESSAGE)
     } finally {
       busyRef.current = false
       setBusy(false)

@@ -27,9 +27,9 @@ import {
   setItemPinned,
   setItemTags,
   setItemsFavorite,
-  trashItems,
   type VaultItem,
 } from '../../data/items'
+import { trashWithUndo } from '../../lib/feedback'
 import { NoteContentEditor } from './NoteContentEditor'
 import { NoteTagField } from './NoteTagField'
 import { toEditorHtml, toStoredContent } from './noteContent'
@@ -76,6 +76,9 @@ export function NoteEditor() {
   const contentRef = useRef('')
   const savedRef = useRef({ title: '', content: '' })
   const loadedRef = useRef(false)
+  const draftSavingRef = useRef(false)
+  const createdIdRef = useRef<string | null>(null)
+  const editorKeyRef = useRef('draft')
   const metaRef = useRef<EditorMeta>({
     description: '',
     collectionId: null,
@@ -108,6 +111,36 @@ export function NoteEditor() {
 
     if (!id) return
 
+    // A draft has no record yet. The first real change creates one, keeps the
+    // new id, and swaps the URL for the saved note's route.
+    if (id === 'new') {
+      if (draftSavingRef.current) return
+
+      draftSavingRef.current = true
+      setSaveStatus('saving')
+
+      try {
+        const created = await saveItem({
+          kind: 'note',
+          title: current.title,
+          content: current.content,
+        })
+        createdIdRef.current = created.id
+        savedRef.current = current
+        setItem(created)
+        setSaveStatus('saved')
+        setActionError(null)
+        navigate(`/notes/${created.id}`, { replace: true })
+      } catch {
+        setSaveStatus('idle')
+        setActionError('Kivo could not save this note. Your changes are still here. Try again.')
+      } finally {
+        draftSavingRef.current = false
+      }
+
+      return
+    }
+
     setSaveStatus('saving')
 
     try {
@@ -128,7 +161,7 @@ export function NoteEditor() {
       setSaveStatus('idle')
       setActionError('Kivo could not save this note. Your changes are still here. Try again.')
     }
-  }, [id])
+  }, [id, navigate])
 
   const scheduleSave = useCallback(() => {
     if (timerRef.current !== null) clearTimeout(timerRef.current)
@@ -139,9 +172,36 @@ export function NoteEditor() {
   }, [flush])
 
   useEffect(() => {
+    // After a draft is created the route param becomes the new id, but the
+    // local state already holds the saved note. Reloading would remount the
+    // content editor and drop the caret, so skip the whole load.
+    if (createdIdRef.current === id) return
+
+    // Any other route is a fresh load; the created note is no longer local.
+    createdIdRef.current = null
+
     let active = true
     loadedRef.current = false
     setLoadState('loading')
+
+    if (id === 'new') {
+      setItem(null)
+      setTitle('')
+      setContent('')
+      titleRef.current = ''
+      contentRef.current = ''
+      savedRef.current = { title: UNTITLED, content: '' }
+      metaRef.current = {
+        description: '',
+        collectionId: null,
+        isFavorite: false,
+        isPinned: false,
+      }
+      editorKeyRef.current = 'draft'
+      loadedRef.current = true
+      setLoadState('ready')
+      return
+    }
 
     loadItem(id)
       .then((loaded) => {
@@ -160,6 +220,7 @@ export function NoteEditor() {
           isFavorite: loaded.isFavorite,
           isPinned: loaded.isPinned,
         }
+        editorKeyRef.current = loaded.id
         loadedRef.current = true
         setLoadState('ready')
         void markItemOpened(loaded.id).catch(() => undefined)
@@ -285,14 +346,12 @@ export function NoteEditor() {
   async function confirmTrash() {
     if (!item) return
 
-    try {
-      await trashItems([item.id])
-      navigate('/notes')
-    } catch {
-      setActionError('Kivo could not move this note to Trash. Try again.')
-      setTrashOpen(false)
-    }
+    const moved = await trashWithUndo({ ids: [item.id], label: 'Note' })
+    if (moved) navigate('/notes')
+    else setTrashOpen(false)
   }
+
+  const isDraft = loadState === 'ready' && item === null
 
   if (loadState === 'loading') {
     return (
@@ -311,7 +370,7 @@ export function NoteEditor() {
     )
   }
 
-  if (loadState === 'missing' || !item) {
+  if (loadState === 'missing') {
     return (
       <section aria-labelledby="note-editor-title" className="grid gap-8">
         <PageHeader title="Note not found" titleId="note-editor-title" />
@@ -352,33 +411,35 @@ export function NoteEditor() {
           value={title}
           onChange={(event) => handleTitleChange(event.target.value)}
         />
-        <div className="flex justify-end">
-          <ButtonGroup aria-label="Note actions" size="lg" variant="tertiary">
-            <Button
-              variant={item.isPinned ? 'primary' : undefined}
-              onPress={() => void handlePin(!item.isPinned)}
-            >
-              <HugeiconsIcon
-                aria-hidden="true"
-                icon={item.isPinned ? PinOffIcon : PinIcon}
-                size={18}
-              />
-              {item.isPinned ? 'Unpin' : 'Pin'}
-            </Button>
-            <Button
-              variant={item.isFavorite ? 'primary' : undefined}
-              onPress={() => void handleFavorite(!item.isFavorite)}
-            >
-              <ButtonGroup.Separator />
-              <HugeiconsIcon
-                aria-hidden="true"
-                icon={item.isFavorite ? StarOffIcon : StarIcon}
-                size={18}
-              />
-              {item.isFavorite ? 'Remove from Favorite' : 'Add to Favorite'}
-            </Button>
-          </ButtonGroup>
-        </div>
+        {!isDraft && item ? (
+          <div className="flex justify-end">
+            <ButtonGroup aria-label="Note actions" size="lg" variant="tertiary">
+              <Button
+                variant={item.isPinned ? 'primary' : undefined}
+                onPress={() => void handlePin(!item.isPinned)}
+              >
+                <HugeiconsIcon
+                  aria-hidden="true"
+                  icon={item.isPinned ? PinOffIcon : PinIcon}
+                  size={18}
+                />
+                {item.isPinned ? 'Unpin' : 'Pin'}
+              </Button>
+              <Button
+                variant={item.isFavorite ? 'primary' : undefined}
+                onPress={() => void handleFavorite(!item.isFavorite)}
+              >
+                <ButtonGroup.Separator />
+                <HugeiconsIcon
+                  aria-hidden="true"
+                  icon={item.isFavorite ? StarOffIcon : StarIcon}
+                  size={18}
+                />
+                {item.isFavorite ? 'Remove from Favorite' : 'Add to Favorite'}
+              </Button>
+            </ButtonGroup>
+          </div>
+        ) : null}
       </div>
 
       {actionError ? (
@@ -389,33 +450,35 @@ export function NoteEditor() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <NoteContentEditor
-          key={item.id}
+          key={editorKeyRef.current}
           initialHtml={toEditorHtml(content)}
           status={STATUS_TEXT[saveStatus]}
           onChange={handleContentChange}
         />
 
-        <div className="grid gap-4">
-          <aside
-            aria-label="Note settings"
-            className="grid gap-4 rounded-3xl border border-default bg-surface p-4"
-          >
-            <NoteTagField value={item.tags} onChange={(next) => void handleTags(next)} />
+        {!isDraft && item ? (
+          <div className="grid gap-4">
+            <aside
+              aria-label="Note settings"
+              className="grid gap-4 rounded-3xl border border-default bg-surface p-4"
+            >
+              <NoteTagField value={item.tags} onChange={(next) => void handleTags(next)} />
 
-            <Separator />
+              <Separator />
 
-            <CollectionSelect
-              label="Collection"
-              value={item.collectionId}
-              onChange={(next) => void handleCollection(next)}
-            />
-          </aside>
+              <CollectionSelect
+                label="Collection"
+                value={item.collectionId}
+                onChange={(next) => void handleCollection(next)}
+              />
+            </aside>
 
-          <Button className="w-full" size="lg" variant="danger" onPress={() => setTrashOpen(true)}>
-            <HugeiconsIcon aria-hidden="true" icon={Delete02Icon} size={18} />
-            Delete Note
-          </Button>
-        </div>
+            <Button className="w-full" size="lg" variant="danger" onPress={() => setTrashOpen(true)}>
+              <HugeiconsIcon aria-hidden="true" icon={Delete02Icon} size={18} />
+              Delete Note
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <ConfirmDialog

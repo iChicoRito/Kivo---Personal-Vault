@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { StrictMode } from 'react'
 import type { Mock } from 'vitest'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const itemsMock = vi.hoisted(() => ({
@@ -36,11 +36,18 @@ const settingsMock = vi.hoisted(() => ({
   savePreferences: vi.fn(),
 }))
 
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+  trashWithUndo: vi.fn(),
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/settings', () => settingsMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 
 import type { Collection } from '../data/collections'
 import type { ItemSummary, VaultItem } from '../data/items'
@@ -55,6 +62,7 @@ import { NoteEditor } from '../features/notes/NoteEditor'
 import { NotesPage } from '../features/notes/NotesPage'
 import { SaveSourceDialog } from '../features/sources/SaveSourceDialog'
 import { SourcesPage } from '../features/sources/SourcesPage'
+import { VAULT_CHANGED_EVENT } from '../data/events'
 
 function noteSummary(overrides: Partial<ItemSummary> = {}): ItemSummary {
   return {
@@ -113,6 +121,7 @@ function renderNotes(preferences: Partial<Preferences> = {}) {
       <PreferencesProvider initialPreferences={{ ...DEFAULT_PREFERENCES, ...preferences }}>
         <Routes>
           <Route path="/notes" element={<NotesPage />} />
+          <Route path="/notes/new" element={<div>New note route</div>} />
           <Route path="/notes/:id" element={<div>Editor route</div>} />
         </Routes>
       </PreferencesProvider>
@@ -123,6 +132,26 @@ function renderNotes(preferences: Partial<Preferences> = {}) {
 function renderEditor(id = 'n1') {
   return render(
     <MemoryRouter initialEntries={[`/notes/${id}`]}>
+      <Routes>
+        <Route path="/notes" element={<div>Notes route</div>} />
+        <Route path="/notes/:id" element={<NoteEditor />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+// The draft editor keeps its local state and swaps the URL for the saved note's
+// route, so a marker beside the routes reports where the editor now sits.
+function LocationMarker() {
+  const { pathname } = useLocation()
+
+  return <span data-testid="location">{pathname}</span>
+}
+
+function renderDraftEditor() {
+  return render(
+    <MemoryRouter initialEntries={['/notes/new']}>
+      <LocationMarker />
       <Routes>
         <Route path="/notes" element={<div>Notes route</div>} />
         <Route path="/notes/:id" element={<NoteEditor />} />
@@ -219,6 +248,8 @@ beforeEach(() => {
 
   settingsMock.loadPreferences.mockResolvedValue(DEFAULT_PREFERENCES)
   settingsMock.savePreferences.mockResolvedValue(undefined)
+
+  feedbackMock.trashWithUndo.mockResolvedValue(true)
 })
 
 afterEach(() => {
@@ -272,15 +303,11 @@ describe('NotesPage', () => {
   })
 
   it('creates a note from the empty state action', async () => {
-    itemsMock.saveItem.mockResolvedValue(noteItem({ id: 'new1', title: 'Untitled note' }))
-
     renderNotes()
     fireEvent.click(await screen.findByRole('button', { name: 'Create Note' }))
 
-    await waitFor(() =>
-      expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
-    )
-    expect(await screen.findByText('Editor route')).toBeInTheDocument()
+    expect(await screen.findByText('New note route')).toBeInTheDocument()
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
   })
 
   it('shows an error state and reloads from Try again', async () => {
@@ -294,6 +321,26 @@ describe('NotesPage', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
 
     expect(await screen.findByText('Alpha')).toBeInTheDocument()
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes the list when the vault reports a change', async () => {
+    itemsMock.listItems
+      .mockResolvedValueOnce([noteSummary({ id: 'n1', title: 'Alpha' })])
+      .mockResolvedValueOnce([
+        noteSummary({ id: 'n1', title: 'Alpha' }),
+        noteSummary({ id: 'n2', title: 'Beta' }),
+      ])
+
+    renderNotes()
+    await screen.findByText('Alpha')
+    expect(screen.queryByText('Beta')).not.toBeInTheDocument()
+
+    act(() => {
+      window.dispatchEvent(new Event(VAULT_CHANGED_EVENT))
+    })
+
+    expect(await screen.findByText('Beta')).toBeInTheDocument()
     expect(itemsMock.listItems).toHaveBeenCalledTimes(2)
   })
 
@@ -409,15 +456,11 @@ describe('NotesPage', () => {
   })
 
   it('creates a new note and opens its editor', async () => {
-    itemsMock.saveItem.mockResolvedValue(noteItem({ id: 'new1', title: 'Untitled note' }))
-
     renderNotes()
     fireEvent.click(screen.getByRole('button', { name: 'New Note' }))
 
-    await waitFor(() =>
-      expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
-    )
-    expect(await screen.findByText('Editor route')).toBeInTheDocument()
+    expect(await screen.findByText('New note route')).toBeInTheDocument()
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
   })
 
   it('pins a note from its row menu', async () => {
@@ -443,7 +486,9 @@ describe('NotesPage', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))
 
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['n1']))
+    await waitFor(() =>
+      expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: ['n1'], label: 'Note' }),
+    )
   })
 
   it('floats a note card toward a collection and drops it there', async () => {
@@ -502,6 +547,60 @@ describe('NoteEditor', () => {
 
     expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('Alpha')
     expect(screen.getByRole('textbox', { name: 'Content' })).toHaveTextContent('Body text')
+  })
+
+  it('starts a new note as an empty draft with no saved record', async () => {
+    renderDraftEditor()
+
+    expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('')
+    expect(screen.getByPlaceholderText('Untitled note')).toBeInTheDocument()
+    expect(itemsMock.loadItem).not.toHaveBeenCalled()
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Pin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete Note' })).not.toBeInTheDocument()
+  })
+
+  it('creates the note on the first change and moves the URL to the saved route', async () => {
+    vi.useFakeTimers()
+    itemsMock.saveItem.mockResolvedValue(noteItem({ id: 'new-1', title: 'Draft title' }))
+
+    renderDraftEditor()
+    await act(async () => {})
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
+      target: { value: 'Draft title' },
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+    })
+    await act(async () => {})
+
+    expect(itemsMock.saveItem).toHaveBeenCalledTimes(1)
+    expect(itemsMock.saveItem).toHaveBeenCalledWith({
+      kind: 'note',
+      title: 'Draft title',
+      content: '',
+    })
+    expect(screen.getByTestId('location')).toHaveTextContent('/notes/new-1')
+  })
+
+  it('leaves nothing behind when the draft closes without a change', async () => {
+    vi.useFakeTimers()
+
+    renderDraftEditor()
+    await act(async () => {})
+
+    fireEvent.blur(window)
+
+    await act(async () => {})
+
+    fireEvent.click(screen.getByRole('link', { name: 'Back' }))
+
+    await act(async () => {})
+
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
+    expect(screen.getByText('Notes route')).toBeInTheDocument()
   })
 
   it('counts the characters in the note body', async () => {
@@ -765,7 +864,9 @@ describe('NoteEditor', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))
 
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['n1']))
+    await waitFor(() =>
+      expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: ['n1'], label: 'Note' }),
+    )
     expect(await screen.findByText('Notes route')).toBeInTheDocument()
   })
 })
@@ -778,25 +879,22 @@ describe('SourcesPage', () => {
     itemsMock.loadItem.mockResolvedValue(sourceItem())
   }
 
-  it.each([
-    ['grid', ['sm:grid-cols-2']],
-    ['list', ['gap-2']],
-  ] as const)('shows source skeletons in the selected %s layout', (view, classes) => {
+  it('shows source skeletons in a list', () => {
     itemsMock.listItems.mockReturnValue(new Promise(() => undefined))
 
-    renderSources({ sourcesView: view })
+    renderSources()
 
     const status = findLoadingStatus('Loading your sources')
     const loadingList = status.querySelector('ul')
 
     expect(status).toHaveAttribute('aria-live', 'polite')
     expect(loadingList).not.toBeNull()
-    expect(loadingList).toHaveClass(...classes)
+    expect(loadingList).toHaveClass('gap-2')
     expect(loadingList?.closest('[aria-hidden="true"]')).not.toBeNull()
     expect(loadingList?.querySelectorAll('.skeleton').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'New Source' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Grid' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'List' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Grid' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'List' })).not.toBeInTheDocument()
   })
 
   it('keeps the collection sidebar visible while sources load', async () => {
@@ -808,25 +906,36 @@ describe('SourcesPage', () => {
     expect(
       await screen.findByRole('complementary', { name: 'Collection folders' }),
     ).toBeInTheDocument()
-    expect(findLoadingStatus('Loading your sources').querySelector('ul')).toHaveClass(
-      'sm:grid-cols-2',
-    )
+    expect(findLoadingStatus('Loading your sources').querySelector('ul')).toHaveClass('gap-2')
   })
 
-  it('shows the title and the address on a Source card', async () => {
+  it('shows the title and the address on a source row without a Source chip', async () => {
     setupSource()
 
-    renderSources({ sourcesView: 'list' })
+    renderSources()
+    await screen.findByText('Example')
 
-    expect(await screen.findByText('Example')).toBeInTheDocument()
-    expect(screen.getByText('https://example.com')).toBeInTheDocument()
+    const row = findCardRow('Example')
+
+    expect(within(row).getByText('https://example.com')).toBeInTheDocument()
+    expect(within(row).queryByText('Source')).not.toBeInTheDocument()
     expect(screen.queryByText('A summary')).not.toBeInTheDocument()
+  })
+
+  it('renders sources as rows with no view toggle', async () => {
+    setupSource()
+
+    renderSources()
+    await screen.findByText('Example')
+
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
   })
 
   it('opens a source from the list row body', async () => {
     setupSource()
 
-    renderSources({ sourcesView: 'list' })
+    renderSources()
     fireEvent.click(await screen.findByRole('button', { name: 'Example' }))
 
     await waitFor(() => expect(filesMock.openSourceUrl).toHaveBeenCalledWith('s1'))
@@ -835,7 +944,7 @@ describe('SourcesPage', () => {
   it('edits a source from the row menu', async () => {
     setupSource()
 
-    renderSources({ sourcesView: 'list' })
+    renderSources()
     await screen.findByText('Example')
     await openRowMenu('Example')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit source' }))
@@ -845,10 +954,43 @@ describe('SourcesPage', () => {
     expect(itemsMock.loadItem).toHaveBeenCalledWith('s1')
   })
 
+  it('offers Move to collection and Move to trash in the row menu', async () => {
+    setupSource()
+
+    renderSources()
+    await screen.findByText('Example')
+    await openRowMenu('Example')
+
+    expect(await screen.findByRole('menuitem', { name: 'Move to collection' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Move to trash' })).toBeInTheDocument()
+  })
+
+  it('moves a source to a collection from the row menu', async () => {
+    setupSource()
+    collectionsMock.listCollections.mockResolvedValue([collectionSummary()])
+
+    renderSources()
+    await screen.findByText('Example')
+    await openRowMenu('Example')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to collection' }))
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /Collection/ }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Work' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+
+    await waitFor(() =>
+      expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['s1'], 'col-1'),
+    )
+    await waitFor(() =>
+      expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Source moved to collection'),
+    )
+  })
+
   it('moves a source to Trash from the row menu', async () => {
     setupSource()
 
-    renderSources({ sourcesView: 'list' })
+    renderSources()
     await screen.findByText('Example')
     await openRowMenu('Example')
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to trash' }))
@@ -856,35 +998,9 @@ describe('SourcesPage', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to Trash' }))
 
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['s1']))
-  })
-
-  it('opens a source from the grid card button', async () => {
-    setupSource()
-
-    renderSources()
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Link' }))
-
-    await waitFor(() => expect(filesMock.openSourceUrl).toHaveBeenCalledWith('s1'))
-  })
-
-  it('remembers the list layout when the view toggle changes', async () => {
-    setupSource()
-
-    renderSources()
-    await screen.findByText('Example')
-
-    expect(screen.getByRole('tab', { name: 'Grid' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'List' }))
-
     await waitFor(() =>
-      expect(settingsMock.savePreferences).toHaveBeenCalledWith(
-        expect.objectContaining({ sourcesView: 'list' }),
-      ),
+      expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: ['s1'], label: 'Source' }),
     )
-    expect(screen.getByRole('list').closest('[data-slot="scroll-shadow"]')).not.toBeNull()
   })
 
   it('shows the no-match line when a search finds nothing', async () => {

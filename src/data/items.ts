@@ -1,3 +1,4 @@
+import { notifyVaultChanged } from './events'
 import { invoke } from './runtime'
 
 export type ItemKind = 'note' | 'source' | 'file'
@@ -64,7 +65,9 @@ export type ItemInput = {
 }
 
 export async function saveItem(input: ItemInput): Promise<VaultItem> {
-  return invoke<VaultItem>('save_item', { input })
+  const item = await invoke<VaultItem>('save_item', { input })
+  notifyVaultChanged()
+  return item
 }
 
 export async function loadItem(id: string): Promise<VaultItem> {
@@ -87,19 +90,23 @@ export async function moveItemsToCollection(
   ids: string[],
   collectionId: string | null,
 ): Promise<void> {
-  return invoke<void>('move_items_to_collection', { ids, collectionId })
+  await invoke<void>('move_items_to_collection', { ids, collectionId })
+  notifyVaultChanged()
 }
 
 export async function trashItems(ids: string[]): Promise<void> {
-  return invoke<void>('trash_items', { ids })
+  await invoke<void>('trash_items', { ids })
+  notifyVaultChanged()
 }
 
 export async function restoreItems(ids: string[]): Promise<void> {
-  return invoke<void>('restore_items', { ids })
+  await invoke<void>('restore_items', { ids })
+  notifyVaultChanged()
 }
 
 export async function deleteItemsPermanently(ids: string[]): Promise<void> {
-  return invoke<void>('delete_items_permanently', { ids })
+  await invoke<void>('delete_items_permanently', { ids })
+  notifyVaultChanged()
 }
 
 export async function importFile(sourcePath: string): Promise<VaultItem> {

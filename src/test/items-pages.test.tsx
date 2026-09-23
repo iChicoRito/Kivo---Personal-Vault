@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const itemsMock = vi.hoisted(() => ({
@@ -36,10 +36,17 @@ const filesMock = vi.hoisted(() => ({
   openSourceUrl: vi.fn(),
 }))
 
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+  trashWithUndo: vi.fn().mockResolvedValue(true),
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/files', () => filesMock)
+vi.mock('../lib/feedback', () => feedbackMock)
 
 // The pickers open HeroUI Select popovers that are awkward to drive in jsdom.
 // Replace them with native selects so the page and dialog wiring stays under test.
@@ -192,10 +199,14 @@ function toSummary(item: VaultItem): ItemSummary {
 }
 
 // The Quick Add menu uses useNavigate, so the page needs a router around it.
+// A probe route stands in for the draft note flow that "New note" navigates to.
 function renderItemsPage() {
   return render(
-    <MemoryRouter>
-      <ItemsPage />
+    <MemoryRouter initialEntries={['/items']}>
+      <Routes>
+        <Route path="/notes/new" element={<div>New note draft</div>} />
+        <Route path="*" element={<ItemsPage />} />
+      </Routes>
     </MemoryRouter>,
   )
 }
@@ -445,7 +456,73 @@ describe('ItemsPage', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }))
 
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['note-1']))
+    await waitFor(() =>
+      expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: ['note-1'], label: 'Item' }),
+    )
+  })
+
+  it('moves a row to a collection from its action menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    openRowMenu('Alpha note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to collection' }))
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Collection'), {
+      target: { value: 'collection-1' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+
+    await waitFor(() =>
+      expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['note-1'], 'collection-1'),
+    )
+    await waitFor(() =>
+      expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Item moved to collection'),
+    )
+  })
+
+  it('shows a danger toast and keeps the move dialog open when the move fails', async () => {
+    itemsMock.moveItemsToCollection.mockRejectedValueOnce(new Error('move failed'))
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    openRowMenu('Alpha note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to collection' }))
+
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith('Kivo could not move this item. Try again.'),
+    )
+    expect(screen.getByRole('heading', { name: 'Move to collection' })).toBeInTheDocument()
+  })
+
+  it('shows a danger toast when a favorite toggle fails', async () => {
+    itemsMock.setItemsFavorite.mockRejectedValueOnce(new Error('favorite failed'))
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    openRowMenu('Alpha note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Add to favorites' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not finish that action. Your items are unchanged. Try again.',
+      ),
+    )
+  })
+
+  it('creates a note from the Quick Add menu', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quick Add' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
+
+    expect(await screen.findByText('New note draft')).toBeInTheDocument()
+    expect(itemsMock.saveItem).not.toHaveBeenCalled()
   })
 
   it('toggles a row favorite from its action menu', async () => {
@@ -465,18 +542,6 @@ describe('ItemsPage', () => {
 
     await waitFor(() =>
       expect(itemsMock.setItemsFavorite).toHaveBeenCalledWith(['source-1'], false),
-    )
-  })
-
-  it('creates a note from the Quick Add menu', async () => {
-    renderItemsPage()
-    await screen.findByText('Alpha note')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Quick Add' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
-
-    await waitFor(() =>
-      expect(itemsMock.saveItem).toHaveBeenCalledWith({ kind: 'note', title: 'Untitled note' }),
     )
   })
 
@@ -587,9 +652,40 @@ describe('ItemDetailsDialog', () => {
 
     fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Move to trash' }))
 
-    await waitFor(() => expect(itemsMock.trashItems).toHaveBeenCalledWith(['note-1']))
+    await waitFor(() =>
+      expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: ['note-1'], label: 'Item' }),
+    )
     expect(onChanged).toHaveBeenCalledTimes(1)
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a danger toast and keeps the inline error when saving details fails', async () => {
+    itemsMock.saveItem.mockRejectedValueOnce(new Error('save failed'))
+    renderDetails()
+    await screen.findByRole('textbox', { name: 'Title' })
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), {
+      target: { value: 'Renamed' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not save this change. Your saved details are unchanged.',
+      ),
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Kivo could not save this change. Your saved details are unchanged.',
+    )
+  })
+
+  it('shows a success toast when the details save', async () => {
+    renderDetails()
+    await screen.findByRole('textbox', { name: 'Title' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Item saved'))
   })
 
   it('saves a collection change through saveItem', async () => {

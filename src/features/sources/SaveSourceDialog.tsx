@@ -10,6 +10,7 @@ import {
   Typography,
 } from '@heroui/react'
 
+import { notifyError, notifySuccess } from '../../lib/feedback'
 import { loadItem, saveItem, type VaultItem } from '../../data/items'
 
 const ADDRESS_REQUIRED = 'Address is required.'
@@ -110,10 +111,12 @@ export function SaveSourceDialog({ open, onClose, itemId, onSaved }: SaveSourceD
         isFavorite: loaded?.isFavorite ?? false,
         isPinned: loaded?.isPinned ?? false,
       })
+      notifySuccess('Source saved')
       onSaved()
       onClose()
     } catch {
       setFormError(SAVE_ERROR)
+      notifyError(SAVE_ERROR)
     } finally {
       setBusy(false)
     }

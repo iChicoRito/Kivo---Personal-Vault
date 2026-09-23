@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Skeleton, Tooltip, Typography } from '@heroui/react'
 import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
+import { Button, Dropdown, Label, Modal, Skeleton, Tooltip, Typography } from '@heroui/react'
+import {
+  Delete02Icon,
+  EyeIcon,
   FolderOpenIcon,
   Layers01Icon,
   SidebarLeftIcon,
@@ -11,8 +20,11 @@ import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { useNavigate } from 'react-router-dom'
 
 import { BranchedMenu, type BranchedMenuChild, type BranchedMenuItem } from '../../components/ui/BranchedMenu'
-import { listCollections, type Collection } from '../../data/collections'
+import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
+import { deleteCollection, listCollections, type Collection } from '../../data/collections'
+import { VAULT_CHANGED_EVENT } from '../../data/events'
 import { listItems, moveItemsToCollection, type ItemSummary } from '../../data/items'
+import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
 import { openItemByKind } from './itemOpen'
 import {
   ITEM_DROPPED_EVENT,
@@ -46,6 +58,11 @@ const MENU_WIDTH = 288
 type ItemsEntry = { status: 'loading' | 'ready' | 'error'; items: ItemSummary[] }
 
 type Notice = { tone: 'ok' | 'error'; text: string }
+
+/** What the single row menu is open on: a folder head or one item row. */
+type MenuTarget =
+  | { kind: 'folder'; collection: Collection }
+  | { kind: 'item'; item: ItemSummary }
 
 function collectionIcon(icon: string | null) {
   return (icon ? ICON_COMPONENTS[icon] : undefined) ?? FolderOpenIcon
@@ -107,8 +124,15 @@ export function CollectionFolderPanel() {
   const [notice, setNotice] = useState<Notice | null>(null)
   const [openIds, setOpenIds] = useState<string[]>([])
   const [itemsById, setItemsById] = useState<Record<string, ItemsEntry>>({})
+  const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null)
+  const [menuPoint, setMenuPoint] = useState({ x: 0, y: 0 })
+  const [moveTarget, setMoveTarget] = useState<ItemSummary | null>(null)
+  const [moveCollectionId, setMoveCollectionId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Collection | null>(null)
   const inFlight = useRef(new Set<string>())
   const openedFirst = useRef(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const menuAnchorRef = useRef<HTMLSpanElement>(null)
 
   const loadItems = useCallback((collectionId: string, refresh = false) => {
     if (refresh) inFlight.current.delete(collectionId)
@@ -220,6 +244,23 @@ export function CollectionFolderPanel() {
     }
   }, [collections, openIds, loadItems])
 
+  // Every vault write announces itself, so the panel reloads its collections and
+  // each open branch without the caller passing props. A refresh keeps the rows
+  // on screen while they refetch, so the tree never folds or blinks.
+  useEffect(() => {
+    function handleVaultChanged() {
+      listCollections()
+        .then((loaded) => setCollections(loaded))
+        .catch(() => undefined)
+
+      for (const id of openIds) loadItems(id, true)
+    }
+
+    window.addEventListener(VAULT_CHANGED_EVENT, handleVaultChanged)
+
+    return () => window.removeEventListener(VAULT_CHANGED_EVENT, handleVaultChanged)
+  }, [openIds, loadItems])
+
   // Every collection shows, empty or not, so the list never changes shape in
   // the middle of a drag, and an empty folder is always a drop target.
   const visible = collections ?? []
@@ -300,6 +341,103 @@ export function CollectionFolderPanel() {
     }
   })
 
+  function findTarget(value: string | undefined): MenuTarget | null {
+    if (!value) return null
+
+    const item = itemLookup[value]
+    if (item) return { kind: 'item', item }
+
+    const collection = visible.find((candidate) => candidate.id === value)
+    return collection ? { kind: 'folder', collection } : null
+  }
+
+  function openMenuAt(target: MenuTarget, x: number, y: number) {
+    setMenuPoint({ x, y })
+    setMenuTarget(target)
+  }
+
+  // Right click lands the menu where the pointer is, the same way the item cards
+  // do it. The anchor is a zero-size span inside the panel's relative wrapper.
+  function handleRowContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    node: BranchedMenuItem | BranchedMenuChild,
+  ) {
+    event.preventDefault()
+
+    const target = findTarget(node.value)
+    if (!target) return
+
+    const bounds = panelRef.current?.getBoundingClientRect()
+    openMenuAt(target, event.clientX - (bounds?.left ?? 0), event.clientY - (bounds?.top ?? 0))
+  }
+
+  // The menu key and Shift + F10 open the menu from the keyboard, under the row
+  // that has focus.
+  function handleMenuKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+
+    const row = (event.target as HTMLElement).closest<HTMLElement>('[data-bm-row]')
+    const target = findTarget(row?.dataset.bmRow)
+    if (!target || !row) return
+
+    event.preventDefault()
+
+    const bounds = panelRef.current?.getBoundingClientRect()
+    const rect = row.getBoundingClientRect()
+    openMenuAt(
+      target,
+      rect.left - (bounds?.left ?? 0) + 16,
+      rect.bottom - (bounds?.top ?? 0),
+    )
+  }
+
+  function handleMenuAction(key: string) {
+    const target = menuTarget
+    if (!target) return
+
+    setMenuTarget(null)
+
+    if (target.kind === 'folder') {
+      if (key === 'open') navigate(`/collections?collection=${target.collection.id}`)
+      else if (key === 'delete') setDeleteTarget(target.collection)
+      return
+    }
+
+    const item = target.item
+
+    if (key === 'open') void openItem(item)
+    else if (key === 'move') {
+      setMoveCollectionId(item.collectionId)
+      setMoveTarget(item)
+    } else if (key === 'trash') void trashWithUndo({ ids: [item.id], label: 'Item' })
+  }
+
+  async function handleMove() {
+    if (!moveTarget) return
+
+    try {
+      await moveItemsToCollection([moveTarget.id], moveCollectionId)
+      setMoveTarget(null)
+      notifySuccess('Item moved to collection')
+    } catch {
+      notifyError('Kivo could not move this item. Try again.')
+    }
+  }
+
+  async function handleDeleteCollection() {
+    if (!deleteTarget) return
+
+    const id = deleteTarget.id
+    setDeleteTarget(null)
+
+    try {
+      await deleteCollection(id)
+      notifySuccess('Collection deleted')
+    } catch {
+      notifyError('Kivo could not delete this collection. Try again.')
+    }
+  }
+
   const showExpanded = isOpen || isDragging
   const toggleLabel = showExpanded ? 'Collapse collection folder' : 'Expand collection folder'
 
@@ -309,6 +447,7 @@ export function CollectionFolderPanel() {
     // inside the panel instead of stretching the page. The floor keeps the
     // panel readable next to a list that is shorter than the tree.
     <div
+      ref={panelRef}
       className={`relative min-h-96 shrink-0 transition-[width] duration-300 ease-out ${
         showExpanded ? 'w-80' : 'w-16'
       }`}
@@ -341,7 +480,7 @@ export function CollectionFolderPanel() {
         </div>
 
         {showExpanded ? (
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto" onKeyDown={handleMenuKey}>
             <BranchedMenu
               accentColor="var(--foreground)"
               className="kivo-collection-menu"
@@ -354,6 +493,7 @@ export function CollectionFolderPanel() {
               rowHeight={MENU_ROW_HEIGHT}
               trunk={MENU_TRUNK}
               width={MENU_WIDTH}
+              onContextMenu={handleRowContextMenu}
               onSelect={(value) => {
                 const item = itemLookup[value]
 
@@ -403,6 +543,129 @@ export function CollectionFolderPanel() {
           </Typography>
         ) : null}
       </aside>
+
+      {/* The popover anchors to this zero-size mark so the menu opens where the
+          pointer was, rather than at a fixed corner of the panel. */}
+      <span
+        ref={menuAnchorRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute"
+        style={{ left: menuPoint.x, top: menuPoint.y }}
+      />
+
+      <Dropdown
+        isOpen={menuTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setMenuTarget(null)
+        }}
+      >
+        <Dropdown.Trigger aria-label="Collection row actions" className="sr-only" />
+        <Dropdown.Popover triggerRef={menuAnchorRef}>
+          <Dropdown.Menu
+            autoFocus
+            className="kivo-row-actions-menu"
+            onAction={(key) => handleMenuAction(String(key))}
+          >
+            {menuTarget?.kind === 'folder' ? (
+              <>
+                <Dropdown.Item id="open" key="open" textValue="Open collection">
+                  <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
+                  <Label>Open collection</Label>
+                </Dropdown.Item>
+                <Dropdown.Section
+                  aria-label="Danger zone"
+                  className="mt-1 border-t border-separator pt-1"
+                >
+                  <Dropdown.Item
+                    id="delete"
+                    key="delete"
+                    textValue="Delete collection"
+                    variant="danger"
+                  >
+                    <HugeiconsIcon
+                      aria-hidden="true"
+                      className="text-danger"
+                      icon={Delete02Icon}
+                      size={16}
+                    />
+                    <Label>Delete collection</Label>
+                  </Dropdown.Item>
+                </Dropdown.Section>
+              </>
+            ) : menuTarget?.kind === 'item' ? (
+              <>
+                <Dropdown.Item id="open" key="open" textValue="Open">
+                  <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
+                  <Label>Open</Label>
+                </Dropdown.Item>
+                <Dropdown.Item id="move" key="move" textValue="Move to Collection…">
+                  <HugeiconsIcon aria-hidden="true" icon={FolderOpenIcon} size={16} />
+                  <Label>Move to Collection…</Label>
+                </Dropdown.Item>
+                <Dropdown.Section
+                  aria-label="Danger zone"
+                  className="mt-1 border-t border-separator pt-1"
+                >
+                  <Dropdown.Item
+                    id="trash"
+                    key="trash"
+                    textValue="Move to Trash"
+                    variant="danger"
+                  >
+                    <HugeiconsIcon
+                      aria-hidden="true"
+                      className="text-danger"
+                      icon={Delete02Icon}
+                      size={16}
+                    />
+                    <Label>Move to Trash</Label>
+                  </Dropdown.Item>
+                </Dropdown.Section>
+              </>
+            ) : null}
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
+
+      <Modal
+        isOpen={moveTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setMoveTarget(null)
+        }}
+      >
+        <Modal.Backdrop>
+          <Modal.Container>
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Move item to collection</Modal.Heading>
+              </Modal.Header>
+              <Modal.Body>
+                <CollectionSelect
+                  label="Collection"
+                  value={moveCollectionId}
+                  onChange={setMoveCollectionId}
+                />
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onPress={() => setMoveTarget(null)}>
+                  Cancel
+                </Button>
+                <Button onPress={() => void handleMove()}>Move</Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+
+      <ConfirmDialog
+        confirmLabel="Delete collection"
+        description="This removes the collection. The items inside stay in your library."
+        open={deleteTarget !== null}
+        title="Delete this collection?"
+        tone="danger"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void handleDeleteCollection()}
+      />
     </div>
   )
 }

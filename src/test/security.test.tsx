@@ -13,6 +13,13 @@ import AppLockSettings from '../features/security/AppLockSettings'
 import UnlockPage from '../features/security/UnlockPage'
 import { getTauriInvoke } from './setup'
 
+const feedbackMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+}))
+
+vi.mock('../lib/feedback', () => feedbackMock)
+
 const invoke = getTauriInvoke()
 
 const VERIFIER = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA'
@@ -226,6 +233,8 @@ describe('UnlockPage', () => {
 describe('AppLockSettings', () => {
   beforeEach(() => {
     invoke.mockReset()
+    feedbackMock.notifySuccess.mockClear()
+    feedbackMock.notifyError.mockClear()
   })
 
   it('shows the setup form when no app lock exists', async () => {
@@ -291,6 +300,7 @@ describe('AppLockSettings', () => {
     expect(await screen.findByText('App lock is on.')).toBeInTheDocument()
     expect(invoke).toHaveBeenCalledWith('hash_password', { password: PASSWORD })
     expect(invoke).toHaveBeenCalledWith('set_password_verifier', { verifier: ENCODED })
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('App lock is on')
   })
 
   it('rejects a mismatched confirmation without storing anything', async () => {
@@ -329,6 +339,7 @@ describe('AppLockSettings', () => {
       verifier: VERIFIER,
     })
     expect(invoke).toHaveBeenCalledWith('set_password_verifier', { verifier: ENCODED })
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Master password changed')
   })
 
   it('rejects a change when the current password is wrong', async () => {
@@ -372,6 +383,7 @@ describe('AppLockSettings', () => {
       verifier: VERIFIER,
     })
     expect(invoke).toHaveBeenCalledWith('remove_password_verifier')
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('App lock is off')
   })
 
   it('requires a password before removal is sent', async () => {
@@ -429,6 +441,7 @@ describe('AppLockSettings', () => {
     expect(
       await screen.findByText('We could not update app lock. Try again.'),
     ).toBeInTheDocument()
+    expect(feedbackMock.notifyError).toHaveBeenCalledWith('We could not update app lock. Try again.')
     expect(screen.getByText('App lock is off.')).toBeInTheDocument()
     expect(screen.queryByText('App lock is on.')).not.toBeInTheDocument()
     expect(invoke).toHaveBeenCalledWith('set_password_verifier', { verifier: ENCODED })
@@ -451,6 +464,7 @@ describe('AppLockSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Yes, remove app lock' }))
 
     expect(await screen.findByText('We could not remove app lock. Try again.')).toBeInTheDocument()
+    expect(feedbackMock.notifyError).toHaveBeenCalledWith('We could not remove app lock. Try again.')
     expect(screen.getByText('App lock is on.')).toBeInTheDocument()
     expect(screen.queryByText('App lock is off.')).not.toBeInTheDocument()
   })
