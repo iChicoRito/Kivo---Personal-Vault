@@ -313,7 +313,7 @@ describe('CollectionFolderPanel', () => {
     })
 
     expect(collapsedToggle).toHaveAttribute('aria-expanded', 'false')
-    expect(panelBox(panel)).toHaveClass('w-32')
+    expect(panelBox(panel)).toHaveClass('w-16')
     expect(within(panel).getByRole('button', { name: 'Open collection Work' })).toBeInTheDocument()
 
     fireEvent.click(collapsedToggle)
@@ -383,7 +383,7 @@ describe('CollectionFolderPanel', () => {
     expect(within(panel).getByRole('button', { name: 'Reading 0 Items' })).toBeInTheDocument()
 
     fireEvent.click(within(panel).getByRole('button', { name: 'Collapse collection folder' }))
-    expect(panelBox(panel)).toHaveClass('w-32')
+    expect(panelBox(panel)).toHaveClass('w-16')
 
     act(() => {
       window.dispatchEvent(new Event(ITEM_DRAG_START_EVENT))
@@ -400,7 +400,7 @@ describe('CollectionFolderPanel', () => {
     expect(
       within(panel).getByRole('button', { name: 'Open collection Reading' }),
     ).toBeInTheDocument()
-    expect(panelBox(panel)).toHaveClass('w-32')
+    expect(panelBox(panel)).toHaveClass('w-16')
   })
 
   it('marks the collection under the pointer while an item is dragged over it', async () => {

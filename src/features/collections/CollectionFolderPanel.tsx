@@ -310,12 +310,14 @@ export function CollectionFolderPanel() {
     // panel readable next to a list that is shorter than the tree.
     <div
       className={`relative min-h-96 shrink-0 transition-[width] duration-300 ease-out ${
-        showExpanded ? 'w-80' : 'w-32'
+        showExpanded ? 'w-80' : 'w-16'
       }`}
     >
       <aside
         aria-label="Collection folders"
-        className="absolute inset-0 flex flex-col gap-3 rounded-3xl border border-default bg-surface p-4"
+        className={`absolute inset-0 flex flex-col gap-3 rounded-3xl border border-default bg-surface ${
+          showExpanded ? 'p-4' : 'px-2 py-4'
+        }`}
       >
         <div
           className={`flex items-center gap-2 ${showExpanded ? 'justify-between' : 'justify-center'}`}
