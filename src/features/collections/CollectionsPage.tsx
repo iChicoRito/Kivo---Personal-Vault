@@ -51,7 +51,7 @@ import {
   type Collection,
   type CollectionProtection,
 } from '../../data/collections'
-import { openItemFile, openSourceUrl, revealItemFile } from '../../data/files'
+import { revealItemFile } from '../../data/files'
 import {
   listItems,
   loadItem,
@@ -62,6 +62,7 @@ import {
 import type { CollectionsView } from '../../data/settings'
 import { CollectionFolderFloat } from './CollectionFolderFloat'
 import { CollectionItemView } from './CollectionItemView'
+import { openItemByKind } from './itemOpen'
 import { UnlockDialog } from './UnlockDialog'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -489,17 +490,7 @@ export function CollectionsPage() {
     setActionError(null)
 
     try {
-      if (item.kind === 'note') {
-        navigate(`/notes/${item.id}`)
-        return
-      }
-
-      if (item.kind === 'source') {
-        await openSourceUrl(item.id)
-        return
-      }
-
-      await openItemFile(item.id)
+      await openItemByKind(item, (id) => navigate(`/notes/${id}`))
     } catch {
       setActionError(OPEN_ERROR)
     }

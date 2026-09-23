@@ -150,7 +150,10 @@ async function openRowMenu(title: string) {
 }
 
 function findCardRow(title: string) {
-  const row = screen.getByText(title).closest('li')
+  const row = screen
+    .getAllByText(title)
+    .map((element) => element.closest('li'))
+    .find((element): element is HTMLLIElement => element !== null)
 
   if (!row) throw new Error('The item row is missing.')
 
@@ -170,10 +173,12 @@ function collectionSummary(overrides: Partial<Collection> = {}): Collection {
   }
 }
 
+// The panel head is a BranchedMenu section head, so the element that takes a
+// drop is the section wrapper around the head and its item rows.
 function findCollectionRow(panel: HTMLElement, name: string) {
   const row = within(panel)
-    .getByRole('button', { name: `Open collection ${name}` })
-    .closest('li')
+    .getByRole('button', { name: new RegExp(`^${name} `) })
+    .closest('[data-collection-drop]')
 
   if (!row) throw new Error('The collection row is missing.')
 
@@ -440,7 +445,8 @@ describe('NotesPage', () => {
     collectionsMock.listCollections.mockResolvedValue([collectionSummary()])
 
     renderNotes()
-    await screen.findByText('Alpha')
+    // The panel repeats the note title under its collection, so wait for any match.
+    await screen.findAllByText('Alpha')
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
     const row = findCardRow('Alpha')
@@ -892,7 +898,8 @@ describe('SourcesPage', () => {
     collectionsMock.listCollections.mockResolvedValue([collectionSummary()])
 
     renderSources()
-    await screen.findByText('Example')
+    // The panel repeats the source title under its collection, so wait for any match.
+    await screen.findAllByText('Example')
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
     const row = findCardRow('Example')

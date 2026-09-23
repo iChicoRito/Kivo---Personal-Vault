@@ -299,6 +299,56 @@
 }
 
 /*
+ * Collection panel tree. The panel body is the ReactBits BranchedMenu, whose
+ * vendored sheet is unlayered, so these rules stay unlayered too and carry the
+ * extra class when they have to beat it on order.
+ *
+ * The nav-level trunk line goes away: the Figma frames show a trunk only inside
+ * the open collection, drawn by the branch paths of that one section. The head
+ * turns into a flex row so the collection icon and the name sit together, and
+ * long item titles end in an ellipsis instead of stretching the panel. The
+ * marker that glides along the nav's edge is off as well: the frames mark the
+ * active item with the bright label and the bright branch into it, nothing
+ * else.
+ */
+.kivo-collection-menu.branched-menu {
+  width: 100%;
+}
+
+.kivo-collection-menu.branched-menu::before {
+  content: none;
+}
+
+.kivo-collection-menu .branched-menu__marker {
+  display: none;
+}
+
+.kivo-collection-menu .branched-menu__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.kivo-collection-menu .branched-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A loading bar or a failed load shows copy the user cannot act on, so those
+   rows take no pointer and keep the muted tone on hover. */
+.kivo-collection-menu .branched-menu__item:disabled {
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .kivo-collection-menu .branched-menu__item:disabled:hover {
+    color: var(--bm-muted);
+  }
+}
+
+/*
  * Drag to a collection. The card under the pointer is copied into a fixed layer
  * that follows it at full strength, lifted off the page with a drop shadow,
  * while the card left in the list dims until the drop lands. Over a collection

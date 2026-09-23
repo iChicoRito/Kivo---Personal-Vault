@@ -5,17 +5,25 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Collection } from '../data/collections'
+import type { ItemSummary } from '../data/items'
 
 const collectionsMock = vi.hoisted(() => ({
   listCollections: vi.fn(),
 }))
 
 const itemsMock = vi.hoisted(() => ({
+  listItems: vi.fn(),
   moveItemsToCollection: vi.fn(),
+}))
+
+const filesMock = vi.hoisted(() => ({
+  openItemFile: vi.fn(),
+  openSourceUrl: vi.fn(),
 }))
 
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/items', () => itemsMock)
+vi.mock('../data/files', () => filesMock)
 
 import { CollectionFolderPanel } from '../features/collections/CollectionFolderPanel'
 import {
@@ -38,6 +46,22 @@ function collection(overrides: Partial<Collection> = {}): Collection {
   }
 }
 
+function item(overrides: Partial<ItemSummary> = {}): ItemSummary {
+  return {
+    id: 'n1',
+    kind: 'note',
+    title: 'Alpha',
+    isFavorite: false,
+    collectionId: 'col-1',
+    updatedAt: '2026-09-10T11:20:00.000Z',
+    fileMissing: false,
+    isPinned: false,
+    content: '',
+    file: null,
+    ...overrides,
+  }
+}
+
 function dragOver(collectionId: string | null) {
   act(() => {
     window.dispatchEvent(
@@ -54,12 +78,22 @@ async function dropItem(itemId: string, collectionId: string) {
   })
 }
 
-function findRow(panel: HTMLElement, name: string) {
-  const row = within(panel).getByRole('button', { name: `Open collection ${name}` }).closest('li')
+// The panel's wrapper carries the width and takes the height of the list area,
+// so the panel inside it never stretches the page.
+function panelBox(panel: HTMLElement) {
+  const box = panel.parentElement
 
-  if (!row) throw new Error('The collection row is missing.')
+  if (!box) throw new Error('The panel wrapper is missing.')
 
-  return row
+  return box
+}
+
+function findSection(panel: HTMLElement, collectionId: string) {
+  const section = panel.querySelector(`[data-collection-drop="${collectionId}"]`)
+
+  if (!section) throw new Error('The collection section is missing.')
+
+  return section
 }
 
 function LocationProbe() {
@@ -72,6 +106,7 @@ function renderPanel() {
     <MemoryRouter initialEntries={['/notes']}>
       <Routes>
         <Route path="/notes" element={<CollectionFolderPanel />} />
+        <Route path="/notes/:id" element={<LocationProbe />} />
         <Route path="/collections" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
@@ -81,7 +116,10 @@ function renderPanel() {
 beforeEach(() => {
   vi.clearAllMocks()
   collectionsMock.listCollections.mockResolvedValue([])
+  itemsMock.listItems.mockResolvedValue([])
   itemsMock.moveItemsToCollection.mockResolvedValue(undefined)
+  filesMock.openItemFile.mockResolvedValue(undefined)
+  filesMock.openSourceUrl.mockResolvedValue(undefined)
 })
 
 describe('CollectionFolderPanel', () => {
@@ -100,20 +138,39 @@ describe('CollectionFolderPanel', () => {
     expect([...skeletons].every((skeleton) => skeleton.closest('[aria-hidden="true"]'))).toBe(true)
   })
 
-  it('renders nothing when every collection is empty', async () => {
+  it('shows every collection even when none holds items', async () => {
     collectionsMock.listCollections.mockResolvedValue([
       collection({ id: 'col-1', name: 'Work', itemCount: 0 }),
       collection({ id: 'col-2', name: 'Reading', itemCount: 0 }),
     ])
 
-    const view = renderPanel()
+    renderPanel()
 
-    await waitFor(() => expect(collectionsMock.listCollections).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
-    expect(view.container).toBeEmptyDOMElement()
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    expect(within(panel).getByRole('button', { name: 'Work 0 Items' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Reading 0 Items' })).toBeInTheDocument()
   })
 
-  it('renders only collections that hold items, with the count copy', async () => {
+  it('unfolds the first collection that holds items, not an empty one', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Empty', itemCount: 0 }),
+      collection({ id: 'col-2', name: 'Work', itemCount: 1 }),
+    ])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: 'col-2' })
+    expect(itemsMock.listItems).not.toHaveBeenCalledWith({ collectionId: 'col-1' })
+    expect(within(panel).getByRole('button', { name: 'Work 1 Item' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+  })
+
+  it('renders every collection with the count read aloud', async () => {
     collectionsMock.listCollections.mockResolvedValue([
       collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
       collection({ id: 'col-2', name: 'Reading', itemCount: 2 }),
@@ -124,23 +181,119 @@ describe('CollectionFolderPanel', () => {
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
 
-    expect(within(panel).getByText('Work')).toBeInTheDocument()
-    expect(within(panel).getByText('Reading')).toBeInTheDocument()
-    expect(within(panel).queryByText('Empty')).not.toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Work 1 Item' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Reading 2 Items' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Empty 0 Items' })).toBeInTheDocument()
 
-    expect(within(panel).getByText('1 Item')).toBeInTheDocument()
-    expect(within(panel).getByText('2 Items')).toBeInTheDocument()
-
-    expect(within(panel).getByRole('button', { name: 'Open collection Work' })).toBeInTheDocument()
-    expect(
-      within(panel).getByRole('button', { name: 'Open collection Reading' }),
-    ).toBeInTheDocument()
-    expect(
-      within(panel).queryByRole('button', { name: 'Open collection Empty' }),
-    ).not.toBeInTheDocument()
+    // The count is spoken, not drawn, matching the design.
+    expect(within(panel).queryByText('1 Item')).not.toBeInTheDocument()
+    expect(within(panel).queryByText('2 Items')).not.toBeInTheDocument()
   })
 
-  it('collapses to a rail that still opens collections, then expands again', async () => {
+  it('unfolds the first collection and lists the items it holds', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
+    ])
+    itemsMock.listItems.mockResolvedValue([item()])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: 'col-1' })
+    expect(await within(panel).findByRole('button', { name: 'Alpha' })).toBeInTheDocument()
+  })
+
+  it('shows loading bars under a head while its items load', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
+    ])
+    itemsMock.listItems.mockReturnValue(new Promise(() => undefined))
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+    const section = await waitFor(() => findSection(panel, 'col-1'))
+
+    await waitFor(() => expect(section.querySelectorAll('.skeleton').length).toBe(3))
+    expect(section.querySelectorAll('.branched-menu__item:disabled').length).toBe(3)
+  })
+
+  it('shows a quiet line when the items of a collection fail to load', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
+    ])
+    itemsMock.listItems.mockRejectedValue(new Error('boom'))
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    expect(await within(panel).findByText('Could not load these items.')).toBeInTheDocument()
+  })
+
+  it('unfolds another collection on a head click and folds it back', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
+      collection({ id: 'col-2', name: 'Reading', itemCount: 1, sortOrder: 1 }),
+    ])
+    itemsMock.listItems.mockResolvedValue([item()])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+    const reading = within(panel).getByRole('button', { name: 'Reading 1 Item' })
+
+    expect(reading).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(reading)
+
+    expect(reading).toHaveAttribute('aria-expanded', 'true')
+    await waitFor(() =>
+      expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: 'col-2' }),
+    )
+
+    fireEvent.click(reading)
+
+    expect(reading).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('opens a note in the editor when its row is clicked', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
+    ])
+    itemsMock.listItems.mockResolvedValue([item({ id: 'n7', title: 'Alpha' })])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Alpha' }))
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/notes/n7'))
+  })
+
+  it('opens a source link and a file with the system app', async () => {
+    collectionsMock.listCollections.mockResolvedValue([
+      collection({ id: 'col-1', name: 'Work', itemCount: 2 }),
+    ])
+    itemsMock.listItems.mockResolvedValue([
+      item({ id: 's1', kind: 'source', title: 'ACME docs' }),
+      item({ id: 'f1', kind: 'file', title: 'Guide.pdf' }),
+    ])
+
+    renderPanel()
+
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    fireEvent.click(await within(panel).findByRole('button', { name: 'ACME docs' }))
+    await waitFor(() => expect(filesMock.openSourceUrl).toHaveBeenCalledWith('s1'))
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Guide.pdf' }))
+    await waitFor(() => expect(filesMock.openItemFile).toHaveBeenCalledWith('f1'))
+  })
+
+  it('collapses to the rail that still opens collections, then expands again', async () => {
     collectionsMock.listCollections.mockResolvedValue([
       collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
     ])
@@ -151,7 +304,7 @@ describe('CollectionFolderPanel', () => {
     const toggle = within(panel).getByRole('button', { name: 'Collapse collection folder' })
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(panel).toHaveClass('w-80')
+    expect(panelBox(panel)).toHaveClass('w-80')
 
     fireEvent.click(toggle)
 
@@ -160,7 +313,7 @@ describe('CollectionFolderPanel', () => {
     })
 
     expect(collapsedToggle).toHaveAttribute('aria-expanded', 'false')
-    expect(panel).toHaveClass('w-[4.5rem]')
+    expect(panelBox(panel)).toHaveClass('w-32')
     expect(within(panel).getByRole('button', { name: 'Open collection Work' })).toBeInTheDocument()
 
     fireEvent.click(collapsedToggle)
@@ -168,7 +321,7 @@ describe('CollectionFolderPanel', () => {
     expect(
       within(panel).getByRole('button', { name: 'Collapse collection folder' }),
     ).toHaveAttribute('aria-expanded', 'true')
-    expect(within(panel).getByRole('button', { name: 'Open collection Work' })).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Work 1 Item' })).toBeInTheDocument()
   })
 
   it('shows the collection name in a tooltip on the collapsed rail', async () => {
@@ -190,14 +343,17 @@ describe('CollectionFolderPanel', () => {
     expect(await screen.findByRole('tooltip', {}, { timeout: 3000 })).toHaveTextContent('Work')
   })
 
-  it('opens the collections page for the clicked collection', async () => {
+  it('opens the collections page from the collapsed rail', async () => {
     collectionsMock.listCollections.mockResolvedValue([
       collection({ id: 'col-9', name: 'Work', itemCount: 1 }),
     ])
 
     renderPanel()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open collection Work' }))
+    const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Collapse collection folder' }))
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open collection Work' }))
 
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/collections?collection=col-9'),
@@ -213,7 +369,7 @@ describe('CollectionFolderPanel', () => {
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
   })
 
-  it('lists empty collections and expands while a drag is active', async () => {
+  it('expands the rail while a drag is active and folds it back after', async () => {
     collectionsMock.listCollections.mockResolvedValue([
       collection({ id: 'col-1', name: 'Work', itemCount: 1 }),
       collection({ id: 'col-2', name: 'Reading', itemCount: 0 }),
@@ -223,24 +379,28 @@ describe('CollectionFolderPanel', () => {
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
 
-    expect(within(panel).queryByText('Reading')).not.toBeInTheDocument()
+    // The empty collection is already in the list, so a drag adds nothing new.
+    expect(within(panel).getByRole('button', { name: 'Reading 0 Items' })).toBeInTheDocument()
 
     fireEvent.click(within(panel).getByRole('button', { name: 'Collapse collection folder' }))
-    expect(panel).toHaveClass('w-[4.5rem]')
+    expect(panelBox(panel)).toHaveClass('w-32')
 
     act(() => {
       window.dispatchEvent(new Event(ITEM_DRAG_START_EVENT))
     })
 
-    expect(within(panel).getByText('Reading')).toBeInTheDocument()
-    expect(panel).toHaveClass('w-80')
+    expect(within(panel).getByRole('button', { name: 'Reading 0 Items' })).toBeInTheDocument()
+    expect(panelBox(panel)).toHaveClass('w-80')
 
     act(() => {
       window.dispatchEvent(new Event(ITEM_DRAG_END_EVENT))
     })
 
-    expect(within(panel).queryByText('Reading')).not.toBeInTheDocument()
-    expect(panel).toHaveClass('w-[4.5rem]')
+    // Back on the rail, every collection still has its button, empty ones too.
+    expect(
+      within(panel).getByRole('button', { name: 'Open collection Reading' }),
+    ).toBeInTheDocument()
+    expect(panelBox(panel)).toHaveClass('w-32')
   })
 
   it('marks the collection under the pointer while an item is dragged over it', async () => {
@@ -251,35 +411,40 @@ describe('CollectionFolderPanel', () => {
     renderPanel()
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
-    const row = findRow(panel, 'Work')
+    const section = findSection(panel, 'col-1')
 
     dragOver('col-1')
-    expect(row).toHaveClass('outline-focus')
+    expect(section).toHaveClass('outline-focus')
 
     dragOver(null)
-    expect(row).not.toHaveClass('outline-focus')
+    expect(section).not.toHaveClass('outline-focus')
   })
 
-  it('moves the dropped item into that collection and reports it', async () => {
+  it('moves the dropped item into that collection, reports it, and refreshes the tree', async () => {
     collectionsMock.listCollections
       .mockResolvedValueOnce([collection({ id: 'col-1', name: 'Work', itemCount: 1 })])
       .mockResolvedValueOnce([collection({ id: 'col-1', name: 'Work', itemCount: 2 })])
+    itemsMock.listItems.mockResolvedValue([item()])
 
     renderPanel()
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
-    const row = findRow(panel, 'Work')
+    const section = findSection(panel, 'col-1')
 
     dragOver('col-1')
-    expect(row).toHaveClass('outline-focus')
+    expect(section).toHaveClass('outline-focus')
 
-    await dropItem('note-1', 'col-1')
+    await dropItem('n1', 'col-1')
 
-    expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['note-1'], 'col-1')
+    expect(itemsMock.moveItemsToCollection).toHaveBeenCalledWith(['n1'], 'col-1')
     expect(await within(panel).findByText('Moved to Work')).toBeInTheDocument()
-    await waitFor(() => expect(within(panel).getByText('2 Items')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(within(panel).getByRole('button', { name: 'Work 2 Items' })).toBeInTheDocument(),
+    )
     expect(collectionsMock.listCollections).toHaveBeenCalledTimes(2)
-    expect(row).not.toHaveClass('outline-focus')
+    // The open tree refetches, so the moved item shows up under its new head.
+    expect(itemsMock.listItems).toHaveBeenCalledTimes(2)
+    expect(section).not.toHaveClass('outline-focus')
   })
 
   it('keeps the panel and reports a move that fails', async () => {
@@ -291,14 +456,14 @@ describe('CollectionFolderPanel', () => {
     renderPanel()
 
     const panel = await screen.findByRole('complementary', { name: 'Collection folders' })
-    const row = findRow(panel, 'Work')
+    const section = findSection(panel, 'col-1')
 
-    await dropItem('note-1', 'col-1')
+    await dropItem('n1', 'col-1')
 
     expect(await within(panel).findByRole('alert')).toHaveTextContent(
       'Could not move this item. Try again.',
     )
-    expect(within(panel).getByText('Work')).toBeInTheDocument()
-    expect(row).not.toHaveClass('outline-focus')
+    expect(within(panel).getByRole('button', { name: 'Work 1 Item' })).toBeInTheDocument()
+    expect(section).not.toHaveClass('outline-focus')
   })
 })
