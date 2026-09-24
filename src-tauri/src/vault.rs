@@ -478,11 +478,20 @@ fn read_collections(connection: &Connection) -> rusqlite::Result<Vec<Collection>
     Ok(collections)
 }
 
-fn read_tags(connection: &Connection) -> rusqlite::Result<Vec<Tag>> {
+// Items and live credentials share one tag list so the shared TagPicker sees
+// every tag regardless of which feature created it. An id only counts once.
+pub(crate) fn read_tags(connection: &Connection) -> rusqlite::Result<Vec<Tag>> {
     let mut statement = connection.prepare(
-        "SELECT MIN(value) AS name, COUNT(DISTINCT i.id) AS count
-         FROM items i, json_each(i.tags)
-         WHERE i.deleted_at IS NULL
+        "SELECT MIN(value) AS name, COUNT(DISTINCT source_id) AS count
+         FROM (
+           SELECT i.id AS source_id, value
+           FROM items i, json_each(i.tags)
+           WHERE i.deleted_at IS NULL
+           UNION ALL
+           SELECT c.id AS source_id, value
+           FROM credentials c, json_each(c.tags)
+           WHERE c.deleted_at IS NULL
+         )
          GROUP BY lower(value)
          ORDER BY MIN(value) COLLATE NOCASE ASC",
     )?;
@@ -996,7 +1005,8 @@ fn resolve_collection_protection(
                 if secret.chars().count() < 4 {
                     return Err("Password must be at least 4 characters".to_string());
                 }
-            } else if secret.len() != 6 || !secret.chars().all(|character| character.is_ascii_digit())
+            } else if secret.len() != 6
+                || !secret.chars().all(|character| character.is_ascii_digit())
             {
                 return Err("PIN must be 6 digits".to_string());
             }
@@ -1027,10 +1037,8 @@ fn write_collection(
         .map(str::to_string);
 
     // Resolved before the transaction so a bad secret never opens one.
-    let protection = resolve_collection_protection(
-        input.protection.as_deref(),
-        input.secret.as_deref(),
-    )?;
+    let protection =
+        resolve_collection_protection(input.protection.as_deref(), input.secret.as_deref())?;
 
     let transaction = connection
         .transaction()
@@ -2016,7 +2024,10 @@ mod tests {
         assert_eq!(first, vec!["Work".to_string(), "personal".to_string()]);
 
         let loaded = load_item_with_state(&state, &saved.id).expect("load tags");
-        assert_eq!(loaded.tags, vec!["Work".to_string(), "personal".to_string()]);
+        assert_eq!(
+            loaded.tags,
+            vec!["Work".to_string(), "personal".to_string()]
+        );
 
         let second =
             set_item_tags_with_state(&state, &saved.id, &["Home".to_string()]).expect("replace");
@@ -3229,7 +3240,8 @@ mod tests {
             .expect("import second");
 
         // One live tag and one tag on a trashed item: the live name counts once.
-        set_item_tags_with_state(&state, &favorite_item.id, &["News".to_string()]).expect("tag note");
+        set_item_tags_with_state(&state, &favorite_item.id, &["News".to_string()])
+            .expect("tag note");
         set_item_tags_with_state(&state, &source.id, &["News".to_string()]).expect("tag source");
 
         // Trash one source and one file so live counts and disk bytes diverge.
@@ -3314,10 +3326,10 @@ mod tests {
         input.secret = Some("123456".to_string());
         let locked = save_collection_with_state(&state, &input).expect("create locked");
 
+        assert!(verify_collection_secret_with_state(&state, &locked.id, "123456").expect("verify"));
         assert!(
-            verify_collection_secret_with_state(&state, &locked.id, "123456").expect("verify")
+            !verify_collection_secret_with_state(&state, &locked.id, "999999").expect("verify")
         );
-        assert!(!verify_collection_secret_with_state(&state, &locked.id, "999999").expect("verify"));
 
         let open =
             save_collection_with_state(&state, &collection_input("Open")).expect("create open");
@@ -3350,7 +3362,8 @@ mod tests {
         assert_eq!(renamed.name, "Kept renamed");
         assert_eq!(renamed.protection, "password");
         assert!(
-            verify_collection_secret_with_state(&state, &created.id, "secret-pass").expect("verify")
+            verify_collection_secret_with_state(&state, &created.id, "secret-pass")
+                .expect("verify")
         );
     }
 

@@ -40,14 +40,31 @@ const dashboardMock = vi.hoisted(() => ({
   loadVaultSummary: vi.fn(),
 }))
 
+const passwordsMock = vi.hoisted(() => ({
+  vaultStatus: vi.fn(),
+  setupVault: vi.fn(),
+  unlockVault: vi.fn(),
+  lockVault: vi.fn(),
+  listCredentials: vi.fn(),
+  loadCredential: vi.fn(),
+  saveCredential: vi.fn(),
+  setCredentialsFavorite: vi.fn(),
+  trashCredentials: vi.fn(),
+  restoreCredentials: vi.fn(),
+  deleteCredentialsPermanently: vi.fn(),
+  PASSWORD_CATEGORIES: ['Uncategorized', 'Personal', 'Work', 'Banking', 'Development', 'Social'],
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/dashboard', () => dashboardMock)
+vi.mock('../data/passwords', () => passwordsMock)
 
 import { AppRoutes } from '../app/router'
 import { navigationGroups } from '../app/navigation'
+import { VaultProvider } from '../app/vault'
 import ModulePage, { moduleRoutes } from '../features/modules/ModulePage'
 
 // Documented dock destinations, independent of the dashboard component.
@@ -73,6 +90,11 @@ const REAL_DESTINATIONS: Array<{ path: string; title: string; description?: stri
   { path: '/sources', title: 'Source' },
   { path: '/files', title: 'Files' },
   { path: '/collections', title: 'Collections' },
+  {
+    path: '/passwords',
+    title: 'Password Manager',
+    description: 'Saved logins stay encrypted on this device.',
+  },
   { path: '/favorites', title: 'Favorites', description: 'Keep priority items easy to find.' },
   {
     path: '/trash',
@@ -83,9 +105,11 @@ const REAL_DESTINATIONS: Array<{ path: string; title: string; description?: stri
 
 function renderRoute(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
+    <VaultProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+      </MemoryRouter>
+    </VaultProvider>,
   )
 }
 
@@ -97,6 +121,8 @@ beforeEach(() => {
   tagsMock.listTags.mockResolvedValue([])
   filesMock.pickFile.mockResolvedValue(null)
   dashboardMock.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
+  passwordsMock.vaultStatus.mockResolvedValue({ configured: true, unlocked: true })
+  passwordsMock.listCredentials.mockResolvedValue([])
 })
 
 describe('documented destinations', () => {
@@ -207,8 +233,12 @@ describe('Primary dock navigation', () => {
     const dock = await screen.findByRole('navigation', { name: 'Primary navigation' })
     const links = within(dock).getAllByRole('link')
 
-    expect(dockDestinations).toHaveLength(9)
+    expect(dockDestinations).toHaveLength(10)
     expect(links).toHaveLength(dockDestinations.length)
+
+    expect(
+      within(dock).getByRole('link', { name: 'Password Manager', exact: true }),
+    ).toHaveAttribute('href', '/passwords')
 
     for (const destination of dockDestinations) {
       const link = within(dock).getByRole('link', { name: destination.label, exact: true })

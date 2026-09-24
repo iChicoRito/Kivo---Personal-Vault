@@ -7,6 +7,7 @@ import {
   Link02Icon,
   NoteEditIcon,
   Settings01Icon,
+  SquareLockPasswordIcon,
   StarIcon,
 } from '@hugeicons/core-free-icons'
 import type { IconSvgElement } from '@hugeicons/react'
@@ -32,6 +33,12 @@ export const navigationGroups: Array<{ label: string; links: NavigationLink[] }>
       { label: 'Sources', to: '/sources', icon: Link02Icon },
       { label: 'Files', to: '/files', icon: FolderOpenIcon },
       { label: 'Collections', to: '/collections', icon: Layers01Icon },
+    ],
+  },
+  {
+    label: 'PASSWORDS',
+    links: [
+      { label: 'Password Manager', to: '/passwords', icon: SquareLockPasswordIcon },
     ],
   },
   {

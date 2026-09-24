@@ -1,4 +1,6 @@
 mod database;
+mod icons;
+mod passwords;
 mod security;
 mod vault;
 
@@ -21,6 +23,7 @@ pub fn run() {
             // Try migration during startup. Failed attempts remain retryable through the command.
             let _ = database.initialize();
             app.manage(database);
+            app.manage(passwords::VaultKeyState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -61,6 +64,18 @@ pub fn run() {
             vault::open_item_file,
             vault::reveal_item_file,
             vault::open_source_url,
+            icons::credential_icon,
+            passwords::vault_status,
+            passwords::setup_vault,
+            passwords::unlock_vault,
+            passwords::lock_vault,
+            passwords::list_credentials,
+            passwords::load_credential,
+            passwords::save_credential,
+            passwords::set_credentials_favorite,
+            passwords::trash_credentials,
+            passwords::restore_credentials,
+            passwords::delete_credentials_permanently,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kivo")

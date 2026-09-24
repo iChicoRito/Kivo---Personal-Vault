@@ -40,13 +40,30 @@ const tagsMock = vi.hoisted(() => ({
   listTags: vi.fn(),
 }))
 
+const passwordsMock = vi.hoisted(() => ({
+  vaultStatus: vi.fn(),
+  setupVault: vi.fn(),
+  unlockVault: vi.fn(),
+  lockVault: vi.fn(),
+  listCredentials: vi.fn(),
+  loadCredential: vi.fn(),
+  saveCredential: vi.fn(),
+  setCredentialsFavorite: vi.fn(),
+  trashCredentials: vi.fn(),
+  restoreCredentials: vi.fn(),
+  deleteCredentialsPermanently: vi.fn(),
+  PASSWORD_CATEGORIES: ['Uncategorized', 'Personal', 'Work', 'Banking', 'Development', 'Social'],
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
 vi.mock('../data/dashboard', () => dashboardMock)
+vi.mock('../data/passwords', () => passwordsMock)
 
 import { AppRoutes } from '../app/router'
+import { VaultProvider } from '../app/vault'
 
 const EMPTY_SUMMARY = {
   itemCount: 0,
@@ -68,6 +85,7 @@ const destinations: Array<[path: string, heading: string]> = [
   ['/sources', 'Source'],
   ['/files', 'Files'],
   ['/collections', 'Collections'],
+  ['/passwords', 'Password Manager'],
   ['/favorites', 'Favorites'],
   ['/trash', 'Trash'],
   ['/settings', 'Settings'],
@@ -75,9 +93,11 @@ const destinations: Array<[path: string, heading: string]> = [
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
+    <VaultProvider>
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+      </MemoryRouter>
+    </VaultProvider>,
   )
 }
 
@@ -89,6 +109,8 @@ beforeEach(() => {
   tagsMock.listTags.mockResolvedValue([])
   filesMock.pickFile.mockResolvedValue(null)
   dashboardMock.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
+  passwordsMock.vaultStatus.mockResolvedValue({ configured: true, unlocked: true })
+  passwordsMock.listCredentials.mockResolvedValue([])
 })
 
 describe('router', () => {

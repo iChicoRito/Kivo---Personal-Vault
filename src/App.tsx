@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AppRoutes } from './app/router'
 import { PreferencesProvider } from './app/preferences'
+import { VaultProvider } from './app/vault'
 import StatusScreen from './app/StatusScreen'
 import { FeedbackToastRegion } from './components/ui/FeedbackToast'
 import { initializeDatabase } from './data/database'
@@ -91,7 +92,9 @@ function ReadyApplication() {
   return (
     <PreferencesProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <VaultProvider>
+          <AppRoutes />
+        </VaultProvider>
       </BrowserRouter>
       <FeedbackToastRegion />
     </PreferencesProvider>

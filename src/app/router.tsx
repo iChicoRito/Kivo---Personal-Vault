@@ -11,6 +11,7 @@ import { FilesPage } from '../features/files/FilesPage'
 import { CollectionsPage } from '../features/collections/CollectionsPage'
 import { FavoritesPage } from '../features/favorites/FavoritesPage'
 import { TrashPage } from '../features/trash/TrashPage'
+import PasswordsPage from '../features/passwords/PasswordsPage'
 
 export function NotFoundPage() {
   return (
@@ -42,6 +43,7 @@ export function AppRoutes() {
         <Route path="collections" element={<CollectionsPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="trash" element={<TrashPage />} />
+        <Route path="passwords" element={<PasswordsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

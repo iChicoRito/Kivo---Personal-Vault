@@ -18,6 +18,7 @@ const COLLECTIONS_VIEW_MIGRATION: &str = include_str!("../migrations/0007_collec
 const COLLECTION_PROTECTION_MIGRATION: &str =
     include_str!("../migrations/0008_collection_protection.sql");
 const INLINE_TAGS: &str = include_str!("../migrations/0009_inline_tags.sql");
+const PASSWORD_VAULT_MIGRATION: &str = include_str!("../migrations/0010_password_vault.sql");
 
 struct Migration {
     version: i64,
@@ -62,6 +63,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 9,
         sql: INLINE_TAGS,
+    },
+    Migration {
+        version: 10,
+        sql: PASSWORD_VAULT_MIGRATION,
     },
 ];
 
@@ -677,7 +682,7 @@ mod tests {
         apply_migrations(&mut connection).expect("first migration");
         apply_migrations(&mut connection).expect("second migration");
 
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
 
         for table in [
             "profile",
@@ -688,6 +693,8 @@ mod tests {
             "files",
             "activity",
             "index_state",
+            "vault_config",
+            "credentials",
         ] {
             assert!(table_exists(&connection, table), "missing table {table}");
         }
@@ -716,7 +723,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
 
         // Dropping a table gives the test a way to detect whether the migration ran again.
         connection
@@ -729,7 +736,7 @@ mod tests {
             !table_exists(&connection, "preferences"),
             "an up-to-date database must not re-run its migration"
         );
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
     }
 
     #[test]
@@ -752,7 +759,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
         assert_eq!(
             read_preferences(&connection).expect("read preferences"),
             Preferences {
@@ -820,7 +827,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
         assert!(
             !table_exists(&connection, "starter_collections"),
             "the onboarding table is dropped after the copy"
@@ -895,7 +902,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
 
         let (title, content, is_pinned, deleted_at, icon): (
             String,
@@ -960,7 +967,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
         let collections_view: String = connection
             .query_row(
                 "SELECT collections_view FROM preferences WHERE id = 1",
@@ -1003,7 +1010,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
         let (protection, secret_hash): (String, Option<String>) = connection
             .query_row(
                 "SELECT protection, secret_hash FROM collections WHERE id = 'col-old'",
@@ -1062,7 +1069,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 9);
+        assert_eq!(read_user_version(&connection), 10);
         let tags: String = connection
             .query_row("SELECT tags FROM items WHERE id = 'item-1'", [], |row| {
                 row.get(0)

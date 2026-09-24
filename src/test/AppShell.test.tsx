@@ -18,6 +18,7 @@ vi.mock('../data/settings', () => settingsMock)
 vi.mock('../lib/feedback', () => feedbackMock)
 
 import AppShell from '../app/AppShell'
+import { navigationGroups } from '../app/navigation'
 import { DEFAULT_PREFERENCES, PreferencesProvider } from '../app/preferences'
 import type { Preferences } from '../data/settings'
 import { setMediaQueryMatches } from './setup'
@@ -29,6 +30,7 @@ const destinationLabels = [
   'Sources',
   'Files',
   'Collections',
+  'Password Manager',
   'Favorites',
   'Trash',
   'Settings',
@@ -41,6 +43,7 @@ const hrefByLabel: Record<string, string> = {
   Sources: '/sources',
   Files: '/files',
   Collections: '/collections',
+  'Password Manager': '/passwords',
   Favorites: '/favorites',
   Trash: '/trash',
   Settings: '/settings',
@@ -109,6 +112,20 @@ describe('AppShell', () => {
         hrefByLabel[label],
       )
     }
+  })
+
+  it('documents the PASSWORDS group with one destination', () => {
+    const passwordsGroup = navigationGroups.find((group) => group.label === 'PASSWORDS')
+
+    expect(passwordsGroup).toBeDefined()
+    expect(passwordsGroup?.links.map((link) => link.label)).toEqual(['Password Manager'])
+    expect(passwordsGroup?.links.map((link) => link.to)).toEqual(['/passwords'])
+
+    renderShell()
+
+    expect(
+      within(dock()).getByRole('link', { name: 'Password Manager', exact: true }),
+    ).toHaveAttribute('href', '/passwords')
   })
 
   it('keeps the dock mounted on every route', () => {
