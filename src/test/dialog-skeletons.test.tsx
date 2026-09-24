@@ -11,13 +11,11 @@ const itemsMock = vi.hoisted(() => ({
   trashItems: vi.fn(),
 }))
 
-const activityMock = vi.hoisted(() => ({ markItemOpened: vi.fn() }))
 const filesMock = vi.hoisted(() => ({ openItemFile: vi.fn(), revealItemFile: vi.fn() }))
 const collectionsMock = vi.hoisted(() => ({ listCollections: vi.fn() }))
 const tagsMock = vi.hoisted(() => ({ listTags: vi.fn() }))
 
 vi.mock('../data/items', () => itemsMock)
-vi.mock('../data/activity', () => activityMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
@@ -63,7 +61,6 @@ beforeEach(() => {
   itemsMock.saveItem.mockResolvedValue(ITEM)
   itemsMock.setItemTags.mockResolvedValue([])
   itemsMock.trashItems.mockResolvedValue(undefined)
-  activityMock.markItemOpened.mockResolvedValue(undefined)
   filesMock.openItemFile.mockResolvedValue(undefined)
   filesMock.revealItemFile.mockResolvedValue(undefined)
   collectionsMock.listCollections.mockResolvedValue([])

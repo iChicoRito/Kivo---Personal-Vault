@@ -18,7 +18,6 @@ import {
   ConfirmDialog,
   TagPicker,
 } from '../../components/items/dialogs'
-import { markItemOpened } from '../../data/activity'
 import { openItemFile, revealItemFile } from '../../data/files'
 import {
   loadItem,
@@ -129,7 +128,6 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
         setItem(loaded)
         applyFields(loaded)
         setLoadState('ready')
-        void markItemOpened(itemId).catch(() => undefined)
       })
       .catch(() => {
         if (active) setLoadState('error')

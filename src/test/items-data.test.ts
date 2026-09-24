@@ -162,7 +162,7 @@ describe('items data contract', () => {
     const filter: ItemFilter = {
       kind: 'note',
       collectionId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
-      tagId: 'c3d4e5f60718293a4b5c6d7e8f90123',
+      tag: 'design',
       favorite: true,
       query: 'meeting',
       sort: 'updated',

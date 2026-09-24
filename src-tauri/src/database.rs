@@ -17,6 +17,7 @@ const SOURCES_VIEW_MIGRATION: &str = include_str!("../migrations/0006_sources_vi
 const COLLECTIONS_VIEW_MIGRATION: &str = include_str!("../migrations/0007_collections_view.sql");
 const COLLECTION_PROTECTION_MIGRATION: &str =
     include_str!("../migrations/0008_collection_protection.sql");
+const INLINE_TAGS: &str = include_str!("../migrations/0009_inline_tags.sql");
 
 struct Migration {
     version: i64,
@@ -57,6 +58,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 8,
         sql: COLLECTION_PROTECTION_MIGRATION,
+    },
+    Migration {
+        version: 9,
+        sql: INLINE_TAGS,
     },
 ];
 
@@ -640,6 +645,17 @@ mod tests {
             == 1
     }
 
+    fn column_exists(connection: &Connection, table: &str, column: &str) -> bool {
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+                params![table, column],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("count column")
+            == 1
+    }
+
     fn read_user_version(connection: &Connection) -> i64 {
         connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -661,7 +677,7 @@ mod tests {
         apply_migrations(&mut connection).expect("first migration");
         apply_migrations(&mut connection).expect("second migration");
 
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
 
         for table in [
             "profile",
@@ -670,13 +686,24 @@ mod tests {
             "security",
             "items",
             "files",
-            "tags",
-            "item_tags",
             "activity",
             "index_state",
         ] {
             assert!(table_exists(&connection, table), "missing table {table}");
         }
+
+        assert!(
+            !table_exists(&connection, "tags"),
+            "tags live on the item row now"
+        );
+        assert!(
+            !table_exists(&connection, "item_tags"),
+            "tag links live on the item row now"
+        );
+        assert!(
+            column_exists(&connection, "items", "tags"),
+            "items carries an inline tags column"
+        );
 
         assert!(
             !table_exists(&connection, "starter_collections"),
@@ -689,7 +716,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
 
         // Dropping a table gives the test a way to detect whether the migration ran again.
         connection
@@ -702,7 +729,7 @@ mod tests {
             !table_exists(&connection, "preferences"),
             "an up-to-date database must not re-run its migration"
         );
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
     }
 
     #[test]
@@ -725,7 +752,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
         assert_eq!(
             read_preferences(&connection).expect("read preferences"),
             Preferences {
@@ -793,7 +820,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
         assert!(
             !table_exists(&connection, "starter_collections"),
             "the onboarding table is dropped after the copy"
@@ -868,7 +895,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
 
         let (title, content, is_pinned, deleted_at, icon): (
             String,
@@ -933,7 +960,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
         let collections_view: String = connection
             .query_row(
                 "SELECT collections_view FROM preferences WHERE id = 1",
@@ -976,7 +1003,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 8);
+        assert_eq!(read_user_version(&connection), 9);
         let (protection, secret_hash): (String, Option<String>) = connection
             .query_row(
                 "SELECT protection, secret_hash FROM collections WHERE id = 'col-old'",
@@ -986,6 +1013,70 @@ mod tests {
             .expect("read protection");
         assert_eq!(protection, "none");
         assert_eq!(secret_hash, None);
+    }
+
+    #[test]
+    fn migration_nine_folds_tag_links_into_the_item_row() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory database");
+
+        // Stage a version-eight vault with one tagged item, then let the gate move
+        // the tag onto the item and drop the old tag tables.
+        for migration in [
+            PHASE_ONE_MIGRATION,
+            PHASE_TWO_MIGRATION,
+            PHASE_TWO_SCHEMA_MIGRATION,
+            PHASE_THREE_MIGRATION,
+            NOTES_VIEW_MIGRATION,
+            SOURCES_VIEW_MIGRATION,
+            COLLECTIONS_VIEW_MIGRATION,
+            COLLECTION_PROTECTION_MIGRATION,
+        ] {
+            connection
+                .execute_batch(migration)
+                .expect("apply shipped migration");
+        }
+        connection
+            .execute(
+                "INSERT INTO items (id, kind, title, created_at, updated_at)
+                 VALUES ('item-1', 'note', 'Tagged', '2026-01-01T00:00:00.000Z',
+                         '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("seed item");
+        connection
+            .execute(
+                "INSERT INTO tags (id, name, created_at)
+                 VALUES ('tag-1', 'Rust', '2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .expect("seed tag");
+        connection
+            .execute(
+                "INSERT INTO item_tags (item_id, tag_id) VALUES ('item-1', 'tag-1')",
+                [],
+            )
+            .expect("seed tag link");
+        connection
+            .pragma_update(None, "user_version", 8)
+            .expect("set version eight");
+
+        apply_migrations(&mut connection).expect("upgrade database");
+
+        assert_eq!(read_user_version(&connection), 9);
+        let tags: String = connection
+            .query_row("SELECT tags FROM items WHERE id = 'item-1'", [], |row| {
+                row.get(0)
+            })
+            .expect("read inline tags");
+        assert_eq!(tags, "[\"Rust\"]");
+        assert!(
+            !table_exists(&connection, "tags"),
+            "the tags table is dropped"
+        );
+        assert!(
+            !table_exists(&connection, "item_tags"),
+            "the item_tags table is dropped"
+        );
     }
 
     #[test]

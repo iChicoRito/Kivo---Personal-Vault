@@ -1,5 +1,4 @@
 import {
-  Clock01Icon,
   DashboardSquare01Icon,
   Delete02Icon,
   FolderOpenIcon,
@@ -9,7 +8,6 @@ import {
   NoteEditIcon,
   Settings01Icon,
   StarIcon,
-  Tag01Icon,
 } from '@hugeicons/core-free-icons'
 import type { IconSvgElement } from '@hugeicons/react'
 
@@ -34,14 +32,12 @@ export const navigationGroups: Array<{ label: string; links: NavigationLink[] }>
       { label: 'Sources', to: '/sources', icon: Link02Icon },
       { label: 'Files', to: '/files', icon: FolderOpenIcon },
       { label: 'Collections', to: '/collections', icon: Layers01Icon },
-      { label: 'Tags', to: '/tags', icon: Tag01Icon },
     ],
   },
   {
     label: 'QUICK ACCESS',
     links: [
       { label: 'Favorites', to: '/favorites', icon: StarIcon },
-      { label: 'Recent', to: '/recent', icon: Clock01Icon },
     ],
   },
   {

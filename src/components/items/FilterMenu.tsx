@@ -12,13 +12,13 @@ export type KindFilter = 'all' | ItemKind
 export type FilterMenuProps = {
   kind: KindFilter
   collectionId: string | null
-  tagId: string | null
+  tag: string | null
   favoritesOnly: boolean
   collections: Collection[]
   tags: Tag[]
   onKindChange: (kind: KindFilter) => void
   onCollectionChange: (id: string | null) => void
-  onTagChange: (id: string | null) => void
+  onTagChange: (name: string | null) => void
   onFavoritesChange: (value: boolean) => void
   onClear: () => void
 }
@@ -26,7 +26,7 @@ export type FilterMenuProps = {
 export function FilterMenu({
   kind,
   collectionId,
-  tagId,
+  tag,
   favoritesOnly,
   collections,
   tags,
@@ -39,7 +39,7 @@ export function FilterMenu({
   const activeCount =
     (kind === 'all' ? 0 : 1) +
     (collectionId ? 1 : 0) +
-    (tagId ? 1 : 0) +
+    (tag ? 1 : 0) +
     (favoritesOnly ? 1 : 0)
 
   function handleAction(key: Key) {
@@ -105,12 +105,12 @@ export function FilterMenu({
             <Dropdown.Popover>
               <Dropdown.Menu
                 selectionMode="single"
-                selectedKeys={[tagId ? `tag.${tagId}` : 'tag.all']}
+                selectedKeys={[tag ? `tag.${tag}` : 'tag.all']}
                 onAction={handleAction}
               >
                 <Dropdown.Item id="tag.all" textValue="All tags">All tags</Dropdown.Item>
                 {tags.map((tag) => (
-                  <Dropdown.Item key={tag.id} id={`tag.${tag.id}`} textValue={tag.name}>
+                  <Dropdown.Item key={tag.name} id={`tag.${tag.name}`} textValue={tag.name}>
                     {tag.name}
                   </Dropdown.Item>
                 ))}

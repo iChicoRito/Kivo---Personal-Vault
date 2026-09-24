@@ -24,8 +24,6 @@ const collectionsMock = vi.hoisted(() => ({
 
 const tagsMock = vi.hoisted(() => ({
   listTags: vi.fn(),
-  saveTag: vi.fn(),
-  deleteTag: vi.fn(),
 }))
 
 const filesMock = vi.hoisted(() => ({
@@ -168,7 +166,7 @@ const COLLECTIONS: Collection[] = [
   { id: 'collection-2', name: 'Collection Two', icon: null, protection: 'none', sortOrder: 2, createdAt: '', itemCount: 0 },
 ]
 
-const TAGS: Tag[] = [{ id: 'tag-1', name: 'alpha', count: 1 }]
+const TAGS: Tag[] = [{ name: 'alpha', count: 1 }]
 
 const PAGED_ITEMS: ItemSummary[] = Array.from({ length: 12 }, (_, index) => ({
   id: `page-${index + 1}`,
@@ -411,7 +409,7 @@ describe('ItemsPage', () => {
     await chooseFilterItem('Tag', 'alpha')
 
     await waitFor(() =>
-      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ tagId: 'tag-1' }),
+      expect(itemsMock.listItems).toHaveBeenLastCalledWith({ tag: 'alpha' }),
     )
   })
 

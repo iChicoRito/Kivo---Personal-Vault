@@ -45,7 +45,7 @@ export type ItemSort = 'title' | 'created' | 'updated' | 'kind'
 export type ItemFilter = {
   kind?: ItemKind
   collectionId?: string
-  tagId?: string
+  tag?: string
   favorite?: boolean
   query?: string
   sort?: ItemSort

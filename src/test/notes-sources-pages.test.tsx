@@ -23,8 +23,6 @@ const filesMock = vi.hoisted(() => ({
 
 const tagsMock = vi.hoisted(() => ({
   listTags: vi.fn(),
-  saveTag: vi.fn(),
-  deleteTag: vi.fn(),
 }))
 
 const collectionsMock = vi.hoisted(() => ({

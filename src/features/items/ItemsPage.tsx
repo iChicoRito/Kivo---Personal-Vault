@@ -36,7 +36,7 @@ const panelLabelClass = 'uppercase'
 function buildFilter(
   kind: KindFilter,
   collectionId: string | null,
-  tagId: string | null,
+  tag: string | null,
   favorite: boolean,
   query: string,
 ): ItemFilter {
@@ -44,7 +44,7 @@ function buildFilter(
 
   if (kind !== 'all') filter.kind = kind
   if (collectionId) filter.collectionId = collectionId
-  if (tagId) filter.tagId = tagId
+  if (tag) filter.tag = tag
   if (favorite) filter.favorite = true
 
   const trimmedQuery = query.trim()
@@ -67,7 +67,7 @@ export function ItemsPage() {
   const [collectionId, setCollectionId] = useState<string | null>(() =>
     searchParams.get('collection'),
   )
-  const [tagId, setTagId] = useState<string | null>(null)
+  const [tag, setTag] = useState<string | null>(null)
   const [favorite, setFavorite] = useState(false)
   const [page, setPage] = useState(1)
 
@@ -104,7 +104,7 @@ export function ItemsPage() {
     let active = true
     setLoadState((state) => (state === 'ready' ? state : 'loading'))
 
-    listItems(buildFilter(kind, collectionId, tagId, favorite, query))
+    listItems(buildFilter(kind, collectionId, tag, favorite, query))
       .then((loaded) => {
         if (!active) return
         setItems(loaded)
@@ -117,17 +117,17 @@ export function ItemsPage() {
     return () => {
       active = false
     }
-  }, [attempt, kind, collectionId, tagId, favorite, query])
+  }, [attempt, kind, collectionId, tag, favorite, query])
 
   useEffect(() => {
     setPage(1)
-  }, [kind, collectionId, tagId, favorite, query])
+  }, [kind, collectionId, tag, favorite, query])
 
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
   const pagedItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const hasActiveFilters =
-    kind !== 'all' || collectionId !== null || tagId !== null || favorite || query.trim() !== ''
+    kind !== 'all' || collectionId !== null || tag !== null || favorite || query.trim() !== ''
 
   function reload() {
     setAttempt((value) => value + 1)
@@ -199,18 +199,18 @@ export function ItemsPage() {
           collections={collections}
           favoritesOnly={favorite}
           kind={kind}
-          tagId={tagId}
+          tag={tag}
           tags={tags}
           onClear={() => {
             setKind('all')
             setCollectionId(null)
-            setTagId(null)
+            setTag(null)
             setFavorite(false)
           }}
           onCollectionChange={setCollectionId}
           onFavoritesChange={setFavorite}
           onKindChange={setKind}
-          onTagChange={setTagId}
+          onTagChange={setTag}
         />
 
         <div className="ms-auto">

@@ -29,9 +29,7 @@ const destinationLabels = [
   'Sources',
   'Files',
   'Collections',
-  'Tags',
   'Favorites',
-  'Recent',
   'Trash',
   'Settings',
 ] as const
@@ -43,9 +41,7 @@ const hrefByLabel: Record<string, string> = {
   Sources: '/sources',
   Files: '/files',
   Collections: '/collections',
-  Tags: '/tags',
   Favorites: '/favorites',
-  Recent: '/recent',
   Trash: '/trash',
   Settings: '/settings',
 }

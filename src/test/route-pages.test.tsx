@@ -34,15 +34,6 @@ const collectionsMock = vi.hoisted(() => ({
 
 const tagsMock = vi.hoisted(() => ({
   listTags: vi.fn(),
-  saveTag: vi.fn(),
-  deleteTag: vi.fn(),
-}))
-
-const activityMock = vi.hoisted(() => ({
-  listRecentItems: vi.fn(),
-  listActivity: vi.fn(),
-  listIndexState: vi.fn(),
-  markItemOpened: vi.fn(),
 }))
 
 const dashboardMock = vi.hoisted(() => ({
@@ -53,7 +44,6 @@ vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
-vi.mock('../data/activity', () => activityMock)
 vi.mock('../data/dashboard', () => dashboardMock)
 
 import { AppRoutes } from '../app/router'
@@ -83,9 +73,7 @@ const REAL_DESTINATIONS: Array<{ path: string; title: string; description?: stri
   { path: '/sources', title: 'Source' },
   { path: '/files', title: 'Files' },
   { path: '/collections', title: 'Collections' },
-  { path: '/tags', title: 'Tags' },
   { path: '/favorites', title: 'Favorites', description: 'Keep priority items easy to find.' },
-  { path: '/recent', title: 'Recent', description: 'Return to items opened lately.' },
   {
     path: '/trash',
     title: 'Trash',
@@ -108,8 +96,6 @@ beforeEach(() => {
   collectionsMock.listCollections.mockResolvedValue([])
   tagsMock.listTags.mockResolvedValue([])
   filesMock.pickFile.mockResolvedValue(null)
-  activityMock.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
-  activityMock.markItemOpened.mockResolvedValue(undefined)
   dashboardMock.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
 })
 
@@ -221,7 +207,7 @@ describe('Primary dock navigation', () => {
     const dock = await screen.findByRole('navigation', { name: 'Primary navigation' })
     const links = within(dock).getAllByRole('link')
 
-    expect(dockDestinations).toHaveLength(11)
+    expect(dockDestinations).toHaveLength(9)
     expect(links).toHaveLength(dockDestinations.length)
 
     for (const destination of dockDestinations) {

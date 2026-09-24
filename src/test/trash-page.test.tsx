@@ -36,15 +36,6 @@ const collectionsMock = vi.hoisted(() => ({
 
 const tagsMock = vi.hoisted(() => ({
   listTags: vi.fn(),
-  saveTag: vi.fn(),
-  deleteTag: vi.fn(),
-}))
-
-const activityMock = vi.hoisted(() => ({
-  listRecentItems: vi.fn(),
-  listActivity: vi.fn(),
-  listIndexState: vi.fn(),
-  markItemOpened: vi.fn(),
 }))
 
 const dashboardMock = vi.hoisted(() => ({
@@ -61,7 +52,6 @@ vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
-vi.mock('../data/activity', () => activityMock)
 vi.mock('../data/dashboard', () => dashboardMock)
 vi.mock('../lib/feedback', () => feedbackMock)
 
@@ -136,10 +126,6 @@ beforeEach(() => {
   collectionsMock.saveCollection.mockResolvedValue(undefined)
   collectionsMock.deleteCollection.mockResolvedValue(undefined)
   tagsMock.listTags.mockResolvedValue([])
-  tagsMock.saveTag.mockResolvedValue(undefined)
-  tagsMock.deleteTag.mockResolvedValue(undefined)
-  activityMock.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
-  activityMock.markItemOpened.mockResolvedValue(undefined)
   dashboardMock.loadVaultSummary.mockResolvedValue({
     itemCount: 0,
     noteCount: 0,

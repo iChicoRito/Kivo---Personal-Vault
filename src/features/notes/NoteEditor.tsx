@@ -20,7 +20,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import PageHeader, { textLinkClass } from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
-import { markItemOpened } from '../../data/activity'
 import {
   loadItem,
   saveItem,
@@ -223,7 +222,6 @@ export function NoteEditor() {
         editorKeyRef.current = loaded.id
         loadedRef.current = true
         setLoadState('ready')
-        void markItemOpened(loaded.id).catch(() => undefined)
       })
       .catch(() => {
         if (active) setLoadState('missing')

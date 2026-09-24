@@ -6,21 +6,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Collection } from '../data/collections'
 import type { ItemSummary } from '../data/items'
-import type { Tag } from '../data/tags'
 
 const mocks = vi.hoisted(() => ({
   deleteCollection: vi.fn(),
-  deleteTag: vi.fn(),
   listCollections: vi.fn(),
   listItems: vi.fn(),
-  listTags: vi.fn(),
   loadItem: vi.fn(),
   moveItemsToCollection: vi.fn(),
   openItemFile: vi.fn(),
   openSourceUrl: vi.fn(),
   revealItemFile: vi.fn(),
   saveCollection: vi.fn(),
-  saveTag: vi.fn(),
   trashItems: vi.fn(),
   verifyCollectionSecret: vi.fn(),
   loadPreferences: vi.fn(),
@@ -44,11 +40,6 @@ vi.mock('../data/files', () => ({
   openSourceUrl: mocks.openSourceUrl,
   revealItemFile: mocks.revealItemFile,
 }))
-vi.mock('../data/tags', () => ({
-  deleteTag: mocks.deleteTag,
-  listTags: mocks.listTags,
-  saveTag: mocks.saveTag,
-}))
 vi.mock('../data/settings', () => ({
   loadPreferences: mocks.loadPreferences,
   savePreferences: mocks.savePreferences,
@@ -56,7 +47,6 @@ vi.mock('../data/settings', () => ({
 
 import { DEFAULT_PREFERENCES, PreferencesProvider } from '../app/preferences'
 import { CollectionsPage } from '../features/collections/CollectionsPage'
-import { TagsPage } from '../features/tags/TagsPage'
 
 const COLLECTION: Collection = {
   id: 'collection-1',
@@ -79,12 +69,6 @@ const SOURCE_ITEM: ItemSummary = {
   isPinned: false,
   file: null,
   content: null,
-}
-
-const TAG: Tag = {
-  id: 'tag-1',
-  name: 'design',
-  count: 1,
 }
 
 function deferred<T>() {
@@ -119,10 +103,9 @@ beforeEach(() => {
   vi.resetAllMocks()
   mocks.listCollections.mockResolvedValue([])
   mocks.listItems.mockResolvedValue([])
-  mocks.listTags.mockResolvedValue([])
 })
 
-describe('collections and tags loading skeletons', () => {
+describe('collections loading skeletons', () => {
   it('shows folder-grid skeletons while collections load, then shows folders', async () => {
     const request = deferred<Collection[]>()
     mocks.listCollections.mockReturnValue(request.promise)
@@ -184,38 +167,5 @@ describe('collections and tags loading skeletons', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open collection Projects' }))
 
     expect(await screen.findByText('No address saved.')).toBeInTheDocument()
-  })
-
-  it('shows tag-list skeletons while tags load, then shows tag actions', async () => {
-    const request = deferred<Tag[]>()
-    mocks.listTags.mockReturnValue(request.promise)
-
-    const { container } = render(<TagsPage />)
-
-    expectLoadingSkeleton('Loading your tags')
-    expect(container.querySelector('ul')).toBeInTheDocument()
-
-    await act(async () => request.resolve([TAG]))
-
-    expect(
-      await screen.findByRole('button', { name: 'View items tagged design' }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
-  })
-
-  it('shows item-row skeletons while a tag opens, then its empty state', async () => {
-    mocks.listTags.mockResolvedValue([TAG])
-    const request = deferred<ItemSummary[]>()
-    mocks.listItems.mockReturnValue(request.promise)
-
-    render(<TagsPage />)
-    fireEvent.click(await screen.findByRole('button', { name: 'View items tagged design' }))
-
-    expectLoadingSkeleton('Loading items with this tag')
-
-    await act(async () => request.resolve([]))
-
-    expect(await screen.findByText('No items with this tag.')).toBeInTheDocument()
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 })

@@ -8,7 +8,6 @@ import type { ReactNode } from 'react'
 import type { ItemSummary, VaultItem } from '../data/items'
 import type { Collection } from '../data/collections'
 import type { Preferences } from '../data/settings'
-import type { Tag } from '../data/tags'
 
 const itemsMock = vi.hoisted(() => ({
   saveItem: vi.fn(),
@@ -42,19 +41,6 @@ const settingsMock = vi.hoisted(() => ({
   savePreferences: vi.fn(),
 }))
 
-const tagsMock = vi.hoisted(() => ({
-  listTags: vi.fn(),
-  saveTag: vi.fn(),
-  deleteTag: vi.fn(),
-}))
-
-const activityMock = vi.hoisted(() => ({
-  listRecentItems: vi.fn(),
-  listActivity: vi.fn(),
-  listIndexState: vi.fn(),
-  markItemOpened: vi.fn(),
-}))
-
 const dashboardMock = vi.hoisted(() => ({
   loadVaultSummary: vi.fn(),
 }))
@@ -74,8 +60,6 @@ vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/settings', () => settingsMock)
-vi.mock('../data/tags', () => tagsMock)
-vi.mock('../data/activity', () => activityMock)
 vi.mock('../data/dashboard', () => dashboardMock)
 vi.mock('../lib/feedback', () => feedbackMock)
 vi.mock('../features/sources/SaveSourceDialog', () => ({ default: sourceDialogMock }))
@@ -88,7 +72,6 @@ vi.mock('react-router-dom', async (importOriginal) => {
 import { DEFAULT_PREFERENCES, PreferencesProvider } from '../app/preferences'
 import { FilesPage } from '../features/files/FilesPage'
 import { CollectionsPage } from '../features/collections/CollectionsPage'
-import { TagsPage } from '../features/tags/TagsPage'
 import { QuickAddDialog } from '../features/quick-add/QuickAddDialog'
 import DashboardPage from '../features/dashboard/DashboardPage'
 
@@ -168,12 +151,6 @@ const COLLECTION: Collection = {
   itemCount: 1,
 }
 
-const TAG: Tag = {
-  id: 'tag-1',
-  name: 'design',
-  count: 2,
-}
-
 function renderInRouter(node: ReactNode) {
   return render(<MemoryRouter>{node}</MemoryRouter>)
 }
@@ -209,11 +186,6 @@ beforeEach(() => {
   collectionsMock.verifyCollectionSecret.mockResolvedValue(true)
   settingsMock.loadPreferences.mockResolvedValue({ ...DEFAULT_PREFERENCES })
   settingsMock.savePreferences.mockResolvedValue(undefined)
-  tagsMock.listTags.mockResolvedValue([])
-  tagsMock.saveTag.mockResolvedValue({ ...TAG })
-  tagsMock.deleteTag.mockResolvedValue(undefined)
-  activityMock.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
-  activityMock.markItemOpened.mockResolvedValue(undefined)
   dashboardMock.loadVaultSummary.mockResolvedValue({
     itemCount: 0,
     noteCount: 0,
@@ -808,72 +780,6 @@ describe('CollectionsPage', () => {
     await waitFor(() =>
       expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: LOCKED.id }),
     )
-    expect(await screen.findByText('Meeting notes')).toBeInTheDocument()
-  })
-})
-
-describe('TagsPage', () => {
-  it('creates a tag through the dialog', async () => {
-    renderInRouter(<TagsPage />)
-    await screen.findByRole('heading', { level: 1, name: 'Tags', exact: true })
-
-    fireEvent.click(screen.getByRole('button', { name: 'New tag' }))
-
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Tag name' }), {
-      target: { value: 'design' },
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create tag' }))
-
-    await waitFor(() =>
-      expect(tagsMock.saveTag).toHaveBeenCalledWith({ id: undefined, name: 'design' }),
-    )
-    await waitFor(() => expect(tagsMock.listTags).toHaveBeenCalledTimes(2))
-  })
-
-  it('renames a tag through the dialog', async () => {
-    tagsMock.listTags.mockResolvedValue([{ ...TAG }])
-
-    renderInRouter(<TagsPage />)
-    await screen.findByRole('button', { name: 'Rename design' })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Rename design' }))
-
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Tag name' }), {
-      target: { value: 'planning' },
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }))
-
-    await waitFor(() =>
-      expect(tagsMock.saveTag).toHaveBeenCalledWith({ id: TAG.id, name: 'planning' }),
-    )
-  })
-
-  it('deletes a tag after confirmation', async () => {
-    tagsMock.listTags.mockResolvedValue([{ ...TAG }])
-
-    renderInRouter(<TagsPage />)
-    await screen.findByRole('button', { name: 'Delete design' })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Delete design' }))
-
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete tag' }))
-
-    await waitFor(() => expect(tagsMock.deleteTag).toHaveBeenCalledWith(TAG.id))
-  })
-
-  it('loads the items of a selected tag', async () => {
-    tagsMock.listTags.mockResolvedValue([{ ...TAG }])
-    itemsMock.listItems.mockResolvedValue([NOTE])
-
-    renderInRouter(<TagsPage />)
-    await screen.findByRole('button', { name: 'View items tagged design' })
-
-    fireEvent.click(screen.getByRole('button', { name: 'View items tagged design' }))
-
-    await waitFor(() => expect(itemsMock.listItems).toHaveBeenCalledWith({ tagId: TAG.id }))
     expect(await screen.findByText('Meeting notes')).toBeInTheDocument()
   })
 })

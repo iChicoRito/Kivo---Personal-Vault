@@ -44,13 +44,6 @@ const dashboardData = vi.hoisted(() => ({
   loadVaultSummary: vi.fn(),
 }))
 
-const activityData = vi.hoisted(() => ({
-  listRecentItems: vi.fn(),
-  listActivity: vi.fn(),
-  listIndexState: vi.fn(),
-  markItemOpened: vi.fn(),
-}))
-
 vi.mock('../data/database', () => ({
   initializeDatabase: boot.initializeDatabase,
 }))
@@ -60,7 +53,6 @@ vi.mock('../data/settings', () => settings)
 vi.mock('../data/items', () => itemsData)
 vi.mock('../data/collections', () => collectionsData)
 vi.mock('../data/dashboard', () => dashboardData)
-vi.mock('../data/activity', () => activityData)
 
 vi.mock('../data/setup', () => ({
   loadBootState: boot.loadBootState,
@@ -100,7 +92,6 @@ function resetBoot() {
     ...Object.values(itemsData),
     ...Object.values(collectionsData),
     ...Object.values(dashboardData),
-    ...Object.values(activityData),
   ]) {
     mock.mockReset()
   }
@@ -109,8 +100,6 @@ function resetBoot() {
   itemsData.loadItem.mockResolvedValue(undefined)
   collectionsData.listCollections.mockResolvedValue([])
   dashboardData.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
-  activityData.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
-  activityData.markItemOpened.mockResolvedValue(undefined)
 
   settings.loadPreferences.mockReset()
   settings.savePreferences.mockReset()

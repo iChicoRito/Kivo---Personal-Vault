@@ -70,7 +70,6 @@ pub struct Collection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
-    pub id: String,
     pub name: String,
     pub count: i64,
 }
@@ -90,14 +89,6 @@ pub struct IndexState {
     pub item_id: String,
     pub needs_index: bool,
     pub indexed_at: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecentItems {
-    pub opened: Vec<ItemSummary>,
-    pub modified: Vec<ItemSummary>,
-    pub created: Vec<ItemSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -136,7 +127,7 @@ pub struct ItemInput {
 pub struct ItemFilter {
     pub kind: Option<String>,
     pub collection_id: Option<String>,
-    pub tag_id: Option<String>,
+    pub tag: Option<String>,
     pub favorite: Option<bool>,
     pub query: Option<String>,
     pub sort: Option<String>,
@@ -154,13 +145,6 @@ pub struct CollectionInput {
     pub secret: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TagInput {
-    pub id: Option<String>,
-    pub name: String,
-}
-
 // The raw item row plus its optional file record, before tags and disk state join in.
 struct StoredItem {
     id: String,
@@ -175,6 +159,7 @@ struct StoredItem {
     deleted_at: Option<String>,
     created_at: String,
     updated_at: String,
+    tags_json: String,
     original_name: Option<String>,
     byte_size: Option<i64>,
     imported_at: Option<String>,
@@ -217,20 +202,10 @@ fn upsert_index_state(connection: &Connection, item_id: &str) -> rusqlite::Resul
     Ok(())
 }
 
-fn read_item_tags(connection: &Connection, item_id: &str) -> rusqlite::Result<Vec<String>> {
-    let mut statement = connection.prepare(
-        "SELECT t.name
-         FROM tags t
-         JOIN item_tags it ON it.tag_id = t.id
-         WHERE it.item_id = ?1
-         ORDER BY t.name COLLATE NOCASE ASC",
-    )?;
-
-    let names = statement
-        .query_map(params![item_id], |row| row.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<String>>>()?;
-
-    Ok(names)
+// Tag names are stored as a JSON array in `items.tags`; a malformed value reads
+// as no tags.
+fn parse_tags(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
 }
 
 fn read_item(
@@ -243,7 +218,7 @@ fn read_item(
             "SELECT i.id, i.kind, i.title, i.description, i.content, i.url,
                     i.collection_id, i.is_favorite, i.is_pinned, i.deleted_at,
                     i.created_at, i.updated_at,
-                    f.original_name, f.byte_size, f.imported_at, f.stored_name
+                    f.original_name, f.byte_size, f.imported_at, f.stored_name, i.tags
              FROM items i
              LEFT JOIN files f ON f.item_id = i.id
              WHERE i.id = ?1",
@@ -266,6 +241,7 @@ fn read_item(
                     byte_size: row.get(13)?,
                     imported_at: row.get(14)?,
                     stored_name: row.get(15)?,
+                    tags_json: row.get(16)?,
                 })
             },
         )
@@ -275,7 +251,7 @@ fn read_item(
         return Ok(None);
     };
 
-    let tags = read_item_tags(connection, &stored.id)?;
+    let tags = parse_tags(&stored.tags_json);
     let is_file = stored.kind == "file";
 
     let file = if is_file {
@@ -317,8 +293,8 @@ fn read_item(
     }))
 }
 
-// Shared by list_items and list_recent_items so a summary keeps the same file
-// and file_missing answers everywhere. The column order is load-bearing.
+// Used by list_items so a summary keeps the same file and file_missing
+// answers everywhere. The column order is load-bearing.
 const ITEM_SUMMARY_COLUMNS: &str = "i.id, i.kind, i.title, i.is_favorite, i.is_pinned,
             i.collection_id, i.updated_at, i.deleted_at,
             f.stored_name, f.original_name, f.byte_size, f.imported_at, i.content";
@@ -391,12 +367,12 @@ fn read_item_summaries(
             values.push(rusqlite::types::Value::Text(collection_id.to_string()));
         }
 
-        if let Some(tag_id) = filter.tag_id.as_deref().filter(|value| !value.is_empty()) {
+        if let Some(tag) = filter.tag.as_deref().filter(|value| !value.is_empty()) {
             sql.push_str(
-                " AND EXISTS (SELECT 1 FROM item_tags it
-                              WHERE it.item_id = i.id AND it.tag_id = ?)",
+                " AND EXISTS (SELECT 1 FROM json_each(i.tags)
+                              WHERE value = ? COLLATE NOCASE)",
             );
-            values.push(rusqlite::types::Value::Text(tag_id.to_string()));
+            values.push(rusqlite::types::Value::Text(tag.to_string()));
         }
 
         if let Some(favorite) = filter.favorite {
@@ -417,8 +393,8 @@ fn read_item_summaries(
                     OR i.content LIKE ? ESCAPE '\\'
                     OR i.url LIKE ? ESCAPE '\\'
                     OR f.original_name LIKE ? ESCAPE '\\'
-                    OR EXISTS (SELECT 1 FROM item_tags it JOIN tags t ON t.id = it.tag_id
-                               WHERE it.item_id = i.id AND t.name LIKE ? ESCAPE '\\')
+                    OR EXISTS (SELECT 1 FROM json_each(i.tags)
+                               WHERE value LIKE ? ESCAPE '\\')
                     OR EXISTS (SELECT 1 FROM collections c
                                WHERE c.id = i.collection_id AND c.name LIKE ? ESCAPE '\\'))",
             );
@@ -442,45 +418,6 @@ fn read_item_summaries(
 
     sql.push_str(" ORDER BY ");
     sql.push_str(order);
-
-    let mut statement = connection.prepare(&sql)?;
-
-    let summaries = statement
-        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
-            map_summary_row(row, files_dir)
-        })?
-        .collect::<rusqlite::Result<Vec<ItemSummary>>>()?;
-
-    Ok(summaries)
-}
-
-// One Recent group: live items whose newest matching activity row decides the
-// order. The action list binds twice, once for the filter and once for the sort.
-fn read_recent_group(
-    connection: &Connection,
-    files_dir: &Path,
-    actions: &[&str],
-) -> rusqlite::Result<Vec<ItemSummary>> {
-    let placeholders = vec!["?"; actions.len()].join(", ");
-    let sql = format!(
-        "SELECT {ITEM_SUMMARY_COLUMNS}
-         FROM items i
-         LEFT JOIN files f ON f.item_id = i.id
-         WHERE i.deleted_at IS NULL
-           AND EXISTS (SELECT 1 FROM activity a
-                       WHERE a.item_id = i.id AND a.action IN ({placeholders}))
-         ORDER BY (SELECT MAX(a.id) FROM activity a
-                   WHERE a.item_id = i.id AND a.action IN ({placeholders})) DESC
-         LIMIT 50"
-    );
-
-    let mut values: Vec<rusqlite::types::Value> = Vec::new();
-
-    for _ in 0..2 {
-        for action in actions {
-            values.push(rusqlite::types::Value::Text((*action).to_string()));
-        }
-    }
 
     let mut statement = connection.prepare(&sql)?;
 
@@ -541,43 +478,25 @@ fn read_collections(connection: &Connection) -> rusqlite::Result<Vec<Collection>
     Ok(collections)
 }
 
-const TAG_SELECT: &str = "SELECT t.id, t.name,
-            (SELECT COUNT(*) FROM item_tags it
-             JOIN items i ON i.id = it.item_id
-             WHERE it.tag_id = t.id AND i.deleted_at IS NULL)
-     FROM tags t";
-
 fn read_tags(connection: &Connection) -> rusqlite::Result<Vec<Tag>> {
-    let mut statement =
-        connection.prepare(&format!("{TAG_SELECT} ORDER BY t.name COLLATE NOCASE ASC"))?;
+    let mut statement = connection.prepare(
+        "SELECT MIN(value) AS name, COUNT(DISTINCT i.id) AS count
+         FROM items i, json_each(i.tags)
+         WHERE i.deleted_at IS NULL
+         GROUP BY lower(value)
+         ORDER BY MIN(value) COLLATE NOCASE ASC",
+    )?;
 
     let tags = statement
         .query_map([], |row| {
             Ok(Tag {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                count: row.get(2)?,
+                name: row.get(0)?,
+                count: row.get(1)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<Tag>>>()?;
 
     Ok(tags)
-}
-
-fn read_tag(connection: &Connection, id: &str) -> rusqlite::Result<Option<Tag>> {
-    connection
-        .query_row(
-            &format!("{TAG_SELECT} WHERE t.id = ?1"),
-            params![id],
-            |row| {
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    count: row.get(2)?,
-                })
-            },
-        )
-        .optional()
 }
 
 fn read_activity(connection: &Connection) -> rusqlite::Result<Vec<ActivityEntry>> {
@@ -795,6 +714,9 @@ fn replace_item_tags(
         }
     }
 
+    let encoded = serde_json::to_string(&names)
+        .map_err(|error| format!("Could not save the item tags: {error}"))?;
+
     let transaction = connection
         .transaction()
         .map_err(|error| format!("Could not save the item tags: {error}"))?;
@@ -812,55 +734,11 @@ fn replace_item_tags(
     }
 
     transaction
-        .execute("DELETE FROM item_tags WHERE item_id = ?1", params![item_id])
-        .map_err(|error| format!("Could not save the item tags: {error}"))?;
-
-    let mut stored = Vec::with_capacity(names.len());
-
-    for name in &names {
-        let existing: Option<String> = transaction
-            .query_row(
-                "SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE",
-                params![name],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| format!("Could not save the item tags: {error}"))?;
-
-        let tag_id = match existing {
-            Some(tag_id) => tag_id,
-            None => {
-                let tag_id = new_id(&transaction)
-                    .map_err(|error| format!("Could not save the item tags: {error}"))?;
-
-                transaction
-                    .execute(
-                        "INSERT INTO tags (id, name, created_at)
-                         VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-                        params![tag_id, name],
-                    )
-                    .map_err(|error| format!("Could not save the item tags: {error}"))?;
-
-                tag_id
-            }
-        };
-
-        transaction
-            .execute(
-                "INSERT INTO item_tags (item_id, tag_id) VALUES (?1, ?2)",
-                params![item_id, tag_id],
-            )
-            .map_err(|error| format!("Could not save the item tags: {error}"))?;
-
-        stored.push(name.clone());
-    }
-
-    transaction
         .execute(
             "UPDATE items
-             SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             SET tags = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = ?1",
-            params![item_id],
+            params![item_id, encoded],
         )
         .map_err(|error| format!("Could not save the item tags: {error}"))?;
 
@@ -876,7 +754,7 @@ fn replace_item_tags(
         .commit()
         .map_err(|error| format!("Could not save the item tags: {error}"))?;
 
-    Ok(stored)
+    Ok(names)
 }
 
 fn write_item_pin(connection: &mut Connection, id: &str, pinned: bool) -> Result<(), String> {
@@ -1041,8 +919,8 @@ fn write_restored_items(connection: &mut Connection, ids: &[String]) -> Result<(
         .map_err(|error| format!("Could not restore the items: {error}"))
 }
 
-// Reads the managed names first, deletes the rows (files, item_tags, and
-// index_state cascade), then removes the bytes best effort. An id that is not
+// Reads the managed names first, deletes the rows (files and index_state
+// cascade), then removes the bytes best effort. An id that is not
 // trashed is ignored, so a live item can never be destroyed through this path.
 fn remove_items_permanently(
     connection: &mut Connection,
@@ -1099,35 +977,6 @@ fn remove_items_permanently(
     }
 
     Ok(())
-}
-
-// A missing or trashed id records nothing, so Recent never lists it.
-fn write_item_opened(connection: &mut Connection, id: &str) -> Result<(), String> {
-    let transaction = connection
-        .transaction()
-        .map_err(|error| format!("Could not mark the item as opened: {error}"))?;
-
-    let live: i64 = transaction
-        .query_row(
-            "SELECT COUNT(*) FROM items WHERE id = ?1 AND deleted_at IS NULL",
-            params![id],
-            |row| row.get(0),
-        )
-        .map_err(|error| format!("Could not mark the item as opened: {error}"))?;
-
-    if live > 0 {
-        transaction
-            .execute(
-                "INSERT INTO activity (item_id, action, created_at)
-                 VALUES (?1, 'opened', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-                params![id],
-            )
-            .map_err(|error| format!("Could not mark the item as opened: {error}"))?;
-    }
-
-    transaction
-        .commit()
-        .map_err(|error| format!("Could not mark the item as opened: {error}"))
 }
 
 /// Resolves the requested protection into the value to store. `None` means the
@@ -1289,102 +1138,6 @@ fn remove_collection(connection: &mut Connection, id: &str) -> Result<(), String
     transaction
         .commit()
         .map_err(|error| format!("Could not delete the collection: {error}"))
-}
-
-fn write_tag(connection: &mut Connection, input: &TagInput) -> Result<String, String> {
-    let name = input.name.trim().to_string();
-
-    if name.is_empty() {
-        return Err("Tag name is required".to_string());
-    }
-
-    let transaction = connection
-        .transaction()
-        .map_err(|error| format!("Could not save the tag: {error}"))?;
-
-    let duplicate: Option<String> = transaction
-        .query_row(
-            "SELECT id FROM tags WHERE name = ?1 COLLATE NOCASE",
-            params![name],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| format!("Could not save the tag: {error}"))?;
-
-    let id = match &input.id {
-        Some(id) => {
-            let exists: i64 = transaction
-                .query_row(
-                    "SELECT COUNT(*) FROM tags WHERE id = ?1",
-                    params![id],
-                    |row| row.get(0),
-                )
-                .map_err(|error| format!("Could not save the tag: {error}"))?;
-
-            if exists == 0 {
-                return Err("Tag was not found".to_string());
-            }
-
-            if duplicate
-                .as_deref()
-                .is_some_and(|duplicate| duplicate != id.as_str())
-            {
-                return Err("A tag with that name already exists".to_string());
-            }
-
-            transaction
-                .execute("UPDATE tags SET name = ?1 WHERE id = ?2", params![name, id])
-                .map_err(|error| format!("Could not save the tag: {error}"))?;
-
-            id.clone()
-        }
-        None => {
-            if duplicate.is_some() {
-                return Err("A tag with that name already exists".to_string());
-            }
-
-            let id =
-                new_id(&transaction).map_err(|error| format!("Could not save the tag: {error}"))?;
-
-            transaction
-                .execute(
-                    "INSERT INTO tags (id, name, created_at)
-                     VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-                    params![id, name],
-                )
-                .map_err(|error| format!("Could not save the tag: {error}"))?;
-
-            id
-        }
-    };
-
-    transaction
-        .commit()
-        .map_err(|error| format!("Could not save the tag: {error}"))?;
-
-    Ok(id)
-}
-
-fn remove_tag(connection: &mut Connection, id: &str) -> Result<(), String> {
-    let transaction = connection
-        .transaction()
-        .map_err(|error| format!("Could not delete the tag: {error}"))?;
-
-    transaction
-        .execute("DELETE FROM item_tags WHERE tag_id = ?1", params![id])
-        .map_err(|error| format!("Could not delete the tag: {error}"))?;
-
-    let deleted = transaction
-        .execute("DELETE FROM tags WHERE id = ?1", params![id])
-        .map_err(|error| format!("Could not delete the tag: {error}"))?;
-
-    if deleted == 0 {
-        return Err("Tag was not found".to_string());
-    }
-
-    transaction
-        .commit()
-        .map_err(|error| format!("Could not delete the tag: {error}"))
 }
 
 // The extension keeps ASCII letters and digits only, capped at ten characters.
@@ -1603,27 +1356,6 @@ fn delete_items_permanently_with_state(
     )
 }
 
-fn mark_item_opened_with_state(state: &DatabaseState, id: &str) -> Result<(), String> {
-    let mut connection = state.require_connection()?;
-
-    write_item_opened(connection.as_mut().expect("checked above"), id)
-}
-
-fn list_recent_items_with_state(state: &DatabaseState) -> Result<RecentItems, String> {
-    let connection = state.require_connection()?;
-    let connection = connection.as_ref().expect("checked above");
-    let files_dir = state.files_dir();
-
-    Ok(RecentItems {
-        opened: read_recent_group(connection, files_dir, &["opened"])
-            .map_err(|error| format!("Could not list the recent items: {error}"))?,
-        modified: read_recent_group(connection, files_dir, &["updated"])
-            .map_err(|error| format!("Could not list the recent items: {error}"))?,
-        created: read_recent_group(connection, files_dir, &["created", "imported"])
-            .map_err(|error| format!("Could not list the recent items: {error}"))?,
-    })
-}
-
 fn load_vault_summary_with_state(state: &DatabaseState) -> Result<VaultSummary, String> {
     let connection = state.require_connection()?;
     let connection = connection.as_ref().expect("checked above");
@@ -1647,7 +1379,8 @@ fn load_vault_summary_with_state(state: &DatabaseState) -> Result<VaultSummary, 
                (SELECT COUNT(*) FROM items WHERE kind = 'file' AND deleted_at IS NULL),
                (SELECT COUNT(*) FROM items WHERE is_favorite = 1 AND deleted_at IS NULL),
                (SELECT COUNT(*) FROM collections),
-               (SELECT COUNT(*) FROM tags),
+               (SELECT COUNT(DISTINCT lower(value)) FROM items i, json_each(i.tags)
+                WHERE i.deleted_at IS NULL),
                (SELECT COUNT(*) FROM items WHERE deleted_at IS NOT NULL),
                (SELECT COALESCE(SUM(byte_size), 0) FROM files)",
             [],
@@ -1686,13 +1419,6 @@ fn load_vault_summary_with_state(state: &DatabaseState) -> Result<VaultSummary, 
         file_bytes,
         database_bytes: page_count * page_size,
     })
-}
-
-// Best effort: the open already succeeded, so a failed mark never fails the open.
-fn record_item_opened(state: &DatabaseState, id: &str) {
-    if let Ok(mut connection) = state.require_connection() {
-        let _ = write_item_opened(connection.as_mut().expect("checked above"), id);
-    }
 }
 
 fn save_collection_with_state(
@@ -1748,25 +1474,6 @@ fn list_tags_with_state(state: &DatabaseState) -> Result<Vec<Tag>, String> {
 
     read_tags(connection.as_ref().expect("checked above"))
         .map_err(|error| format!("Could not list the tags: {error}"))
-}
-
-fn save_tag_with_state(state: &DatabaseState, input: &TagInput) -> Result<Tag, String> {
-    let id = {
-        let mut connection = state.require_connection()?;
-        write_tag(connection.as_mut().expect("checked above"), input)?
-    };
-
-    let connection = state.require_connection()?;
-    let tag = read_tag(connection.as_ref().expect("checked above"), &id)
-        .map_err(|error| format!("Could not read the tag: {error}"))?;
-
-    tag.ok_or_else(|| "Tag was not found".to_string())
-}
-
-fn delete_tag_with_state(state: &DatabaseState, id: &str) -> Result<(), String> {
-    let mut connection = state.require_connection()?;
-
-    remove_tag(connection.as_mut().expect("checked above"), id)
 }
 
 // Resolves the managed file for a file item, rejecting a missing item, a
@@ -1972,16 +1679,6 @@ pub fn delete_items_permanently(
 }
 
 #[tauri::command]
-pub fn mark_item_opened(id: String, state: State<'_, DatabaseState>) -> Result<(), String> {
-    mark_item_opened_with_state(state.inner(), &id)
-}
-
-#[tauri::command]
-pub fn list_recent_items(state: State<'_, DatabaseState>) -> Result<RecentItems, String> {
-    list_recent_items_with_state(state.inner())
-}
-
-#[tauri::command]
 pub fn load_vault_summary(state: State<'_, DatabaseState>) -> Result<VaultSummary, String> {
     load_vault_summary_with_state(state.inner())
 }
@@ -2014,16 +1711,6 @@ pub fn list_tags(state: State<'_, DatabaseState>) -> Result<Vec<Tag>, String> {
 }
 
 #[tauri::command]
-pub fn save_tag(input: TagInput, state: State<'_, DatabaseState>) -> Result<Tag, String> {
-    save_tag_with_state(state.inner(), &input)
-}
-
-#[tauri::command]
-pub fn delete_tag(id: String, state: State<'_, DatabaseState>) -> Result<(), String> {
-    delete_tag_with_state(state.inner(), &id)
-}
-
-#[tauri::command]
 pub fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
     Ok(app
         .dialog()
@@ -2053,8 +1740,6 @@ pub fn open_item_file(
         .open_path(path.to_string_lossy().to_string(), None::<&str>)
         .map_err(|error| format!("Could not open the file: {error}"))?;
 
-    record_item_opened(state.inner(), &id);
-
     Ok(())
 }
 
@@ -2082,8 +1767,6 @@ pub fn open_source_url(
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|error| format!("Could not open the address: {error}"))?;
-
-    record_item_opened(state.inner(), &id);
 
     Ok(())
 }
@@ -2333,10 +2016,7 @@ mod tests {
         assert_eq!(first, vec!["Work".to_string(), "personal".to_string()]);
 
         let loaded = load_item_with_state(&state, &saved.id).expect("load tags");
-        assert_eq!(
-            loaded.tags,
-            vec!["personal".to_string(), "Work".to_string()]
-        );
+        assert_eq!(loaded.tags, vec!["Work".to_string(), "personal".to_string()]);
 
         let second =
             set_item_tags_with_state(&state, &saved.id, &["Home".to_string()]).expect("replace");
@@ -2345,30 +2025,22 @@ mod tests {
         let loaded = load_item_with_state(&state, &saved.id).expect("load replaced tags");
         assert_eq!(loaded.tags, vec!["Home".to_string()]);
 
-        // A different case reuses the stored tag row instead of adding a duplicate.
-        let third =
-            set_item_tags_with_state(&state, &saved.id, &["home".to_string()]).expect("reuse");
+        // A replace stores exactly what was given; here the lower-case spelling wins.
+        let third = set_item_tags_with_state(&state, &saved.id, &["home".to_string()])
+            .expect("replace again");
         assert_eq!(third, vec!["home".to_string()]);
 
-        let loaded = load_item_with_state(&state, &saved.id).expect("load reused tag");
-        assert_eq!(loaded.tags, vec!["Home".to_string()]);
+        let loaded = load_item_with_state(&state, &saved.id).expect("load lower-case tag");
+        assert_eq!(loaded.tags, vec!["home".to_string()]);
+
+        // list_tags folds the stored spelling into one case-insensitive row.
+        let tags = list_tags_with_state(&state).expect("list tags");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "home");
+        assert_eq!(tags[0].count, 1);
 
         let connection = state.require_connection().expect("lock connection");
         let connection = connection.as_ref().expect("connection is initialized");
-
-        let tag_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
-            .expect("count tags");
-        assert_eq!(tag_count, 3, "Work, personal, and Home only");
-
-        let assignment_count: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM item_tags WHERE item_id = ?1",
-                params![saved.id],
-                |row| row.get(0),
-            )
-            .expect("count assignments");
-        assert_eq!(assignment_count, 1);
 
         let activity_count: i64 = connection
             .query_row(
@@ -2774,14 +2446,9 @@ mod tests {
 
         set_item_tags_with_state(&state, &tagged.id, &["Work".to_string()]).expect("set tag");
 
-        let tags = list_tags_with_state(&state).expect("list tags");
-        let tag = tags
-            .iter()
-            .find(|tag| tag.name == "Work")
-            .expect("work tag");
-
+        // The filter matches a tag name case-insensitively.
         let filter = ItemFilter {
-            tag_id: Some(tag.id.clone()),
+            tag: Some("work".to_string()),
             ..ItemFilter::default()
         };
         let filtered = list_items_with_state(&state, Some(&filter)).expect("list by tag");
@@ -2913,9 +2580,6 @@ mod tests {
         let trashed = save_item_with_state(&state, &trashed_input).expect("save trashed");
 
         set_item_tags_with_state(&state, &trashed.id, &["Gone".to_string()]).expect("tag trashed");
-        let tag_id = list_tags_with_state(&state).expect("list tags")[0]
-            .id
-            .clone();
 
         let collections = list_collections_with_state(&state).expect("counts before trash");
         let live = collections
@@ -2937,9 +2601,9 @@ mod tests {
             .expect("live collection");
         assert_eq!(live.item_count, 1);
 
+        // A trashed item's tags leave the list entirely.
         let tags = list_tags_with_state(&state).expect("tags after trash");
-        let tag = tags.iter().find(|tag| tag.id == tag_id).expect("tag");
-        assert_eq!(tag.count, 0);
+        assert!(tags.is_empty());
 
         // The row survives with its deleted_at stamp for the Phase 4 restore.
         let loaded = load_item_with_state(&state, &trashed.id).expect("load trashed item");
@@ -3309,127 +2973,6 @@ mod tests {
     }
 
     #[test]
-    fn save_tag_validates_and_renames() {
-        let vault = TempVault::new("save-tag");
-        let state = vault.state();
-
-        let created = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: None,
-                name: "  Work  ".to_string(),
-            },
-        )
-        .expect("create tag");
-        assert_eq!(created.name, "Work");
-        assert_eq!(created.count, 0);
-
-        let error = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: None,
-                name: "   ".to_string(),
-            },
-        )
-        .expect_err("blank name rejected");
-        assert_eq!(error, "Tag name is required");
-
-        let error = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: None,
-                name: "work".to_string(),
-            },
-        )
-        .expect_err("duplicate name rejected");
-        assert_eq!(error, "A tag with that name already exists");
-
-        // Renaming a tag to its own spelling stays valid.
-        let same = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: Some(created.id.clone()),
-                name: "Work".to_string(),
-            },
-        )
-        .expect("same name rename");
-        assert_eq!(same.name, "Work");
-
-        let renamed = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: Some(created.id.clone()),
-                name: "Personal".to_string(),
-            },
-        )
-        .expect("rename tag");
-        assert_eq!(renamed.name, "Personal");
-
-        let other = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: None,
-                name: "Home".to_string(),
-            },
-        )
-        .expect("create other tag");
-
-        let error = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: Some(other.id.clone()),
-                name: "personal".to_string(),
-            },
-        )
-        .expect_err("duplicate rename rejected");
-        assert_eq!(error, "A tag with that name already exists");
-
-        let error = save_tag_with_state(
-            &state,
-            &TagInput {
-                id: Some("missing".to_string()),
-                name: "Ghost".to_string(),
-            },
-        )
-        .expect_err("missing tag rejected");
-        assert_eq!(error, "Tag was not found");
-    }
-
-    #[test]
-    fn delete_tag_keeps_its_items() {
-        let vault = TempVault::new("delete-tag");
-        let state = vault.state();
-
-        let item = save_item_with_state(&state, &note_input("Kept", "body")).expect("save item");
-        set_item_tags_with_state(&state, &item.id, &["Work".to_string()]).expect("tag item");
-
-        let tag = list_tags_with_state(&state).expect("list tags")[0].clone();
-
-        delete_tag_with_state(&state, &tag.id).expect("delete tag");
-
-        let loaded = load_item_with_state(&state, &item.id).expect("load item after delete");
-        assert_eq!(loaded.title, "Kept");
-        assert!(loaded.tags.is_empty());
-
-        {
-            let connection = state.require_connection().expect("lock connection");
-            let links: i64 = connection
-                .as_ref()
-                .expect("connection is initialized")
-                .query_row(
-                    "SELECT COUNT(*) FROM item_tags WHERE tag_id = ?1",
-                    params![tag.id],
-                    |row| row.get(0),
-                )
-                .expect("count tag links");
-            assert_eq!(links, 0);
-        }
-
-        let error = delete_tag_with_state(&state, &tag.id).expect_err("missing tag rejected");
-        assert_eq!(error, "Tag was not found");
-    }
-
-    #[test]
     fn file_items_update_metadata_but_are_never_created_through_save() {
         let vault = TempVault::new("file-save");
         let state = vault.state();
@@ -3631,83 +3174,6 @@ mod tests {
     }
 
     #[test]
-    fn mark_item_opened_writes_for_live_items_only() {
-        let vault = TempVault::new("mark-opened");
-        let state = vault.state();
-
-        let live = save_item_with_state(&state, &note_input("Live", "body")).expect("save live");
-        let gone = save_item_with_state(&state, &note_input("Gone", "body")).expect("save gone");
-        trash_items_with_state(&state, std::slice::from_ref(&gone.id)).expect("trash gone");
-
-        mark_item_opened_with_state(&state, &live.id).expect("mark live");
-        mark_item_opened_with_state(&state, &gone.id).expect("mark trashed");
-        mark_item_opened_with_state(&state, "missing").expect("mark missing");
-
-        let connection = state.require_connection().expect("lock connection");
-        let connection = connection.as_ref().expect("connection is initialized");
-
-        let opened = |id: &str| -> i64 {
-            connection
-                .query_row(
-                    "SELECT COUNT(*) FROM activity WHERE item_id = ?1 AND action = 'opened'",
-                    params![id],
-                    |row| row.get(0),
-                )
-                .expect("count opened activity")
-        };
-
-        assert_eq!(opened(&live.id), 1);
-        assert_eq!(opened(&gone.id), 0);
-        assert_eq!(opened("missing"), 0);
-    }
-
-    #[test]
-    fn list_recent_items_groups_live_items_only() {
-        let vault = TempVault::new("recent-items");
-        let state = vault.state();
-
-        let opened =
-            save_item_with_state(&state, &note_input("Opened", "body")).expect("save opened");
-        let updated =
-            save_item_with_state(&state, &note_input("Updated", "body")).expect("save updated");
-        let created =
-            save_item_with_state(&state, &note_input("Created", "body")).expect("save created");
-        let trashed =
-            save_item_with_state(&state, &note_input("Trashed", "body")).expect("save trashed");
-
-        let mut change = note_input("Updated", "changed body");
-        change.id = Some(updated.id.clone());
-        save_item_with_state(&state, &change).expect("update item");
-        mark_item_opened_with_state(&state, &opened.id).expect("mark opened");
-
-        trash_items_with_state(&state, std::slice::from_ref(&trashed.id)).expect("trash item");
-
-        let recent = list_recent_items_with_state(&state).expect("list recent");
-
-        let ids = |group: &[ItemSummary]| -> Vec<String> {
-            group.iter().map(|summary| summary.id.clone()).collect()
-        };
-
-        let opened_ids = ids(&recent.opened);
-        assert!(opened_ids.contains(&opened.id));
-        assert!(!opened_ids.contains(&updated.id));
-
-        let modified_ids = ids(&recent.modified);
-        assert!(modified_ids.contains(&updated.id));
-        assert!(!modified_ids.contains(&opened.id));
-
-        let created_ids = ids(&recent.created);
-        assert!(created_ids.contains(&opened.id));
-        assert!(created_ids.contains(&updated.id));
-        assert!(created_ids.contains(&created.id));
-        assert!(!created_ids.contains(&trashed.id));
-
-        for group in [&recent.opened, &recent.modified, &recent.created] {
-            assert!(group.iter().all(|summary| summary.id != trashed.id));
-        }
-    }
-
-    #[test]
     fn search_matches_tag_names_and_collection_names() {
         let vault = TempVault::new("search-names");
         let state = vault.state();
@@ -3747,7 +3213,7 @@ mod tests {
 
         let mut favorite = note_input("Favorite note", "body");
         favorite.is_favorite = Some(true);
-        save_item_with_state(&state, &favorite).expect("save favorite note");
+        let favorite_item = save_item_with_state(&state, &favorite).expect("save favorite note");
 
         let source = save_item_with_state(&state, &source_input("Site", "https://example.com"))
             .expect("save source");
@@ -3762,6 +3228,8 @@ mod tests {
         let second_file = import_file_with_state(&state, &second_source.to_string_lossy())
             .expect("import second");
 
+        // One live tag and one tag on a trashed item: the live name counts once.
+        set_item_tags_with_state(&state, &favorite_item.id, &["News".to_string()]).expect("tag note");
         set_item_tags_with_state(&state, &source.id, &["News".to_string()]).expect("tag source");
 
         // Trash one source and one file so live counts and disk bytes diverge.

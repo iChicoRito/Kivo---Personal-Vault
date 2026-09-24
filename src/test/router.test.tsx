@@ -18,13 +18,6 @@ const itemsMock = vi.hoisted(() => ({
   setItemTags: vi.fn(),
 }))
 
-const activityMock = vi.hoisted(() => ({
-  listRecentItems: vi.fn(),
-  listActivity: vi.fn(),
-  listIndexState: vi.fn(),
-  markItemOpened: vi.fn(),
-}))
-
 const dashboardMock = vi.hoisted(() => ({
   loadVaultSummary: vi.fn(),
 }))
@@ -45,15 +38,12 @@ const collectionsMock = vi.hoisted(() => ({
 
 const tagsMock = vi.hoisted(() => ({
   listTags: vi.fn(),
-  saveTag: vi.fn(),
-  deleteTag: vi.fn(),
 }))
 
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/tags', () => tagsMock)
-vi.mock('../data/activity', () => activityMock)
 vi.mock('../data/dashboard', () => dashboardMock)
 
 import { AppRoutes } from '../app/router'
@@ -78,9 +68,7 @@ const destinations: Array<[path: string, heading: string]> = [
   ['/sources', 'Source'],
   ['/files', 'Files'],
   ['/collections', 'Collections'],
-  ['/tags', 'Tags'],
   ['/favorites', 'Favorites'],
-  ['/recent', 'Recent'],
   ['/trash', 'Trash'],
   ['/settings', 'Settings'],
 ]
@@ -100,8 +88,6 @@ beforeEach(() => {
   collectionsMock.listCollections.mockResolvedValue([])
   tagsMock.listTags.mockResolvedValue([])
   filesMock.pickFile.mockResolvedValue(null)
-  activityMock.listRecentItems.mockResolvedValue({ opened: [], modified: [], created: [] })
-  activityMock.markItemOpened.mockResolvedValue(undefined)
   dashboardMock.loadVaultSummary.mockResolvedValue({ ...EMPTY_SUMMARY })
 })
 

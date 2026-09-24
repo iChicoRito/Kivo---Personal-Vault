@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Alert, Button, Card, EmptyState, Skeleton, Typography } from '@heroui/react'
 import { useNavigate } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
 import { ItemList, ItemListSkeleton } from '../../components/items/ItemList'
-import { listRecentItems, type RecentItems } from '../../data/activity'
 import { listCollections, type Collection } from '../../data/collections'
 import { loadVaultSummary, type VaultSummary } from '../../data/dashboard'
 import { listItems, type ItemSummary } from '../../data/items'
@@ -16,7 +15,6 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 type InitialAction = 'note' | 'file' | 'source' | 'collection'
 
-const EMPTY_RECENT: RecentItems = { opened: [], modified: [], created: [] }
 const panelLabelClass = 'uppercase'
 
 function formatBytes(bytes: number) {
@@ -40,7 +38,6 @@ export default function DashboardPage() {
   const navigate = useNavigate()
 
   const [summary, setSummary] = useState<VaultSummary | null>(null)
-  const [recent, setRecent] = useState<RecentItems>(EMPTY_RECENT)
   const [favorites, setFavorites] = useState<ItemSummary[]>([])
   const [collections, setCollections] = useState<Collection[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -58,14 +55,12 @@ export default function DashboardPage() {
 
     Promise.all([
       loadVaultSummary(),
-      listRecentItems(),
       listItems({ favorite: true }),
       listCollections(),
     ])
-      .then(([loadedSummary, loadedRecent, loadedFavorites, loadedCollections]) => {
+      .then(([loadedSummary, loadedFavorites, loadedCollections]) => {
         if (!active) return
         setSummary(loadedSummary)
-        setRecent(loadedRecent)
         setFavorites(loadedFavorites)
         setCollections(loadedCollections)
         setLoadState('ready')
@@ -78,19 +73,6 @@ export default function DashboardPage() {
       active = false
     }
   }, [attempt])
-
-  const recentItems = useMemo(() => {
-    const seen = new Set<string>()
-    const merged: ItemSummary[] = []
-
-    for (const item of [...recent.opened, ...recent.modified, ...recent.created]) {
-      if (seen.has(item.id)) continue
-      seen.add(item.id)
-      merged.push(item)
-    }
-
-    return merged.slice(0, 5)
-  }, [recent])
 
   function reload() {
     setAttempt((value) => value + 1)
@@ -125,11 +107,6 @@ export default function DashboardPage() {
           <Typography color="muted" type="body">
             Kivo is reading this vault.
           </Typography>
-
-          <div className="grid gap-3">
-            <Typography type="h2">Recent</Typography>
-            <ItemListSkeleton />
-          </div>
 
           <div className="grid gap-3">
             <Typography type="h2">Favorites</Typography>
@@ -228,16 +205,6 @@ export default function DashboardPage() {
           </Card>
         ) : (
           <div className="grid gap-8">
-            <div className="grid gap-3">
-              <Typography type="h2">Recent</Typography>
-              <ItemList
-                emptyTitle="Nothing recent yet."
-                items={recentItems}
-                view="list"
-                onOpen={setOpenItemId}
-              />
-            </div>
-
             <div className="grid gap-3">
               <Typography type="h2">Favorites</Typography>
               <ItemList

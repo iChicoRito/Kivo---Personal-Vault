@@ -9,9 +9,7 @@ import { NoteEditor } from '../features/notes/NoteEditor'
 import { SourcesPage } from '../features/sources/SourcesPage'
 import { FilesPage } from '../features/files/FilesPage'
 import { CollectionsPage } from '../features/collections/CollectionsPage'
-import { TagsPage } from '../features/tags/TagsPage'
 import { FavoritesPage } from '../features/favorites/FavoritesPage'
-import { RecentPage } from '../features/recent/RecentPage'
 import { TrashPage } from '../features/trash/TrashPage'
 
 export function NotFoundPage() {
@@ -42,9 +40,7 @@ export function AppRoutes() {
         <Route path="sources" element={<SourcesPage />} />
         <Route path="files" element={<FilesPage />} />
         <Route path="collections" element={<CollectionsPage />} />
-        <Route path="tags" element={<TagsPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
-        <Route path="recent" element={<RecentPage />} />
         <Route path="trash" element={<TrashPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
