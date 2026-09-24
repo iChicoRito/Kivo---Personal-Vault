@@ -4,6 +4,9 @@ import { ProgressBar, Spinner, Toast, type ToastContentValue } from '@heroui/rea
 /** The undo toast stays open this long, and its bar drains over the same window. */
 const UNDO_WINDOW_MS = 8000
 
+/** Lifts the stack clear of the floating dock, matching the page's own clearance. */
+const DOCK_CLEARANCE = '7.5rem'
+
 type FeedbackToastProps = { toast: Parameters<typeof Toast>[0]['toast'] }
 
 /**
@@ -14,7 +17,7 @@ type FeedbackToastProps = { toast: Parameters<typeof Toast>[0]['toast'] }
  */
 export function FeedbackToastRegion() {
   return (
-    <Toast.Provider placement="bottom">
+    <Toast.Provider placement="bottom" style={{ bottom: DOCK_CLEARANCE }}>
       {renderProps => <FeedbackToast toast={renderProps.toast} />}
     </Toast.Provider>
   )
