@@ -310,9 +310,8 @@ describe('ItemsPage', () => {
     itemsMock.listItems.mockResolvedValue([])
     renderItemsPage()
 
-    expect(
-      await screen.findByText('No items yet. Save a note, source, or file to see it here.'),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 2, name: 'No items yet.' })).toBeInTheDocument()
+    expect(screen.getByText('Save a note, source, or file to see it here.')).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'All items' })).not.toBeInTheDocument()
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
   })

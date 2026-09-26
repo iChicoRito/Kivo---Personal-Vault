@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Alert, Button, Card, Skeleton, Typography } from '@heroui/react'
+import { Alert, Button, Card, EmptyState, Skeleton, Typography } from '@heroui/react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Delete02Icon,
@@ -9,6 +9,7 @@ import {
   LibraryIcon,
   Link02Icon,
   NoteEditIcon,
+  PlusSignIcon,
   StarIcon,
 } from '@hugeicons/core-free-icons'
 import { Link, useNavigate } from 'react-router-dom'
@@ -273,28 +274,41 @@ export default function DashboardPage() {
       ) : null}
 
       {ready && summary.itemCount === 0 ? (
-        <div className="grid gap-3 lg:grid-cols-12">
-          <Card aria-labelledby="dashboard-empty-title" className="lg:col-span-8">
-            <h2 className="m-0 text-sm font-semibold" id="dashboard-empty-title">
+        <EmptyState
+          aria-labelledby="dashboard-empty-title"
+          className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center"
+        >
+          <span
+            aria-hidden="true"
+            className="flex size-14 items-center justify-center rounded-full bg-background-tertiary text-muted"
+          >
+            <HugeiconsIcon icon={LibraryIcon} size={24} />
+          </span>
+          <div className="grid max-w-lg gap-2">
+            {/* An h2 under the page's h1, styled like the h3 titles of the other empty states. */}
+            <h2 className="typography typography--h3 typography--align-center" id="dashboard-empty-title">
               Your vault is looking a little empty.
             </h2>
-            <p className="m-0 text-sm text-muted">Start adding the things that matter to you.</p>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onPress={() => openQuickAdd('note')}>
-                Add Note
-              </Button>
-              <Button size="sm" variant="secondary" onPress={() => openQuickAdd('file')}>
-                Add File
-              </Button>
-              <Button size="sm" variant="secondary" onPress={() => openQuickAdd('source')}>
-                Save Link
-              </Button>
-              <Button size="sm" variant="secondary" onPress={() => openQuickAdd('collection')}>
-                Create Collection
-              </Button>
-            </div>
-          </Card>
-        </div>
+            <Typography align="center" color="muted" type="body">
+              Start adding the things that matter to you.
+            </Typography>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button onPress={() => openQuickAdd('note')}>
+              <HugeiconsIcon aria-hidden="true" icon={PlusSignIcon} size={18} />
+              Add Note
+            </Button>
+            <Button variant="secondary" onPress={() => openQuickAdd('file')}>
+              Add File
+            </Button>
+            <Button variant="secondary" onPress={() => openQuickAdd('source')}>
+              Save Link
+            </Button>
+            <Button variant="secondary" onPress={() => openQuickAdd('collection')}>
+              Create Collection
+            </Button>
+          </div>
+        </EmptyState>
       ) : null}
 
       {loading || (ready && summary.itemCount > 0) ? (

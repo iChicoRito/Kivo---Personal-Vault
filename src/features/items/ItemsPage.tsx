@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { LibraryIcon } from '@hugeicons/core-free-icons'
 import {
   Alert,
   Button,
+  EmptyState,
   Input,
   Label,
   Modal,
@@ -257,7 +260,30 @@ export function ItemsPage() {
         </Alert>
       ) : null}
 
-      {loadState === 'ready' ? (
+      {loadState === 'ready' && items.length === 0 && !hasActiveFilters ? (
+        <EmptyState
+          aria-labelledby="items-empty-title"
+          className="flex min-h-[32rem] flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-default px-6 py-16 text-center"
+        >
+          <span
+            aria-hidden="true"
+            className="flex size-14 items-center justify-center rounded-full bg-background-tertiary text-muted"
+          >
+            <HugeiconsIcon icon={LibraryIcon} size={24} />
+          </span>
+          <div className="grid max-w-lg gap-2">
+            {/* An h2 under the page's h1, styled like the h3 titles of the other empty states. */}
+            <h2 className="typography typography--h3 typography--align-center" id="items-empty-title">
+              No items yet.
+            </h2>
+            <Typography align="center" color="muted" type="body">
+              Save a note, source, or file to see it here.
+            </Typography>
+          </div>
+        </EmptyState>
+      ) : null}
+
+      {loadState === 'ready' && (items.length > 0 || hasActiveFilters) ? (
         <>
           <SelectionBar
             actionLabel="Move to Trash"
@@ -268,11 +294,7 @@ export function ItemsPage() {
           />
           <ItemTable
           selection={selection}
-          emptyMessage={
-            hasActiveFilters
-              ? 'No items match your search or filters.'
-              : 'No items yet. Save a note, source, or file to see it here.'
-          }
+          emptyMessage="No items match your search or filters."
           items={pagedItems}
           page={currentPage}
           pageSize={PAGE_SIZE}
