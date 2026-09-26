@@ -395,13 +395,7 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Activity' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Recent' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Notes 7, sources 5, files 3.' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: 'Quick add' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^New note/ })).toBeInTheDocument()
-    expect(
-      within(screen.getByRole('navigation', { name: 'Go to' })).getByRole('link', {
-        name: 'Password Manager',
-      }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Quick add' })).not.toBeInTheDocument()
   })
 
   it('shows the empty vault message and the four start actions for an empty vault', async () => {

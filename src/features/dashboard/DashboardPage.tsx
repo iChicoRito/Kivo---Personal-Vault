@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Alert, Button, Card, Kbd, Skeleton, Typography } from '@heroui/react'
+import { Alert, Button, Card, Skeleton, Typography } from '@heroui/react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Delete02Icon,
@@ -14,7 +14,6 @@ import {
 import { Link, useNavigate } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
-import { navigationGroups } from '../../app/navigation'
 import { MonoActivityHeatmap } from '../../components/charts/MonoActivityHeatmap'
 import { MonoRoundedDonutChart } from '../../components/charts/MonoRoundedDonutChart'
 import { MonoRoundedTreemapChart } from '../../components/charts/MonoRoundedTreemapChart'
@@ -25,7 +24,7 @@ import { useVaultChanged } from '../../lib/useVaultChanged'
 import { Panel } from '../../components/ui/Panel'
 import { QuickAddDialog } from '../quick-add/QuickAddDialog'
 import { QuickAddMenu } from '../quick-add/QuickAddMenu'
-import { QuickAddTiles, type QuickAddAction } from '../quick-add/QuickAddTiles'
+import type { QuickAddAction } from '../quick-add/QuickAddTiles'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
 import { buildActivityWeeks } from './activity'
 
@@ -35,11 +34,6 @@ type InitialAction = QuickAddAction
 
 const ACTIVITY_WEEKS = 26
 const LIST_LIMIT = 6
-
-const navigationLinks = navigationGroups.flatMap((group) => group.links)
-const shortcutPages = ['All Items', 'Notes', 'Sources', 'Files', 'Password Manager', 'Trash']
-  .map((label) => navigationLinks.find((link) => link.label === label))
-  .filter((link) => link !== undefined)
 
 const KIND_ICONS: Record<ItemKind, IconSvgElement> = {
   note: NoteEditIcon,
@@ -253,35 +247,6 @@ export default function DashboardPage() {
       ]
     : []
 
-  const quickAddPanel = (
-    <Panel
-      className="lg:col-span-4"
-      id="dashboard-quick-add"
-      meta={
-        <Kbd aria-hidden="true" className="text-[11px]">
-          <Kbd.Abbr keyValue="ctrl" />
-          <Kbd.Content>Shift+N</Kbd.Content>
-        </Kbd>
-      }
-      title="Quick add"
-    >
-      <QuickAddTiles onSelect={openQuickAdd} />
-
-      <nav aria-label="Go to" className="flex flex-wrap gap-1 border-t border-separator pt-3">
-        {shortcutPages.map((link) => (
-          <Link
-            key={link.to}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted no-underline transition-colors hover:bg-default hover:text-foreground ${focusRing}`}
-            to={link.to}
-          >
-            <HugeiconsIcon aria-hidden="true" icon={link.icon} size={14} strokeWidth={1.75} />
-            {link.label}
-          </Link>
-        ))}
-      </nav>
-    </Panel>
-  )
-
   return (
     <section aria-labelledby="dashboard-title" className="grid gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -418,7 +383,20 @@ export default function DashboardPage() {
               )}
             </Panel>
 
-            {quickAddPanel}
+            <Panel className="lg:col-span-4" id="dashboard-types" title="Items by type">
+              {ready ? (
+                <MonoRoundedDonutChart
+                  data={[
+                    { name: 'Notes', value: summary.noteCount },
+                    { name: 'Sources', value: summary.sourceCount },
+                    { name: 'Files', value: summary.fileCount },
+                  ]}
+                  label={`Notes ${summary.noteCount}, sources ${summary.sourceCount}, files ${summary.fileCount}.`}
+                />
+              ) : (
+                <Skeleton aria-hidden="true" animationType="shimmer" className="h-44 rounded-[14px]" />
+              )}
+            </Panel>
 
             <Panel
               className="lg:col-span-4"
@@ -495,23 +473,8 @@ export default function DashboardPage() {
               )}
             </Panel>
 
-            <Panel className="lg:col-span-4" id="dashboard-types" title="Items by type">
-              {ready ? (
-                <MonoRoundedDonutChart
-                  data={[
-                    { name: 'Notes', value: summary.noteCount },
-                    { name: 'Sources', value: summary.sourceCount },
-                    { name: 'Files', value: summary.fileCount },
-                  ]}
-                  label={`Notes ${summary.noteCount}, sources ${summary.sourceCount}, files ${summary.fileCount}.`}
-                />
-              ) : (
-                <Skeleton aria-hidden="true" animationType="shimmer" className="h-44 rounded-[14px]" />
-              )}
-            </Panel>
-
             <Panel
-              className="lg:col-span-8"
+              className="lg:col-span-12"
               id="dashboard-storage"
               meta={ready ? <PanelLink to="/storage">Manage</PanelLink> : null}
               title="Storage"
