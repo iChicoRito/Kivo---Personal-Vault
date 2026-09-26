@@ -1,76 +1,72 @@
-// Adapted from Monocharts "mono-rounded-donut" (https://github.com/Subhan-code/Monocharts),
-// MIT License, Copyright (c) 2026 Syed Subhan Uddin.
+// Plain SVG donut styled with HeroUI tokens. Segments step down the theme accent.
 import { useState } from 'react'
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip, type TooltipContentProps } from 'recharts'
-
-// Segments share the theme text color and differ by opacity.
-const SEGMENT_OPACITY = [1, 0.7, 0.4, 0.2]
 
 type DonutSegment = { name: string; value: number }
 
-function DonutTooltip({ active, payload }: Partial<TooltipContentProps<number, string>>) {
-  if (!active || !payload?.length) return null
-  const item = payload[0]
-  return (
-    <div className="pointer-events-none rounded-xl border border-border bg-overlay px-3 py-2 text-xs shadow-lg">
-      <span className="text-muted">{item.name}: </span>
-      <span className="font-semibold tabular-nums">{item.value}</span>
-    </div>
-  )
-}
+const STROKE_CLASS = ['text-accent', 'text-accent/60', 'text-accent/30', 'text-accent/15']
+const DOT_CLASS = ['bg-accent', 'bg-accent/60', 'bg-accent/30', 'bg-accent/15']
+
+const RADIUS = 40
+const STROKE = 12
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS
+// Room for the round caps plus a small visible gap between segments.
+const GAP = STROKE + 3
 
 export function MonoRoundedDonutChart({ data, label }: { data: DonutSegment[]; label: string }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const total = data.reduce((sum, segment) => sum + segment.value, 0)
   const percent = (value: number) => (total > 0 ? Math.round((value / total) * 100) : 0)
+  const visible = data.filter((segment) => segment.value > 0).length
+
+  let offset = 0
+  const segments = data.map((segment, index) => {
+    const length = total > 0 ? (segment.value / total) * CIRCUMFERENCE : 0
+    const start = offset
+    offset += length
+    return { ...segment, index, start, length }
+  })
 
   return (
-    <div className="flex flex-col gap-3">
-      <div
-        aria-label={label}
-        className="relative flex items-center justify-center rounded-[14px] bg-default p-2 text-foreground"
-        role="img"
-      >
-        <ResponsiveContainer height={160} width="100%">
-          <PieChart>
-            <Tooltip content={<DonutTooltip />} />
-            <Pie
-              animationDuration={900}
-              cornerRadius={8}
-              cx="50%"
-              cy="50%"
-              data={data}
-              dataKey="value"
-              innerRadius={46}
-              nameKey="name"
-              outerRadius={68}
-              paddingAngle={6}
-              stroke="none"
-              onMouseEnter={(_, index) => setHoverIndex(index)}
-              onMouseLeave={() => setHoverIndex(null)}
-            >
-              {data.map((segment, index) => (
-                <Cell
-                  key={segment.name}
-                  fill="currentColor"
-                  fillOpacity={SEGMENT_OPACITY[index % SEGMENT_OPACITY.length]}
-                  style={{
-                    cursor: 'pointer',
-                    transform: hoverIndex === index ? 'scale(1.05)' : 'scale(1)',
-                    transformOrigin: 'center center',
-                    transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-                  }}
-                />
-              ))}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
+    <div className="flex flex-1 flex-col justify-between gap-3">
+      <div aria-label={label} className="relative mx-auto size-40" role="img">
+        <svg className="size-full -rotate-90" viewBox="0 0 100 100">
+          <circle
+            className="text-default"
+            cx="50"
+            cy="50"
+            fill="none"
+            r={RADIUS}
+            stroke="currentColor"
+            strokeWidth={STROKE}
+          />
+          {segments
+            .filter((segment) => segment.length > 0)
+            .map((segment) => (
+              <circle
+                key={segment.name}
+                className={`cursor-pointer transition-[opacity,stroke-width] duration-200 ease-out ${STROKE_CLASS[segment.index % STROKE_CLASS.length]} ${
+                  hoverIndex !== null && hoverIndex !== segment.index ? 'opacity-40' : ''
+                }`}
+                cx="50"
+                cy="50"
+                fill="none"
+                r={RADIUS}
+                stroke="currentColor"
+                strokeDasharray={`${visible > 1 ? Math.max(segment.length - GAP, 0.01) : CIRCUMFERENCE} ${CIRCUMFERENCE}`}
+                strokeDashoffset={-(segment.start + (visible > 1 ? GAP / 2 : 0))}
+                strokeLinecap={visible > 1 ? 'round' : 'butt'}
+                strokeWidth={hoverIndex === segment.index ? STROKE + 2 : STROKE}
+                onMouseEnter={() => setHoverIndex(segment.index)}
+                onMouseLeave={() => setHoverIndex(null)}
+              />
+            ))}
+        </svg>
 
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-sm font-bold tabular-nums">
+          <span className="text-lg font-semibold tabular-nums">
             {hoverIndex !== null ? `${percent(data[hoverIndex].value)}%` : total}
           </span>
-          <span className="text-[10px] text-muted">
+          <span className="text-xs text-muted">
             {hoverIndex !== null ? data[hoverIndex].name : 'items'}
           </span>
         </div>
@@ -78,11 +74,15 @@ export function MonoRoundedDonutChart({ data, label }: { data: DonutSegment[]; l
 
       <ul className="m-0 flex list-none flex-wrap items-center justify-around gap-2 p-0 text-xs">
         {data.map((segment, index) => (
-          <li key={segment.name} className="flex items-center gap-1.5">
+          <li
+            key={segment.name}
+            className="flex cursor-default items-center gap-1.5"
+            onMouseEnter={() => setHoverIndex(index)}
+            onMouseLeave={() => setHoverIndex(null)}
+          >
             <span
               aria-hidden="true"
-              className="size-2 rounded-full bg-foreground"
-              style={{ opacity: SEGMENT_OPACITY[index % SEGMENT_OPACITY.length] }}
+              className={`size-2 rounded-full ${DOT_CLASS[index % DOT_CLASS.length]}`}
             />
             <span className="text-muted">{segment.name}</span>
             <span className="tabular-nums">
