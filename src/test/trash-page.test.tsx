@@ -250,6 +250,65 @@ describe('TrashPage', () => {
     expect(feedbackMock.notifySuccess).not.toHaveBeenCalled()
   })
 
+  it('filters the list by type and by title search', async () => {
+    itemsMock.listItems.mockResolvedValue([TRASHED_NOTE, TRASHED_SOURCE])
+
+    renderTrash()
+    await screen.findByText('Trashed note')
+
+    fireEvent.click(screen.getByRole('tab', { name: /Sources/ }))
+    await waitFor(() => expect(screen.queryByText('Trashed note')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('tab', { name: /All/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search Trash' }), {
+      target: { value: 'zzz' },
+    })
+    expect(await screen.findByText('No matching items in Trash.')).toBeInTheDocument()
+  })
+
+  it('deletes selected items permanently only after the confirmation', async () => {
+    itemsMock.listItems.mockResolvedValue([TRASHED_NOTE, TRASHED_SOURCE])
+
+    renderTrash()
+    await screen.findByText('Trashed note')
+
+    openRowMenu('Trashed note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }))
+    const bar = await screen.findByRole('toolbar', { name: 'Selection' })
+    fireEvent.click(within(bar).getByRole('checkbox', { name: 'Select all' }))
+    fireEvent.click(within(bar).getByRole('button', { name: 'Delete permanently' }))
+
+    const heading = await screen.findByRole('heading', { name: 'Permanently delete 2 items?' })
+    expect(itemsMock.deleteItemsPermanently).not.toHaveBeenCalled()
+    const dialog = heading.closest('[role="dialog"]') as HTMLElement
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete permanently' }))
+
+    await waitFor(() =>
+      expect(itemsMock.deleteItemsPermanently).toHaveBeenCalledWith([
+        TRASHED_NOTE.id,
+        TRASHED_SOURCE.id,
+      ]),
+    )
+  })
+
+  it('restores every selected item at once', async () => {
+    itemsMock.listItems.mockResolvedValue([TRASHED_NOTE, TRASHED_SOURCE])
+
+    renderTrash()
+    await screen.findByText('Trashed note')
+
+    openRowMenu('Trashed note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }))
+    const bar = await screen.findByRole('toolbar', { name: 'Selection' })
+    fireEvent.click(within(bar).getByRole('checkbox', { name: 'Select all' }))
+    fireEvent.click(within(bar).getByRole('button', { name: 'Restore' }))
+
+    await waitFor(() =>
+      expect(itemsMock.restoreItems).toHaveBeenCalledWith([TRASHED_NOTE.id, TRASHED_SOURCE.id]),
+    )
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('2 items restored')
+  })
+
   it('disables Empty Trash when the trash is empty', async () => {
     renderTrash()
 

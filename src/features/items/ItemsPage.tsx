@@ -14,6 +14,8 @@ import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { FilterMenu, type KindFilter } from '../../components/items/FilterMenu'
 import { ItemTable, ItemTableSkeleton } from '../../components/items/ItemTable'
+import { SelectionBar } from '../../components/items/SelectionBar'
+import { useSelection } from '../../components/items/useSelection'
 import { listCollections, type Collection } from '../../data/collections'
 import {
   listItems,
@@ -23,7 +25,7 @@ import {
   type ItemSummary,
 } from '../../data/items'
 import { listTags, type Tag } from '../../data/tags'
-import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { notifyError, notifySuccess, trashManyWithUndo, trashWithUndo } from '../../lib/feedback'
 import { useVaultChanged } from '../../lib/useVaultChanged'
 import { QuickAddMenu } from '../quick-add/QuickAddMenu'
 import { ItemDetailsDialog } from './ItemDetailsDialog'
@@ -128,6 +130,16 @@ export function ItemsPage() {
   const pagedItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const hasActiveFilters =
     kind !== 'all' || collectionId !== null || tag !== null || favorite || query.trim() !== ''
+
+  const selection = useSelection()
+
+  async function trashSelected(ids: string[]) {
+    const moved = await trashManyWithUndo(ids)
+    if (moved) {
+      selection.clear()
+      reload()
+    }
+  }
 
   function reload() {
     setAttempt((value) => value + 1)
@@ -246,7 +258,16 @@ export function ItemsPage() {
       ) : null}
 
       {loadState === 'ready' ? (
-        <ItemTable
+        <>
+          <SelectionBar
+            actionLabel="Move to Trash"
+            confirmTrash
+            selection={selection}
+            visibleIds={items.map((item) => item.id)}
+            onAction={(ids) => void trashSelected(ids)}
+          />
+          <ItemTable
+          selection={selection}
           emptyMessage={
             hasActiveFilters
               ? 'No items match your search or filters.'
@@ -264,6 +285,7 @@ export function ItemsPage() {
           }}
           onTrash={openTrash}
         />
+        </>
       ) : null}
 
       <Modal

@@ -3,7 +3,7 @@ import { Link02Icon, Note01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 
 import { FileTypeIcon } from '../../components/items/FileTypeIcon'
-import { ItemCard } from '../../components/items/ItemCard'
+import { ItemCard, SelectMark } from '../../components/items/ItemCard'
 import { formatSize } from '../../components/items/fileSize'
 import type { ItemKind, ItemSummary } from '../../data/items'
 import { notePreview } from '../notes/noteContent'
@@ -14,6 +14,10 @@ export type CollectionItemViewProps = {
   /** `undefined` while the source address is still loading, `null` when none is saved. */
   address?: string | null
   onOpen: () => void
+  /** While selecting, a click picks the item instead of opening it. */
+  isSelecting?: boolean
+  isSelected?: boolean
+  onSelect?: () => void
 }
 
 const KIND_LABEL: Record<ItemKind, string> = {
@@ -86,7 +90,15 @@ function itemSubtitle(item: ItemSummary, address: string | null | undefined) {
  * Files pages use: a full-width row card and a grid card. The whole item is the
  * open action, so a click anywhere opens the note, link, or file.
  */
-export function CollectionItemView({ item, view, address, onOpen }: CollectionItemViewProps) {
+export function CollectionItemView({
+  item,
+  view,
+  address,
+  onOpen,
+  isSelecting = false,
+  isSelected = false,
+  onSelect,
+}: CollectionItemViewProps) {
   const subtitle = itemSubtitle(item, address)
   const isAddressPending = item.kind === 'source' && address === undefined
 
@@ -94,11 +106,13 @@ export function CollectionItemView({ item, view, address, onOpen }: CollectionIt
     return (
       <button
         aria-label={item.title}
-        className="kivo-item-card relative flex h-full w-full cursor-pointer flex-col gap-3 rounded-3xl border border-default bg-surface p-4 text-left transition-[background-color,scale] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        aria-pressed={isSelecting ? isSelected : undefined}
+        className={`kivo-item-card relative flex h-full w-full cursor-pointer flex-col gap-3 rounded-3xl border bg-surface p-4 text-left transition-[background-color,scale,border-color] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${isSelected ? 'border-accent' : 'border-default'}`}
         type="button"
-        onClick={onOpen}
+        onClick={isSelecting ? onSelect : onOpen}
       >
         <span className="flex flex-wrap items-center gap-2">
+          {isSelecting ? <SelectMark isSelected={isSelected} /> : null}
           <ItemChips item={item} />
         </span>
 
@@ -131,8 +145,10 @@ export function CollectionItemView({ item, view, address, onOpen }: CollectionIt
           </Typography>
         ) : undefined
       }
+      isSelected={isSelected}
+      isSelecting={isSelecting}
       title={item.title}
-      onOpen={onOpen}
+      onOpen={isSelecting ? onSelect : onOpen}
     />
   )
 }

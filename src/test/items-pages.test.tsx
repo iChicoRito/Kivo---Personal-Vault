@@ -38,6 +38,7 @@ const feedbackMock = vi.hoisted(() => ({
   notifySuccess: vi.fn(),
   notifyError: vi.fn(),
   trashWithUndo: vi.fn().mockResolvedValue(true),
+  trashManyWithUndo: vi.fn().mockResolvedValue(true),
 }))
 
 vi.mock('../data/items', () => itemsMock)
@@ -457,6 +458,50 @@ describe('ItemsPage', () => {
     await waitFor(() =>
       expect(feedbackMock.trashWithUndo).toHaveBeenCalledWith({ ids: ['note-1'], label: 'Item' }),
     )
+  })
+
+  it('selects rows from the row menu and trashes every selected item after confirmation', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    expect(screen.queryByRole('toolbar', { name: 'Selection' })).not.toBeInTheDocument()
+
+    openRowMenu('Alpha note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }))
+
+    const bar = await screen.findByRole('toolbar', { name: 'Selection' })
+    expect(within(bar).getByText('1 selected')).toBeInTheDocument()
+
+    fireEvent.click(within(bar).getByRole('checkbox', { name: 'Select all' }))
+    expect(within(bar).getByText('2 selected')).toBeInTheDocument()
+
+    fireEvent.click(within(bar).getByRole('button', { name: 'Move to Trash' }))
+
+    const heading = await screen.findByRole('heading', { name: 'Move 2 items to Trash?' })
+    expect(feedbackMock.trashManyWithUndo).not.toHaveBeenCalled()
+    const dialog = heading.closest('[role="dialog"]') as HTMLElement
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.trashManyWithUndo).toHaveBeenCalledWith([NOTE_ITEM.id, SOURCE_ITEM.id]),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('toolbar', { name: 'Selection' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('toggles a row by clicking it while selecting instead of opening it', async () => {
+    renderItemsPage()
+    await screen.findByText('Alpha note')
+
+    openRowMenu('Alpha note')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }))
+
+    const row = screen.getByRole('button', { name: 'Alpha note' })
+    expect(row).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(row)
+    expect(row).toHaveAttribute('aria-pressed', 'false')
+    expect(within(screen.getByRole('toolbar', { name: 'Selection' })).getByText('0 selected')).toBeInTheDocument()
   })
 
   it('moves a row to a collection from its action menu', async () => {

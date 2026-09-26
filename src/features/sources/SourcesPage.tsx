@@ -22,8 +22,10 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
+import { SelectionBar } from '../../components/items/SelectionBar'
+import { useSelection } from '../../components/items/useSelection'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
-import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { notifyError, notifySuccess, trashManyWithUndo, trashWithUndo } from '../../lib/feedback'
 import { useVaultChanged } from '../../lib/useVaultChanged'
 import { openSourceUrl } from '../../data/files'
 import { listItems, loadItem, moveItemsToCollection, type VaultItem } from '../../data/items'
@@ -130,6 +132,15 @@ export function SourcesPage() {
     } catch {
       notifyError(OPEN_ERROR)
     }
+  }
+
+  const selection = useSelection()
+
+  async function trashSelected(ids: string[]) {
+    const moved = await trashManyWithUndo(ids)
+    if (!moved) return
+    setSources((current) => current.filter((entry) => !ids.includes(entry.id)))
+    selection.clear()
   }
 
   async function confirmTrash() {
@@ -249,6 +260,16 @@ export function SourcesPage() {
                 </ListScrollArea>
               </div>
             ) : (
+              <>
+              <div className="mb-3 empty:hidden">
+                <SelectionBar
+                  actionLabel="Move to Trash"
+                  confirmTrash
+                  selection={selection}
+                  visibleIds={sources.map((entry) => entry.id)}
+                  onAction={(ids) => void trashSelected(ids)}
+                />
+              </div>
               <ListScrollArea>
                 <ul className="grid gap-2">
                   {sources.map((source) => {
@@ -272,6 +293,9 @@ export function SourcesPage() {
                       >
                         <ItemCard
                           actions={actions}
+                          isSelected={selection.isSelected(source.id)}
+                          isSelecting={selection.isActive}
+                          onSelect={() => selection.pick(source.id)}
                           isOpenDisabled={!source.url}
                           leading={
                             <span className="grid size-11 place-items-center rounded-xl bg-default">
@@ -298,6 +322,7 @@ export function SourcesPage() {
                   })}
                 </ul>
               </ListScrollArea>
+              </>
             )}
           </div>
         </div>

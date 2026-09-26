@@ -30,9 +30,11 @@ import { useNavigate } from 'react-router-dom'
 import PageHeader from '../../app/PageHeader'
 import { usePreferences } from '../../app/preferences'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
+import { SelectionBar } from '../../components/items/SelectionBar'
+import { useSelection } from '../../components/items/useSelection'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
-import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { notifyError, notifySuccess, trashManyWithUndo, trashWithUndo } from '../../lib/feedback'
 import { useVaultChanged } from '../../lib/useVaultChanged'
 import type { NoteView } from '../../data/settings'
 import {
@@ -177,6 +179,15 @@ export function NotesPage() {
     } catch {
       notifyError('Kivo could not change the pin. Try again.')
     }
+  }
+
+  const selection = useSelection()
+
+  async function trashSelected(ids: string[]) {
+    const moved = await trashManyWithUndo(ids)
+    if (!moved) return
+    setItems((current) => current.filter((entry) => !ids.includes(entry.id)))
+    selection.clear()
   }
 
   async function confirmTrash() {
@@ -346,6 +357,15 @@ export function NotesPage() {
         <div className="flex gap-4">
           <CollectionFolderPanel />
           <div className="min-w-0 flex-1">
+            <div className="mb-3 empty:hidden">
+              <SelectionBar
+                actionLabel="Move to Trash"
+                confirmTrash
+                selection={selection}
+                visibleIds={items.map((entry) => entry.id)}
+                onAction={(ids) => void trashSelected(ids)}
+              />
+            </div>
             <ListScrollArea>
           <ul
             className={
@@ -390,6 +410,9 @@ export function NotesPage() {
                 >
                   <ItemCard
                     actions={actions}
+                    isSelected={selection.isSelected(item.id)}
+                    isSelecting={selection.isActive}
+                    onSelect={() => selection.pick(item.id)}
                     chips={
                       status === 'plain' ? (
                         <Chip size="sm" variant="soft">

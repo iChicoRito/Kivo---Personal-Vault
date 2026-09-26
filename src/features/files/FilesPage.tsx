@@ -26,6 +26,8 @@ import PageHeader from '../../app/PageHeader'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import { FileTypeIcon } from '../../components/items/FileTypeIcon'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
+import { SelectionBar } from '../../components/items/SelectionBar'
+import { useSelection } from '../../components/items/useSelection'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
 import { formatSize } from '../../components/items/fileSize'
 import {
@@ -37,7 +39,7 @@ import {
   type ItemSummary,
 } from '../../data/items'
 import { openItemFile, pickFiles, revealItemFile } from '../../data/files'
-import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { notifyError, notifySuccess, trashManyWithUndo, trashWithUndo } from '../../lib/feedback'
 import { useVaultChanged } from '../../lib/useVaultChanged'
 import { CollectionFolderPanel } from '../collections/CollectionFolderPanel'
 
@@ -221,6 +223,15 @@ export function FilesPage() {
     }
   }
 
+  const selection = useSelection()
+
+  async function trashSelected(ids: string[]) {
+    const moved = await trashManyWithUndo(ids)
+    if (!moved) return
+    await loadFiles()
+    selection.clear()
+  }
+
   async function handleTrash() {
     if (!trashTarget) return
 
@@ -318,6 +329,16 @@ export function FilesPage() {
                 </ListScrollArea>
               </div>
             ) : (
+              <>
+              <div className="mb-3 empty:hidden">
+                <SelectionBar
+                  actionLabel="Move to Trash"
+                  confirmTrash
+                  selection={selection}
+                  visibleIds={files.map((entry) => entry.id)}
+                  onAction={(ids) => void trashSelected(ids)}
+                />
+              </div>
               <ListScrollArea>
                 <ul className="grid gap-2">
                   {files.map((file) => {
@@ -338,6 +359,9 @@ export function FilesPage() {
                       <li key={file.id} className="min-w-0">
                         <ItemCard
                           actions={actions}
+                          isSelected={selection.isSelected(file.id)}
+                          isSelecting={selection.isActive}
+                          onSelect={() => selection.pick(file.id)}
                           chips={
                             file.fileMissing ? (
                               <Chip color="danger" size="sm" variant="soft">
@@ -367,6 +391,7 @@ export function FilesPage() {
                   })}
                 </ul>
               </ListScrollArea>
+              </>
             )}
           </div>
         </div>

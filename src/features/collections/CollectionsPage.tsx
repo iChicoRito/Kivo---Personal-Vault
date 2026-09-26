@@ -36,6 +36,7 @@ import {
   PlusSignIcon,
   StarIcon,
   Tag01Icon,
+  CheckmarkSquare02Icon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -44,6 +45,8 @@ import PageHeader from '../../app/PageHeader'
 import { usePreferences } from '../../app/preferences'
 import { ItemCard, type ItemCardAction } from '../../components/items/ItemCard'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
+import { SelectionBar } from '../../components/items/SelectionBar'
+import { useSelection } from '../../components/items/useSelection'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import {
   deleteCollection,
@@ -61,7 +64,7 @@ import {
   type ItemSummary,
 } from '../../data/items'
 import type { CollectionsView } from '../../data/settings'
-import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { notifyError, notifySuccess, trashManyWithUndo, trashWithUndo } from '../../lib/feedback'
 import { useVaultChanged } from '../../lib/useVaultChanged'
 import { CollectionFolderFloat } from './CollectionFolderFloat'
 import { CollectionItemView } from './CollectionItemView'
@@ -557,6 +560,19 @@ export function CollectionsPage() {
     }
   }
 
+  const selection = useSelection()
+
+  // Selection belongs to one open collection.
+  useEffect(() => selection.clear(), [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function trashSelected(ids: string[]) {
+    const moved = await trashManyWithUndo(ids)
+    if (!moved) return
+    selection.clear()
+    setItemsAttempt((current) => current + 1)
+    await loadCollections()
+  }
+
   async function handleItemTrash() {
     if (!trashItem) return
 
@@ -591,7 +607,8 @@ export function CollectionsPage() {
   }
 
   function handleItemMenuAction(item: ItemSummary, key: string) {
-    if (key === 'open') void handleItemOpen(item)
+    if (key === 'select') selection.pick(item.id)
+    else if (key === 'open') void handleItemOpen(item)
     else if (key === 'reveal') void handleItemReveal(item)
     else if (key === 'move') openItemMove(item)
     else if (key === 'remove') void handleItemRemove(item)
@@ -614,7 +631,16 @@ export function CollectionsPage() {
     collection.name.toLowerCase().includes(trimmedSearch.toLowerCase()),
   )
   const selected = collections.find((collection) => collection.id === selectedId) ?? null
-  const itemMenuActions = itemMenu ? itemActions(itemMenu.item) : []
+  const itemMenuActions: ItemCardAction[] = itemMenu
+    ? [
+        {
+          id: 'select',
+          label: selection.isSelected(itemMenu.item.id) ? 'Deselect' : 'Select',
+          icon: CheckmarkSquare02Icon,
+        },
+        ...itemActions(itemMenu.item),
+      ]
+    : []
 
   return (
     <section
@@ -985,6 +1011,16 @@ export function CollectionsPage() {
                 </Typography>
               </EmptyState>
             ) : (
+              <>
+              <div className="empty:hidden">
+                <SelectionBar
+                  actionLabel="Move to Trash"
+                  confirmTrash
+                  selection={selection}
+                  visibleIds={items.map((entry) => entry.id)}
+                  onAction={(ids) => void trashSelected(ids)}
+                />
+              </div>
               <ListScrollArea>
                 <ul
                   className={
@@ -1024,14 +1060,18 @@ export function CollectionsPage() {
                     >
                       <CollectionItemView
                         address={sourceUrls[item.id]}
+                        isSelected={selection.isSelected(item.id)}
+                        isSelecting={selection.isActive}
                         item={item}
                         view={itemsView}
                         onOpen={() => void handleItemOpen(item)}
+                        onSelect={() => selection.pick(item.id)}
                       />
                     </li>
                   ))}
                 </ul>
               </ListScrollArea>
+              </>
             )
           ) : null}
 

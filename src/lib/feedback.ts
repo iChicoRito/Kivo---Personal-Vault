@@ -66,3 +66,16 @@ export async function trashWithUndo({
   })
   return true
 }
+
+/** Bulk version of `trashWithUndo` with plural messages. */
+export function trashManyWithUndo(ids: string[]): Promise<boolean> {
+  const count = `${ids.length} ${ids.length === 1 ? 'item' : 'items'}`
+  return trashWithUndo({
+    ids,
+    label: 'Items',
+    successMessage: `${count} moved to Trash`,
+    failureMessage: 'Kivo could not move these items to Trash. Try again.',
+    restoreSuccessMessage: `${count} restored`,
+    restoreFailureMessage: 'Kivo could not restore these items. Try again.',
+  })
+}

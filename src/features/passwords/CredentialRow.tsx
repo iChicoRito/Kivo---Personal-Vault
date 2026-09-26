@@ -32,6 +32,9 @@ export type CredentialRowProps = {
   onChanged: () => void
   onViewTrash: () => void
   onBackToPasswords: () => void
+  isSelecting?: boolean
+  isSelected?: boolean
+  onSelect?: () => void
 }
 
 type ConfirmKind = 'trash' | 'delete' | null
@@ -55,6 +58,9 @@ export function CredentialRow({
   onChanged,
   onViewTrash,
   onBackToPasswords,
+  isSelecting,
+  isSelected,
+  onSelect,
 }: CredentialRowProps) {
   const [confirm, setConfirm] = useState<ConfirmKind>(null)
 
@@ -166,8 +172,11 @@ export function CredentialRow({
             {credential.username || 'No username'}
           </Typography>
         }
+        isSelected={isSelected}
+        isSelecting={isSelecting}
         title={credential.service}
         onAction={handleAction}
+        onSelect={onSelect}
         onOpen={() => onEdit(credential.id)}
       />
 

@@ -22,10 +22,15 @@ import { HugeiconsIcon } from '@hugeicons/react'
 
 import PageHeader from '../../app/PageHeader'
 import { useVault } from '../../app/vault'
+import { ConfirmDialog } from '../../components/items/dialogs'
 import { ListScrollArea } from '../../components/items/ListScrollArea'
+import { SelectionBar } from '../../components/items/SelectionBar'
+import { useSelection } from '../../components/items/useSelection'
 import {
+  deleteCredentialsPermanently,
   listCredentials,
   loadCredential,
+  trashCredentials,
   type Credential,
   type CredentialFilter,
   type CredentialSummary,
@@ -121,6 +126,37 @@ function PasswordsPageContent() {
       active = false
     }
   }, [attempt, query, trashed])
+
+  const selection = useSelection()
+  const [bulkIds, setBulkIds] = useState<string[] | null>(null)
+
+  // Selection belongs to one list: switching to or from Trash starts fresh.
+  useEffect(() => selection.clear(), [trashed]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function runBulk() {
+    const ids = bulkIds
+    if (!ids) return
+    setBulkIds(null)
+    const count = `${ids.length} ${ids.length === 1 ? 'credential' : 'credentials'}`
+
+    try {
+      if (trashed) {
+        await deleteCredentialsPermanently(ids)
+        notifySuccess(`${count} deleted`)
+      } else {
+        await trashCredentials(ids)
+        notifySuccess(`${count} moved to Trash`)
+      }
+      selection.clear()
+      setAttempt((value) => value + 1)
+    } catch {
+      notifyError(
+        trashed
+          ? 'Kivo could not delete these credentials. Try again.'
+          : 'Kivo could not move these credentials to Trash. Try again.',
+      )
+    }
+  }
 
   function openCreate() {
     setEditing(null)
@@ -231,13 +267,25 @@ function PasswordsPageContent() {
       ) : null}
 
       {loadState === 'ready' && items.length > 0 ? (
+        <SelectionBar
+          actionLabel={trashed ? 'Delete forever' : 'Move to Trash'}
+          selection={selection}
+          visibleIds={items.map((entry) => entry.id)}
+          onAction={setBulkIds}
+        />
+      ) : null}
+
+      {loadState === 'ready' && items.length > 0 ? (
         <ListScrollArea>
           <ul aria-label={trashed ? 'Trashed passwords' : 'All passwords'} className="grid gap-3">
             {items.map((credential) => (
               <li key={credential.id} className="min-w-0">
                 <CredentialRow
                   credential={credential}
+                  isSelected={selection.isSelected(credential.id)}
+                  isSelecting={selection.isActive}
                   trashed={trashed}
+                  onSelect={() => selection.pick(credential.id)}
                   onBackToPasswords={() => setTrashed(false)}
                   onChanged={() => setAttempt((value) => value + 1)}
                   onEdit={(id) => void openEdit(id)}
@@ -257,6 +305,24 @@ function PasswordsPageContent() {
           setEditing(null)
         }}
         onSaved={() => setAttempt((value) => value + 1)}
+      />
+
+      <ConfirmDialog
+        confirmLabel={trashed ? 'Delete forever' : 'Move to trash'}
+        description={
+          trashed
+            ? 'These credentials are removed from this device. This cannot be undone.'
+            : 'You can restore them from Trash.'
+        }
+        open={bulkIds !== null}
+        title={
+          trashed
+            ? `Delete ${bulkIds?.length ?? 0} credentials forever?`
+            : `Move ${bulkIds?.length ?? 0} credentials to Trash?`
+        }
+        tone="danger"
+        onCancel={() => setBulkIds(null)}
+        onConfirm={() => void runBulk()}
       />
     </div>
   )

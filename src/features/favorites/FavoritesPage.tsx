@@ -11,6 +11,8 @@ import {
 import PageHeader from '../../app/PageHeader'
 import { CollectionSelect } from '../../components/items/dialogs'
 import { ItemTable, ItemTableSkeleton } from '../../components/items/ItemTable'
+import { SelectionBar } from '../../components/items/SelectionBar'
+import { useSelection } from '../../components/items/useSelection'
 import {
   listItems,
   moveItemsToCollection,
@@ -18,7 +20,7 @@ import {
   type ItemKind,
   type ItemSummary,
 } from '../../data/items'
-import { notifyError, notifySuccess } from '../../lib/feedback'
+import { notifyError, notifySuccess, trashManyWithUndo } from '../../lib/feedback'
 import { useVaultChanged } from '../../lib/useVaultChanged'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
 
@@ -102,6 +104,16 @@ export function FavoritesPage() {
   const currentPage = Math.min(page, totalPages)
   const pagedItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
+  const selection = useSelection()
+
+  async function trashSelected(ids: string[]) {
+    const moved = await trashManyWithUndo(ids)
+    if (moved) {
+      selection.clear()
+      reload()
+    }
+  }
+
   function reload() {
     setAttempt((value) => value + 1)
   }
@@ -172,7 +184,16 @@ export function FavoritesPage() {
       ) : null}
 
       {loadState === 'ready' ? (
-        <ItemTable
+        <>
+          <SelectionBar
+            actionLabel="Move to Trash"
+            confirmTrash
+            selection={selection}
+            visibleIds={items.map((item) => item.id)}
+            onAction={(ids) => void trashSelected(ids)}
+          />
+          <ItemTable
+          selection={selection}
           emptyMessage="No favorites yet. Items marked as favorites will appear here."
           items={pagedItems}
           page={currentPage}
@@ -185,6 +206,7 @@ export function FavoritesPage() {
             void handleToggleFavorite(id, next)
           }}
         />
+        </>
       ) : null}
 
       <Modal

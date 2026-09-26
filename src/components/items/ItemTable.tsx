@@ -9,6 +9,7 @@ import {
   Typography,
 } from '@heroui/react'
 import {
+  CheckmarkSquare02Icon,
   Delete02Icon,
   DeletePutBackIcon,
   EyeIcon,
@@ -22,7 +23,9 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 
 import type { ItemKind, ItemSummary } from '../../data/items'
+import { SelectMark } from './ItemCard'
 import { ListScrollArea } from './ListScrollArea'
+import type { Selection } from './useSelection'
 
 export type ItemTableProps = {
   items: ItemSummary[]
@@ -37,6 +40,8 @@ export type ItemTableProps = {
   onRestore?: (id: string) => void
   onDeletePermanently?: (id: string) => void
   emptyMessage?: string
+  /** Adds a Select entry to the row menu and checkboxes while selecting. */
+  selection?: Selection
 }
 
 const KIND_LABELS: Record<ItemKind, string> = {
@@ -87,6 +92,7 @@ export function ItemTable({
   onRestore,
   onDeletePermanently,
   emptyMessage = 'No items yet.',
+  selection,
 }: ItemTableProps) {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
   const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1
@@ -98,7 +104,8 @@ export function ItemTable({
   const menuAnchorRef = useRef<HTMLSpanElement>(null)
 
   function handleRowAction(item: ItemSummary, key: string) {
-    if (key === 'open') onOpen?.(item.id)
+    if (key === 'select') selection?.pick(item.id)
+    else if (key === 'open') onOpen?.(item.id)
     else if (key === 'favorite') onToggleFavorite?.(item.id, !item.isFavorite)
     else if (key === 'move') onMove?.(item.id)
     else if (key === 'trash') onTrash?.(item.id)
@@ -143,13 +150,21 @@ export function ItemTable({
                   })
                 }}
               >
-                <div className="kivo-item-card relative rounded-3xl border border-default bg-surface transition-[background-color,scale] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover">
+                <div
+                  className={`kivo-item-card relative rounded-3xl border bg-surface transition-[background-color,scale,border-color] duration-300 ease-out hover:z-10 hover:scale-[1.02] hover:bg-surface-hover ${selection?.isSelected(item.id) ? 'border-accent' : 'border-default'}`}
+                >
                   <button
                     aria-label={item.title}
-                    className="grid w-full grid-cols-[auto_1fr] items-center gap-3 rounded-3xl p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    aria-pressed={selection?.isActive ? selection.isSelected(item.id) : undefined}
+                    className="flex w-full items-center gap-3 rounded-3xl p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     type="button"
-                    onClick={() => onOpen?.(item.id)}
+                    onClick={() =>
+                      selection?.isActive ? selection.pick(item.id) : onOpen?.(item.id)
+                    }
                   >
+                    {selection?.isActive ? (
+                      <SelectMark isSelected={selection.isSelected(item.id)} />
+                    ) : null}
                     <span className="grid size-11 place-items-center rounded-xl bg-default">
                       <HugeiconsIcon
                         aria-hidden="true"
@@ -159,7 +174,7 @@ export function ItemTable({
                         strokeWidth={1.75}
                       />
                     </span>
-                    <span className="grid min-w-0 gap-1">
+                    <span className="grid min-w-0 flex-1 gap-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <Chip color="accent" size="sm" variant="secondary">
                           {KIND_LABELS[item.kind]}
@@ -206,6 +221,15 @@ export function ItemTable({
               if (menuItem) handleRowAction(menuItem, String(key))
             }}
           >
+            {selection ? (
+              <Dropdown.Item
+                id="select"
+                textValue={menuItem && selection.isSelected(menuItem.id) ? 'Deselect' : 'Select'}
+              >
+                <HugeiconsIcon aria-hidden="true" icon={CheckmarkSquare02Icon} size={16} />
+                <Label>{menuItem && selection.isSelected(menuItem.id) ? 'Deselect' : 'Select'}</Label>
+              </Dropdown.Item>
+            ) : null}
             {onOpen ? (
               <Dropdown.Item id="open" textValue="Open details">
                 <HugeiconsIcon aria-hidden="true" icon={EyeIcon} size={16} />
