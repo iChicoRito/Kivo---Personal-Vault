@@ -88,6 +88,9 @@ export function setMediaQueryMatches(query: string, matches: boolean) {
   list?.notifyChange()
 }
 
+// jsdom has no canvas; returning null lets canvas backgrounds skip drawing quietly.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext
+
 Object.defineProperty(window, 'matchMedia', {
   configurable: true,
   writable: true,

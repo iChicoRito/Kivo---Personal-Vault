@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ProgressBar, Spinner, Toast, type ToastContentValue } from '@heroui/react'
 
+import { usePreferences } from '../../app/preferences'
+
 /** The undo toast stays open this long, and its bar drains over the same window. */
 const UNDO_WINDOW_MS = 8000
 
@@ -16,8 +18,14 @@ type FeedbackToastProps = { toast: Parameters<typeof Toast>[0]['toast'] }
  * plain failure.
  */
 export function FeedbackToastRegion() {
+  // Only the floating dock needs the lift; with the sidebar the stack sits at the bottom.
+  const { navigationStyle } = usePreferences().preferences
+
   return (
-    <Toast.Provider placement="bottom" style={{ bottom: DOCK_CLEARANCE }}>
+    <Toast.Provider
+      placement="bottom"
+      style={navigationStyle === 'dock' ? { bottom: DOCK_CLEARANCE } : undefined}
+    >
       {renderProps => <FeedbackToast toast={renderProps.toast} />}
     </Toast.Provider>
   )

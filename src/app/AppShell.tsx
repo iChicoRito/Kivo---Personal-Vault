@@ -13,6 +13,7 @@ import AppSidebar from './AppSidebar'
 import NavbarSearch from './NavbarSearch'
 import { CommandPalette } from './CommandPalette'
 import { shortcuts, matchesShortcut } from './shortcuts'
+import DotField from '../components/ui/DotField'
 import { QuickAddDialog } from '../features/quick-add/QuickAddDialog'
 import { ShortcutsDialog } from '../features/shortcuts/ShortcutsDialog'
 import { usePreferences } from './preferences'
@@ -99,6 +100,38 @@ function AppNavbar({ hidden }: { hidden: boolean }) {
   )
 }
 
+// Canvas cannot read CSS variables, so the muted text color is resolved from the theme.
+function readMuted() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() || '#71717a'
+}
+
+/** Faint dot field behind every page. Opacity is the one knob for how visible it is. */
+function AppBackground() {
+  const [color, setColor] = useState(readMuted)
+
+  // Theme switches flip a class or data attribute on <html>; re-read the color then.
+  useEffect(() => {
+    const observer = new MutationObserver(() => setColor(readMuted()))
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] })
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none fixed inset-0 -z-10 opacity-25">
+      <DotField
+        bulgeStrength={67}
+        dotRadius={1.5}
+        dotSpacing={14}
+        glowRadius={0}
+        gradientFrom={color}
+        gradientTo={color}
+        sparkle={false}
+        waveAmplitude={0}
+      />
+    </div>
+  )
+}
+
 export default function AppShell() {
   const mainRef = useRef<HTMLDivElement>(null)
   const hidden = useHideOnScroll(mainRef)
@@ -129,10 +162,11 @@ export default function AppShell() {
 
   return (
     <div
-      className="min-h-screen bg-background text-foreground"
+      className="relative isolate min-h-screen bg-background text-foreground"
       data-navigation={navigationStyle}
       id="kivo-shell"
     >
+      <AppBackground />
       {navigationStyle === 'sidebar' ? <AppSidebar /> : null}
       <div id="kivo-workspace" className="min-w-0">
         <ScrollShadow
