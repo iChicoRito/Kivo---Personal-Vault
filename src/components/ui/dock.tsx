@@ -73,15 +73,12 @@ const Dock = React.forwardRef<HTMLDivElement, DockProps>(
         {...props}
         className={cn(dockVariants({ className }))}
       >
-        {/* The glass bar hugs the icons at rest. Hovering, or focusing an icon with
-            the keyboard, grows it upward for the labels and lifts the content so
-            the labels keep equal top/bottom padding; hover also widens the gaps
-            between the icons. The root keeps its height so the page above never
-            reflows. */}
-        <div className="absolute inset-x-0 bottom-0 h-[58px] rounded-2xl border backdrop-blur-md transition-all duration-300 ease-out group-hover:h-[72px] group-hover:backdrop-blur-xl supports-backdrop-blur:bg-white/10 supports-backdrop-blur:dark:bg-black/10 supports-backdrop-blur:group-hover:bg-white/20 supports-backdrop-blur:dark:group-hover:bg-black/20 group-has-[:focus-visible]:h-[72px] group-has-[:focus-visible]:backdrop-blur-xl supports-backdrop-blur:group-has-[:focus-visible]:bg-white/20 supports-backdrop-blur:dark:group-has-[:focus-visible]:bg-black/20" />
+        {/* The glass bar hugs the icons. Hovering widens the gaps between the
+            icons; names show in tooltips, so the bar keeps its height. */}
+        <div className="absolute inset-x-0 bottom-0 h-[58px] rounded-2xl border backdrop-blur-md transition-all duration-300 ease-out group-hover:backdrop-blur-xl supports-backdrop-blur:bg-white/10 supports-backdrop-blur:dark:bg-black/10 supports-backdrop-blur:group-hover:bg-white/20 supports-backdrop-blur:dark:group-hover:bg-black/20 group-has-[:focus-visible]:backdrop-blur-xl supports-backdrop-blur:group-has-[:focus-visible]:bg-white/20 supports-backdrop-blur:dark:group-has-[:focus-visible]:bg-black/20" />
         <div
           className={cn(
-            "relative flex justify-center gap-4 p-2 transition-[gap,padding-bottom] duration-300 ease-out group-hover:gap-8 group-hover:pb-3.5 group-has-[:focus-visible]:pb-3.5",
+            "relative flex justify-center gap-4 p-2 transition-[gap] duration-300 ease-out group-hover:gap-8",
             {
               "items-start": direction === "top",
               "items-center": direction === "middle",
@@ -108,7 +105,6 @@ export interface DockIconProps extends Omit<
   distance?: number
   mouseX?: MotionValue<number>
   className?: string
-  label?: string
   children?: React.ReactNode
   props?: PropsWithChildren
 }
@@ -120,12 +116,10 @@ const DockIcon = ({
   distance = DEFAULT_DISTANCE,
   mouseX,
   className,
-  label,
   children,
   ...props
 }: DockIconProps) => {
   const ref = useRef<HTMLDivElement>(null)
-  const padding = Math.max(6, size * 0.2)
   const defaultMouseX = useMotionValue(Infinity)
 
   const distanceCalc = useTransform(mouseX ?? defaultMouseX, (val: number) => {
@@ -155,7 +149,7 @@ const DockIcon = ({
     <div className="flex flex-col items-center justify-end gap-1 self-stretch">
       <motion.div
         ref={ref}
-        style={{ width: scaleSize, height: scaleSize, padding }}
+        style={{ width: scaleSize, height: scaleSize }}
         className={cn(
           "flex aspect-square shrink-0 cursor-pointer items-center justify-center rounded-full",
           disableMagnification && "hover:bg-muted-foreground transition-colors",
@@ -167,11 +161,6 @@ const DockIcon = ({
           {children}
         </motion.div>
       </motion.div>
-      {label ? (
-        <span className="-mt-3.5 h-2.5 max-w-16 shrink-0 translate-y-1 select-none truncate text-[10px] leading-none text-muted opacity-0 transition-all duration-300 ease-out group-hover:mt-0 group-hover:translate-y-0 group-hover:opacity-100 group-has-[:focus-visible]:mt-0 group-has-[:focus-visible]:translate-y-0 group-has-[:focus-visible]:opacity-100">
-          {label}
-        </span>
-      ) : null}
     </div>
   )
 }

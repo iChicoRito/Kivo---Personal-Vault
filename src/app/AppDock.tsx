@@ -1,6 +1,7 @@
 import { HugeiconsIcon } from '@hugeicons/react'
-import { useEffect, useRef, type RefObject } from 'react'
-import { NavLink } from 'react-router-dom'
+import { useEffect, useRef, type CSSProperties, type RefObject } from 'react'
+import { Link, RouterProvider, Tooltip } from '@heroui/react'
+import { matchPath, useHref, useLocation, useNavigate } from 'react-router-dom'
 
 import { Dock, DockIcon } from '../components/ui/dock'
 import { navigationGroups } from './navigation'
@@ -79,51 +80,67 @@ export function useScrollDrag(ref: RefObject<HTMLElement | null>) {
 export default function AppDock() {
   const navRef = useRef<HTMLElement>(null)
   useScrollDrag(navRef)
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
 
   return (
     // The dock floats over the bottom of the page area instead of holding a row
     // of its own, so content scrolls behind it like it does behind the navbar.
     // Only the dock catches pointer events; its wrapper stays click-through.
-    <nav
-      ref={navRef}
-      aria-label="Primary navigation"
-      id="kivo-dock-nav"
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-3"
-    >
-      {/* The dock is wider than narrow windows, so it scrolls sideways instead of clipping.
+    <RouterProvider navigate={navigate} useHref={useHref}>
+      <nav
+        ref={navRef}
+        aria-label="Primary navigation"
+        id="kivo-dock-nav"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-3"
+      >
+        {/* The dock is wider than narrow windows, so it scrolls sideways instead of clipping.
           The magnified icon is taller than the dock, so vertical overflow is hidden here
           and scrollbar chrome is suppressed; hover growth must not paint a bar. */}
-      <div className="overflow-x-auto overflow-y-hidden py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <Dock className="kivo-dock pointer-events-auto">
-          {destinations.map((destination) => (
-            <DockIcon key={destination.to} label={destination.label}>
-              {/* Hover surface for the dock. The active destination keeps the accent
-                  fill and a slightly larger circle at rest, so the selected item stays
-                  emphasized after the click; other items show the soft surface on hover.
-                  The dock's magnification scales this circle with the cursor. */}
-              <div className="grid size-9 place-items-center rounded-full transition-[background-color,scale] duration-300 ease-out hover:bg-(--default) has-[a[aria-current=page]]:scale-110 has-[a[aria-current=page]]:bg-accent">
-                <NavLink
-                  aria-label={destination.label}
-                  className={({ isActive }) =>
-                    `flex size-6 items-center justify-center rounded-full transition-colors ${
-                      isActive ? 'text-accent-foreground' : 'text-foreground'
-                    }`
-                  }
-                  end
-                  to={destination.to}
-                >
-                  <HugeiconsIcon
-                    aria-hidden="true"
-                    icon={destination.icon}
-                    size={20}
-                    strokeWidth={1.75}
-                  />
-                </NavLink>
-              </div>
-            </DockIcon>
-          ))}
-        </Dock>
-      </div>
-    </nav>
+        <div className="overflow-x-auto overflow-y-hidden py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <Dock className="kivo-dock pointer-events-auto" iconMagnification={76}>
+            {destinations.map((destination, index) => {
+              const isActive = matchPath({ path: destination.to, end: true }, pathname) !== null
+              return (
+                <DockIcon key={destination.to}>
+                  {/* The link is the whole 36px circle, so the hover target and the
+                      tooltip trigger cover the full icon, not just the glyph. The
+                      active destination keeps the accent fill and a slightly larger
+                      circle; others show the soft surface on hover. */}
+                  <Tooltip.Root closeDelay={0} delay={0}>
+                    <Link
+                      aria-current={isActive ? 'page' : undefined}
+                      aria-label={destination.label}
+                      className={`grid size-9 place-items-center rounded-full no-underline transition-[background-color,scale] duration-300 ease-out hover:no-underline ${
+                        isActive
+                          ? 'scale-110 bg-accent text-accent-foreground'
+                          : 'text-foreground hover:bg-(--default)'
+                      }`}
+                      href={destination.to}
+                      style={{ anchorName: `--kivo-dock-${index}` } as CSSProperties}
+                    >
+                      <HugeiconsIcon
+                        aria-hidden="true"
+                        icon={destination.icon}
+                        size={20}
+                        strokeWidth={1.75}
+                      />
+                    </Link>
+                    <Tooltip.Content
+                      className="kivo-dock-tip"
+                      offset={14}
+                      placement="top"
+                      style={{ positionAnchor: `--kivo-dock-${index}` } as CSSProperties}
+                    >
+                      {destination.label}
+                    </Tooltip.Content>
+                  </Tooltip.Root>
+                </DockIcon>
+              )
+            })}
+          </Dock>
+        </div>
+      </nav>
+    </RouterProvider>
   )
 }

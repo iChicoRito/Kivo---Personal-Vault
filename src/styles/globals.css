@@ -650,3 +650,86 @@ html[data-magicui-theme-vt="active"]::view-transition-new(root) {
     animation-iteration-count: 1 !important;
   }
 }
+
+/*
+ * Dock <-> sidebar swap (see `switchNavigation` in SettingsPage). Names are only
+ * given while the swap runs, so the theme wipe still snapshots the page as one.
+ */
+html[data-kivo-nav-vt='active'] #kivo-sidebar {
+  view-transition-name: kivo-sidebar;
+}
+
+html[data-kivo-nav-vt='active'] #kivo-dock-nav {
+  view-transition-name: kivo-dock;
+}
+
+html[data-kivo-nav-vt='active'] #kivo-workspace {
+  view-transition-name: kivo-workspace;
+}
+
+html[data-kivo-nav-vt='active']::view-transition-old(root),
+html[data-kivo-nav-vt='active']::view-transition-new(root) {
+  animation: none;
+}
+
+html[data-kivo-nav-vt='active']::view-transition-group(kivo-workspace) {
+  animation-duration: 450ms;
+  animation-delay: 150ms;
+  animation-timing-function: var(--ease-smooth);
+}
+
+/* The outgoing menu leaves first, then the incoming one slides into place.
+   Both travel fully off-screen: the sidebar to the left, the dock downward. */
+::view-transition-old(kivo-sidebar) {
+  animation: kivo-nav-sidebar-out 300ms var(--ease-smooth) both;
+}
+
+::view-transition-new(kivo-sidebar) {
+  animation: kivo-nav-sidebar-in 450ms var(--ease-smooth) 150ms both;
+}
+
+::view-transition-old(kivo-dock) {
+  animation: kivo-nav-dock-out 300ms var(--ease-smooth) both;
+}
+
+::view-transition-new(kivo-dock) {
+  animation: kivo-nav-dock-in 450ms var(--ease-smooth) 150ms both;
+}
+
+@keyframes kivo-nav-sidebar-out {
+  to {
+    transform: translateX(-110%);
+  }
+}
+
+@keyframes kivo-nav-sidebar-in {
+  from {
+    transform: translateX(-110%);
+  }
+}
+
+@keyframes kivo-nav-dock-out {
+  to {
+    transform: translateY(110%);
+  }
+}
+
+@keyframes kivo-nav-dock-in {
+  from {
+    transform: translateY(110%);
+  }
+}
+
+/*
+ * Dock tooltips. React Aria measures the icon once when the bubble opens, but
+ * magnification keeps moving icons for a moment after, so the bubble ends up
+ * off-centre. Each icon is a CSS anchor and the bubble centres on it live;
+ * `!important` beats the `left` React Aria writes inline. Browsers without
+ * anchor positioning keep React Aria's position.
+ */
+@supports (anchor-name: --a) {
+  .kivo-dock-tip {
+    left: anchor(center) !important;
+    translate: -50% 0;
+  }
+}

@@ -267,15 +267,15 @@ describe('AppShell', () => {
     expect(dockNav).not.toHaveAttribute('data-hidden')
   })
 
-  it('renders a label under every dock icon for the hover reveal', () => {
+  it('names dock icons in tooltips instead of visible labels', () => {
     renderShell()
 
     const nav = dock()
 
     for (const label of destinationLabels) {
-      expect(within(nav).getByText(label, { exact: true })).toBeInTheDocument()
+      expect(within(nav).queryByText(label, { exact: true })).not.toBeInTheDocument()
+      expect(within(nav).getByRole('link', { name: label, exact: true })).toBeInTheDocument()
     }
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
   it('toggles the theme from the navbar control', async () => {

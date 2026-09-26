@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
-import { Button, buttonVariants, ScrollShadow } from '@heroui/react'
+import { buttonVariants, ScrollShadow } from '@heroui/react'
 import { Outlet } from 'react-router-dom'
 import { useNavigate, useLocation } from 'react-router-dom'
 
@@ -16,7 +16,6 @@ import { shortcuts, matchesShortcut } from './shortcuts'
 import { QuickAddDialog } from '../features/quick-add/QuickAddDialog'
 import { ShortcutsDialog } from '../features/shortcuts/ShortcutsDialog'
 import { usePreferences } from './preferences'
-import { useLock } from './lock'
 
 function ThemeToggle() {
   const { resolvedTheme, updatePreferences } = usePreferences()
@@ -75,9 +74,6 @@ function useHideOnScroll(scrollerRef: RefObject<HTMLElement | null>) {
 }
 
 function AppNavbar({ hidden }: { hidden: boolean }) {
-  const lock = useLock()
-  // The sidebar's profile menu owns Lock, so the navbar only offers it with the dock.
-  const appLock = usePreferences().preferences.navigationStyle === 'dock' ? lock : null
   return (
     <header
       id="kivo-navbar"
@@ -97,7 +93,6 @@ function AppNavbar({ hidden }: { hidden: boolean }) {
       />
       <NavbarSearch />
       <div className="flex items-center gap-2">
-        {appLock ? <Button variant="secondary" onPress={() => void appLock.lock()}>Lock Kivo</Button> : null}
         <ThemeToggle />
       </div>
     </header>

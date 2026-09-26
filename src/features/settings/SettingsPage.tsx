@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import {
   Button,
   Card,
@@ -374,6 +375,20 @@ export default function SettingsPage() {
     resetWasOpen.current = resetDialog.isOpen
   }, [resetDialog.isOpen])
 
+  // Swapping dock and sidebar runs as a view transition: the sidebar slides in
+  // from the left, the dock drops away, and the page area glides to its new
+  // size. `data-kivo-nav-vt` scopes the CSS so the theme wipe keeps its own.
+  function switchNavigation(style: NavigationStyle) {
+    const apply = () => flushSync(() => void handleAppearanceChange({ navigationStyle: style }))
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (typeof document.startViewTransition !== 'function' || reduced) return apply()
+
+    const root = document.documentElement
+    root.dataset.kivoNavVt = 'active'
+    const transition = document.startViewTransition(apply)
+    void transition.finished.finally(() => delete root.dataset.kivoNavVt)
+  }
+
   async function handleAppearanceChange(patch: Partial<Preferences>) {
     setAppearanceError(null)
 
@@ -578,8 +593,7 @@ export default function SettingsPage() {
       hint: 'A dock at the bottom, or a sidebar on the left.',
       value: preferences.navigationStyle,
       options: NAVIGATION_OPTIONS,
-      onChange: (value: string) =>
-        void handleAppearanceChange({ navigationStyle: value as NavigationStyle }),
+      onChange: (value: string) => switchNavigation(value as NavigationStyle),
     },
   ]
 
