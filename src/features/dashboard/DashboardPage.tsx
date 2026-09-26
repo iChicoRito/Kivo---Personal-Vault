@@ -3,7 +3,6 @@ import { Alert, Button, Card, Kbd, Skeleton, Typography } from '@heroui/react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   Delete02Icon,
-  FileImportIcon,
   FolderOpenIcon,
   HardDriveIcon,
   Layers01Icon,
@@ -23,14 +22,16 @@ import { listCollections, type Collection } from '../../data/collections'
 import { loadVaultSummary, type VaultSummary } from '../../data/dashboard'
 import { listItems, type ItemKind, type ItemSummary } from '../../data/items'
 import { useVaultChanged } from '../../lib/useVaultChanged'
+import { Panel } from '../../components/ui/Panel'
 import { QuickAddDialog } from '../quick-add/QuickAddDialog'
 import { QuickAddMenu } from '../quick-add/QuickAddMenu'
+import { QuickAddTiles, type QuickAddAction } from '../quick-add/QuickAddTiles'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
 import { buildActivityWeeks } from './activity'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-type InitialAction = 'note' | 'file' | 'source' | 'collection'
+type InitialAction = QuickAddAction
 
 const ACTIVITY_WEEKS = 26
 const LIST_LIMIT = 6
@@ -39,18 +40,6 @@ const navigationLinks = navigationGroups.flatMap((group) => group.links)
 const shortcutPages = ['All Items', 'Notes', 'Sources', 'Files', 'Password Manager', 'Trash']
   .map((label) => navigationLinks.find((link) => link.label === label))
   .filter((link) => link !== undefined)
-
-const quickAddActions: Array<{
-  label: string
-  hint: string
-  action: InitialAction
-  icon: IconSvgElement
-}> = [
-  { label: 'New note', hint: 'Write in the editor', action: 'note', icon: NoteEditIcon },
-  { label: 'Save link', hint: 'Keep a web source', action: 'source', icon: Link02Icon },
-  { label: 'Import file', hint: 'Copy into the vault', action: 'file', icon: FileImportIcon },
-  { label: 'New collection', hint: 'Group related items', action: 'collection', icon: Layers01Icon },
-]
 
 const KIND_ICONS: Record<ItemKind, IconSvgElement> = {
   note: NoteEditIcon,
@@ -86,34 +75,6 @@ function formatBytes(bytes: number) {
 
 function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? '' : 's'}`
-}
-
-function Panel({
-  id,
-  title,
-  meta,
-  className = '',
-  children,
-}: {
-  id: string
-  title: string
-  meta?: ReactNode
-  className?: string
-  children: ReactNode
-}) {
-  return (
-    <section aria-labelledby={id} className={`min-w-0 ${className}`}>
-      <Card className="h-full">
-        <div className="flex min-h-6 items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold" id={id}>
-            {title}
-          </h2>
-          {meta}
-        </div>
-        {children}
-      </Card>
-    </section>
-  )
 }
 
 function PanelLink({ to, children }: { to: string; children: ReactNode }) {
@@ -304,24 +265,7 @@ export default function DashboardPage() {
       }
       title="Quick add"
     >
-      <div className="grid grid-cols-2 gap-2">
-        {quickAddActions.map((entry) => (
-          <button
-            key={entry.action}
-            className={`group grid content-start gap-2 rounded-xl border border-separator p-3 text-left transition-colors hover:border-accent/40 hover:bg-accent/5 ${focusRing}`}
-            type="button"
-            onClick={() => openQuickAdd(entry.action)}
-          >
-            <span className="grid size-8 place-items-center rounded-lg bg-accent/10 text-accent">
-              <HugeiconsIcon aria-hidden="true" icon={entry.icon} size={16} strokeWidth={1.75} />
-            </span>
-            <span className="grid gap-0.5">
-              <span className="text-sm font-medium">{entry.label}</span>
-              <span className="text-xs text-muted">{entry.hint}</span>
-            </span>
-          </button>
-        ))}
-      </div>
+      <QuickAddTiles onSelect={openQuickAdd} />
 
       <nav aria-label="Go to" className="flex flex-wrap gap-1 border-t border-separator pt-3">
         {shortcutPages.map((link) => (
@@ -460,9 +404,9 @@ export default function DashboardPage() {
                     label={`Items last edited per day over the last ${ACTIVITY_WEEKS} weeks: ${activity.total} in total.`}
                     weeks={activity.weeks}
                   />
-                  <dl className="m-0 mt-auto grid grid-cols-3 gap-3">
+                  <dl className="m-0 grid grid-cols-3 divide-x divide-separator">
                     {activityStats.map(([label, value]) => (
-                      <div key={label} className="grid gap-0.5">
+                      <div key={label} className="grid gap-0.5 px-4 first:pl-0">
                         <dt className="text-xs text-muted">{label}</dt>
                         <dd className="m-0 text-sm font-semibold tabular-nums">{value}</dd>
                       </div>
@@ -589,13 +533,13 @@ export default function DashboardPage() {
                       },
                     ]}
                   />
-                  <dl className="m-0 grid grid-cols-3 gap-3">
+                  <dl className="m-0 grid grid-cols-3 divide-x divide-separator">
                     {[
                       ['Managed files', formatBytes(summary.fileBytes)],
                       ['Database', formatBytes(summary.databaseBytes)],
                       ['Files stored', String(summary.fileCount)],
                     ].map(([label, value]) => (
-                      <div key={label} className="grid gap-0.5">
+                      <div key={label} className="grid gap-0.5 px-4 first:pl-0">
                         <dt className="text-xs text-muted">{label}</dt>
                         <dd className="m-0 text-sm font-semibold tabular-nums">{value}</dd>
                       </div>

@@ -3,6 +3,7 @@ import {
   Button,
   FieldError,
   Input,
+  Kbd,
   Label,
   Modal,
   TextField,
@@ -15,12 +16,13 @@ import { importFile } from '../../data/items'
 import { pickFile } from '../../data/files'
 import { notifyError, notifySuccess } from '../../lib/feedback'
 import SaveSourceDialog from '../sources/SaveSourceDialog'
+import { QuickAddTiles, type QuickAddAction } from './QuickAddTiles'
 
 type QuickAddDialogProps = {
   open: boolean
   onClose: () => void
   initialMode?: 'menu' | 'collection'
-  initialAction?: 'note' | 'file' | 'source' | 'collection' | null
+  initialAction?: QuickAddAction | null
 }
 
 const IMPORT_ERROR = 'Kivo could not import that file. Try again.'
@@ -137,8 +139,15 @@ export function QuickAddDialog({
         <Modal.Backdrop>
           <Modal.Container>
             <Modal.Dialog>
-              <Modal.Header>
-                <Modal.Heading>{direct ? 'New collection' : 'Quick add'}</Modal.Heading>
+              <Modal.Header className="grid gap-0.5">
+                <Modal.Heading className="text-base font-semibold">
+                  {mode === 'collection' ? 'New collection' : 'Quick add'}
+                </Modal.Heading>
+                <p className="m-0 text-sm text-muted">
+                  {mode === 'collection'
+                    ? 'Name a collection to group related items.'
+                    : 'Add something to your vault.'}
+                </p>
               </Modal.Header>
               <Modal.Body className="grid gap-4">
                 {error ? (
@@ -148,27 +157,18 @@ export function QuickAddDialog({
                 ) : null}
 
                 {mode === 'menu' ? (
-                  <div className="grid gap-2">
-                    <Button isDisabled={busy} onPress={handleNewNote}>
-                      New note
-                    </Button>
-                    <Button isDisabled={busy} variant="secondary" onPress={handleNewSource}>
-                      New source
-                    </Button>
-                    <Button isDisabled={busy} variant="secondary" onPress={() => void handleImport()}>
-                      Import file
-                    </Button>
-                    <Button
-                      isDisabled={busy}
-                      variant="secondary"
-                      onPress={() => {
+                  <QuickAddTiles
+                    isDisabled={busy}
+                    onSelect={(action) => {
+                      if (action === 'note') handleNewNote()
+                      else if (action === 'source') handleNewSource()
+                      else if (action === 'file') void handleImport()
+                      else {
                         setError(null)
                         setMode('collection')
-                      }}
-                    >
-                      New collection
-                    </Button>
-                  </div>
+                      }
+                    }}
+                  />
                 ) : (
                   <TextField
                     isInvalid={error === COLLECTION_REQUIRED}
@@ -195,9 +195,18 @@ export function QuickAddDialog({
                     </Button>
                   </>
                 ) : (
-                  <Button variant="secondary" onPress={close}>
-                    Cancel
-                  </Button>
+                  <div className="flex w-full items-center justify-between gap-3">
+                    <span className="flex items-center gap-1.5 text-xs text-muted">
+                      <Kbd aria-hidden="true">
+                        <Kbd.Abbr keyValue="ctrl" />
+                        <Kbd.Content>Shift+N</Kbd.Content>
+                      </Kbd>
+                      opens this anywhere
+                    </span>
+                    <Button size="sm" variant="ghost" onPress={close}>
+                      Cancel
+                    </Button>
+                  </div>
                 )}
               </Modal.Footer>
             </Modal.Dialog>
