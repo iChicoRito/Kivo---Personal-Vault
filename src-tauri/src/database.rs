@@ -23,6 +23,7 @@ const PHASE_FIVE_MIGRATION: &str = include_str!("../migrations/0011_phase_five.s
 const PHASE_SIX_MIGRATION: &str = include_str!("../migrations/0012_phase_six_protection.sql");
 const PHASE_SEVEN_MIGRATION: &str = include_str!("../migrations/0013_phase_seven.sql");
 const ACTIVITY_HISTORY_REMOVAL: &str = include_str!("../migrations/0014_drop_activity.sql");
+const NAVIGATION_STYLE_MIGRATION: &str = include_str!("../migrations/0015_navigation_style.sql");
 
 struct Migration {
     version: i64,
@@ -88,6 +89,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 14,
         sql: ACTIVITY_HISTORY_REMOVAL,
     },
+    Migration {
+        version: 15,
+        sql: NAVIGATION_STYLE_MIGRATION,
+    },
 ];
 
 pub struct DatabaseState {
@@ -132,6 +137,7 @@ pub struct Preferences {
     pub notes_view: String,
     pub sources_view: String,
     pub collections_view: String,
+    pub navigation_style: String,
     #[serde(default)]
     pub auto_lock_minutes: i64,
     #[serde(default)]
@@ -338,7 +344,8 @@ fn validate_preferences(preferences: &Preferences) -> Result<(), String> {
         && matches!(preferences.density.as_str(), "comfortable" | "compact")
         && matches!(preferences.notes_view.as_str(), "grid" | "list")
         && matches!(preferences.sources_view.as_str(), "grid" | "list")
-        && matches!(preferences.collections_view.as_str(), "grid" | "list");
+        && matches!(preferences.collections_view.as_str(), "grid" | "list")
+        && matches!(preferences.navigation_style.as_str(), "dock" | "sidebar");
     let valid = valid && preferences.auto_lock_minutes >= 0;
 
     if valid {
@@ -494,7 +501,7 @@ pub fn write_profile(connection: &mut Connection, profile: &ProfileInput) -> rus
 
 pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences> {
     connection.query_row(
-        "SELECT theme, density, start_at_login, notes_view, sources_view, collections_view, auto_lock_minutes, semantic_search, auto_tag, summaries FROM preferences WHERE id = 1",
+        "SELECT theme, density, start_at_login, notes_view, sources_view, collections_view, auto_lock_minutes, semantic_search, auto_tag, summaries, navigation_style FROM preferences WHERE id = 1",
         [],
         |row| {
             Ok(Preferences {
@@ -504,6 +511,7 @@ pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences
                 notes_view: row.get(3)?,
                 sources_view: row.get(4)?,
                 collections_view: row.get(5)?,
+                navigation_style: row.get(10)?,
                 auto_lock_minutes: row.get(6)?,
                 semantic_search: row.get::<_, i64>(7)? != 0,
                 auto_tag: row.get::<_, i64>(8)? != 0,
@@ -531,7 +539,7 @@ pub fn write_preferences(
         "UPDATE preferences
          SET theme = ?1, density = ?2, start_at_login = ?3, notes_view = ?4, sources_view = ?5,
               collections_view = ?6, auto_lock_minutes = ?7, semantic_search = ?8, auto_tag = ?9,
-              summaries = ?10
+              summaries = ?10, navigation_style = ?11
          WHERE id = 1",
         params![
             preferences.theme,
@@ -544,6 +552,7 @@ pub fn write_preferences(
             i64::from(preferences.semantic_search),
             i64::from(preferences.auto_tag),
             i64::from(preferences.summaries),
+            preferences.navigation_style,
         ],
     )?;
 
@@ -794,7 +803,7 @@ mod tests {
             .expect("mark password vault version");
         connection.execute("INSERT INTO credentials(id, service, password_nonce, password_ciphertext, created_at, updated_at) VALUES ('credential-1', 'Kept', x'010203', x'040506', '2026-01-01', '2026-01-01')", []).expect("seed credential");
         apply_migrations(&mut connection).expect("upgrade version 10 vault");
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
         assert!(table_exists(&connection, "credentials"));
         assert!(table_exists(&connection, "item_search"));
         assert!(table_exists(&connection, "item_versions"));
@@ -811,7 +820,7 @@ mod tests {
         apply_migrations(&mut connection).expect("first migration");
         apply_migrations(&mut connection).expect("second migration");
 
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
 
         for table in [
             "profile",
@@ -855,7 +864,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
 
         // Dropping a table gives the test a way to detect whether the migration ran again.
         connection
@@ -868,7 +877,7 @@ mod tests {
             !table_exists(&connection, "preferences"),
             "an up-to-date database must not re-run its migration"
         );
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
     }
 
     #[test]
@@ -891,7 +900,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
         assert_eq!(
             read_preferences(&connection).expect("read preferences"),
             Preferences {
@@ -901,6 +910,7 @@ mod tests {
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
                 collections_view: "grid".to_string(),
+                navigation_style: "dock".to_string(),
                 auto_lock_minutes: 0,
                 semantic_search: false,
                 auto_tag: false,
@@ -963,7 +973,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
         assert!(
             !table_exists(&connection, "starter_collections"),
             "the onboarding table is dropped after the copy"
@@ -996,6 +1006,7 @@ mod tests {
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
                 collections_view: "grid".to_string(),
+                navigation_style: "dock".to_string(),
                 auto_lock_minutes: 0,
                 semantic_search: false,
                 auto_tag: false,
@@ -1042,7 +1053,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
 
         let (title, content, is_pinned, deleted_at, icon): (
             String,
@@ -1107,7 +1118,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
         let collections_view: String = connection
             .query_row(
                 "SELECT collections_view FROM preferences WHERE id = 1",
@@ -1150,7 +1161,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
         let (protection, secret_hash): (String, Option<String>) = connection
             .query_row(
                 "SELECT protection, secret_hash FROM collections WHERE id = 'col-old'",
@@ -1209,7 +1220,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 14);
+        assert_eq!(read_user_version(&connection), 15);
         let tags: String = connection
             .query_row("SELECT tags FROM items WHERE id = 'item-1'", [], |row| {
                 row.get(0)
@@ -1369,6 +1380,7 @@ mod tests {
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
                 collections_view: "grid".to_string(),
+                navigation_style: "dock".to_string(),
                 auto_lock_minutes: 0,
                 semantic_search: false,
                 auto_tag: false,

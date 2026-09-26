@@ -26,6 +26,7 @@ import {
   saveProfile,
   saveStartAtLogin,
   type Density,
+  type NavigationStyle,
   type Preferences,
   type Theme,
 } from '../../data/settings'
@@ -57,6 +58,11 @@ const DENSITY_OPTIONS: Choice<Density>[] = [
   { value: 'compact', label: 'Compact' },
 ]
 
+const NAVIGATION_OPTIONS: Choice<NavigationStyle>[] = [
+  { value: 'dock', label: 'Dock' },
+  { value: 'sidebar', label: 'Sidebar' },
+]
+
 const RESET_PREFERENCES: Preferences = {
   theme: 'dark',
   density: 'comfortable',
@@ -64,6 +70,7 @@ const RESET_PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  navigationStyle: 'dock',
   autoLockMinutes: 0,
   semanticSearch: false,
   autoTag: false,
@@ -415,6 +422,10 @@ export default function SettingsPage() {
                 <SettingsSkeleton className="mb-1 h-4 w-16 rounded" />
                 <ChoiceSkeletonRows count={2} />
               </div>
+              <div className="grid content-start gap-1">
+                <SettingsSkeleton className="mb-1 h-4 w-20 rounded" />
+                <ChoiceSkeletonRows count={2} />
+              </div>
             </div>
           </SettingsLoadingCard>
 
@@ -579,6 +590,28 @@ export default function SettingsPage() {
             <Label>Density</Label>
             <div className="mt-1 grid gap-1">
               {DENSITY_OPTIONS.map((option) => (
+                <Radio key={option.value} className="min-h-11" value={option.value}>
+                  <Radio.Content>
+                    <Radio.Control>
+                      <Radio.Indicator />
+                    </Radio.Control>
+                    {option.label}
+                  </Radio.Content>
+                </Radio>
+              ))}
+            </div>
+          </RadioGroup>
+
+          <RadioGroup
+            name="navigation"
+            value={preferences.navigationStyle}
+            onChange={(value) =>
+              void handleAppearanceChange({ navigationStyle: value as NavigationStyle })
+            }
+          >
+            <Label>Navigation</Label>
+            <div className="mt-1 grid gap-1">
+              {NAVIGATION_OPTIONS.map((option) => (
                 <Radio key={option.value} className="min-h-11" value={option.value}>
                   <Radio.Content>
                     <Radio.Control>
@@ -768,7 +801,7 @@ export default function SettingsPage() {
             Reset presentation preferences
           </Typography>
           <Typography color="muted" type="body">
-            Reset theme, density, content width, and start at login. Your profile and app
+            Reset theme, density, navigation, content width, and start at login. Your profile and app
             lock stay the same.
           </Typography>
           <Modal state={resetDialog}>
@@ -783,7 +816,7 @@ export default function SettingsPage() {
                   </Modal.Header>
                   <Modal.Body>
                     <Typography type="body">
-                      This resets theme, density, content width, and start at login.
+                      This resets theme, density, navigation, content width, and start at login.
                       Your profile and app lock stay the same.
                     </Typography>
                     {resetError ? (

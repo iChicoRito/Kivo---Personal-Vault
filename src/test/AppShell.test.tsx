@@ -7,7 +7,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const settingsMock = vi.hoisted(() => ({
   loadPreferences: vi.fn(),
   savePreferences: vi.fn(),
+  loadProfile: vi.fn(),
 }))
+
+const windowMock = vi.hoisted(() => ({ close: vi.fn() }))
 
 const feedbackMock = vi.hoisted(() => ({
   notifySuccess: vi.fn(),
@@ -16,8 +19,10 @@ const feedbackMock = vi.hoisted(() => ({
 
 vi.mock('../data/settings', () => settingsMock)
 vi.mock('../lib/feedback', () => feedbackMock)
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => windowMock }))
 
 import AppShell from '../app/AppShell'
+import { LockProvider } from '../app/lock'
 import { navigationGroups } from '../app/navigation'
 import { DEFAULT_PREFERENCES, PreferencesProvider } from '../app/preferences'
 import type { Preferences } from '../data/settings'
@@ -78,6 +83,7 @@ function dock() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  settingsMock.loadProfile.mockResolvedValue({ ownerName: '', vaultName: '', setupCompletedAt: null })
 })
 
 async function activateWithEnter(element: HTMLElement) {
@@ -114,6 +120,55 @@ describe('AppShell', () => {
         hrefByLabel[label],
       )
     }
+  })
+
+  it('shows the sidebar instead of the dock when the sidebar style is saved', async () => {
+    renderShell('/notes', { navigationStyle: 'sidebar' })
+
+    const sidebar = document.getElementById('kivo-sidebar')
+    expect(sidebar).not.toBeNull()
+    expect(document.getElementById('kivo-dock-nav')).toBeNull()
+    expect(document.getElementById('kivo-shell')).toHaveAttribute('data-navigation', 'sidebar')
+
+    const links = within(dock()).getAllByRole('link')
+    expect(links.map((link) => link.textContent)).toEqual([...destinationLabels])
+    expect(within(dock()).getByRole('link', { name: 'Notes' })).toHaveAttribute('aria-current', 'page')
+
+    fireEvent.click(within(dock()).getByRole('link', { name: 'Sources' }))
+    expect(await screen.findByRole('heading', { name: '/sources' })).toBeInTheDocument()
+  })
+
+  it('shows the owner in the sidebar footer with Lock and Quit actions', async () => {
+    settingsMock.loadProfile.mockResolvedValue({
+      ownerName: 'Ada Lovelace',
+      vaultName: "Ada's Vault",
+      setupCompletedAt: '2026-01-01',
+    })
+    windowMock.close.mockResolvedValue(undefined)
+    render(
+      <PreferencesProvider initialPreferences={{ ...DEFAULT_PREFERENCES, navigationStyle: 'sidebar' }}>
+        <LockProvider>
+          <MemoryRouter initialEntries={['/notes']}>
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route path="*" element={<RouteMarker />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </LockProvider>
+      </PreferencesProvider>,
+    )
+
+    const trigger = await screen.findByRole('button', { name: 'Profile menu for Ada Lovelace' })
+    expect(within(trigger).getByText('AL')).toBeInTheDocument()
+    expect(within(trigger).getByText("Ada's Vault")).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: 'Lock Kivo' })).toBeNull()
+
+    fireEvent.click(trigger)
+    expect(await screen.findByRole('menuitem', { name: 'Lock Kivo' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Quit Kivo' }))
+    await waitFor(() => expect(windowMock.close).toHaveBeenCalledTimes(1))
   })
 
   it('documents the PASSWORDS group with one destination', () => {

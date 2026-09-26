@@ -80,6 +80,7 @@ const PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  navigationStyle: 'dock',
   autoLockMinutes: 0,
   semanticSearch: false,
   autoTag: false,
@@ -93,6 +94,7 @@ const RESET_PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  navigationStyle: 'dock',
   autoLockMinutes: 0,
   semanticSearch: false,
   autoTag: false,
@@ -257,6 +259,19 @@ describe('appearance preferences', () => {
       }),
     )
     expect(document.documentElement.dataset.density).toBe('compact')
+  })
+
+  it('persists the navigation style choice', async () => {
+    await renderSettings()
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Sidebar' }))
+
+    await waitFor(() =>
+      expect(settingsMock.savePreferences).toHaveBeenLastCalledWith({
+        ...PREFERENCES,
+        navigationStyle: 'sidebar',
+      }),
+    )
   })
 
   it('rolls the displayed control back to the saved value when saving fails', async () => {
@@ -536,6 +551,7 @@ describe('settings accessibility', () => {
 
     expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument()
     expect(screen.getByRole('radiogroup', { name: 'Density' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Navigation' })).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeInTheDocument()
   })
 

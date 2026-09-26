@@ -5,6 +5,7 @@ export type Density = 'comfortable' | 'compact'
 export type NoteView = 'grid' | 'list'
 export type SourceView = 'grid' | 'list'
 export type CollectionsView = 'grid' | 'list'
+export type NavigationStyle = 'dock' | 'sidebar'
 
 export type Profile = {
   ownerName: string
@@ -24,6 +25,7 @@ export type Preferences = {
   notesView: NoteView
   sourcesView: SourceView
   collectionsView: CollectionsView
+  navigationStyle: NavigationStyle
   autoLockMinutes: number
   semanticSearch: boolean
   autoTag: boolean

@@ -94,6 +94,21 @@
     transform: translateY(-100%);
   }
 
+  /* Sidebar navigation: the sidebar and the workspace sit side by side, and
+     the content drops the extra bottom room that only the dock needs. */
+  #kivo-shell[data-navigation='sidebar'] {
+    display: flex;
+  }
+
+  #kivo-shell[data-navigation='sidebar'] #kivo-workspace {
+    flex: 1;
+    min-width: 0;
+  }
+
+  #kivo-shell[data-navigation='sidebar'] #kivo-content {
+    padding-bottom: clamp(1.25rem, 2.5vw, 2.5rem);
+  }
+
   [data-density="compact"] #kivo-content {
     padding-top: 1rem;
     padding-bottom: calc(1rem + 7.5rem);

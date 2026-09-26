@@ -9,6 +9,7 @@ import { AnimatedThemeToggler } from '../components/ui/animated-theme-toggler'
 import { notifyError } from '../lib/feedback'
 import { cn } from '../lib/utils'
 import AppDock from './AppDock'
+import AppSidebar from './AppSidebar'
 import NavbarSearch from './NavbarSearch'
 import { CommandPalette } from './CommandPalette'
 import { shortcuts, matchesShortcut } from './shortcuts'
@@ -74,7 +75,9 @@ function useHideOnScroll(scrollerRef: RefObject<HTMLElement | null>) {
 }
 
 function AppNavbar({ hidden }: { hidden: boolean }) {
-  const appLock = useLock()
+  const lock = useLock()
+  // The sidebar's profile menu owns Lock, so the navbar only offers it with the dock.
+  const appLock = usePreferences().preferences.navigationStyle === 'dock' ? lock : null
   return (
     <header
       id="kivo-navbar"
@@ -110,6 +113,7 @@ export default function AppShell() {
   const [quickOpen, setQuickOpen] = useState(false)
   const [quickAction, setQuickAction] = useState<'file' | 'source' | 'collection' | undefined>()
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const { navigationStyle } = usePreferences().preferences
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -129,7 +133,12 @@ export default function AppShell() {
   }, [navigate, location.pathname])
 
   return (
-    <div className="min-h-screen bg-background text-foreground" id="kivo-shell">
+    <div
+      className="min-h-screen bg-background text-foreground"
+      data-navigation={navigationStyle}
+      id="kivo-shell"
+    >
+      {navigationStyle === 'sidebar' ? <AppSidebar /> : null}
       <div id="kivo-workspace" className="min-w-0">
         <ScrollShadow
           ref={mainRef}
@@ -146,7 +155,7 @@ export default function AppShell() {
           </div>
         </ScrollShadow>
 
-        <AppDock />
+        {navigationStyle === 'dock' ? <AppDock /> : null}
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onQuickAdd={(action) => { setQuickAction(action); setQuickOpen(true) }} onShortcuts={() => setShortcutsOpen(true)} />
         <QuickAddDialog key={quickAction ?? 'menu'} open={quickOpen} initialAction={quickAction ?? null} onClose={() => setQuickOpen(false)} />
         <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />

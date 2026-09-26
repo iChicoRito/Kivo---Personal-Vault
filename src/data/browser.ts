@@ -64,6 +64,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  navigationStyle: 'dock',
   autoLockMinutes: 0,
   semanticSearch: false,
   autoTag: false,
