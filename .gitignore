@@ -5,6 +5,5 @@ dist/
 docs/
 tasks/
 obsidian/system-analyzer/
-
 src-tauri/target/
 src-tauri/gen/

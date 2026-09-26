@@ -1,0 +1,410 @@
+KIVO END USER LICENSE AGREEMENT AND DATA NOTICE
+
+Effective Date: [Insert Date]
+
+Please read this agreement before installing or using Kivo.
+
+By installing Kivo or clicking "I Agree", you confirm that you have read and accepted these terms.
+
+------------------------------------------------------------
+
+1. ABOUT KIVO
+
+Kivo is a local-first personal vault application designed to help you organize and store notes, files, links, passwords, and other personal information on your own device.
+
+Kivo currently does not require:
+
+- An account
+- Sign-in
+- Cloud storage
+- Online synchronization
+
+Your vault is primarily stored on your device.
+
+------------------------------------------------------------
+
+2. LICENSE TO USE KIVO
+
+Kivo gives you a limited, non-exclusive, non-transferable license to install and use the application for personal use.
+
+You may install Kivo on devices that you own or control.
+
+This license gives you permission to use Kivo. It does not transfer ownership of Kivo itself to you.
+
+Unless separately permitted, you may not:
+
+- Sell or resell Kivo
+- Redistribute modified copies of Kivo
+- Claim Kivo or its branding as your own
+- Remove copyright, license, or ownership notices
+- Use Kivo in a way that violates applicable law
+
+------------------------------------------------------------
+
+3. OWNERSHIP
+
+YOUR DATA
+
+Everything you add to Kivo remains yours.
+
+This includes:
+
+- Notes
+- Files
+- Documents
+- Images
+- Saved links
+- Password entries
+- Collections
+- Tags
+- Other personal information
+
+Kivo does not claim ownership of your vault contents.
+
+KIVO SOFTWARE
+
+The Kivo application, branding, design, logo, source code, and other original parts of Kivo remain the property of the Kivo developer unless otherwise stated.
+
+Third-party components remain subject to their respective licenses.
+
+------------------------------------------------------------
+
+4. WHERE YOUR DATA IS STORED
+
+Kivo is designed as a local-first application.
+
+Your vault data is stored on your device.
+
+Structured information may be stored in Kivo's local database, while files may be stored inside Kivo's application data folder.
+
+When you add a file to Kivo, Kivo may create its own copy inside the Kivo data folder.
+
+Because of this:
+
+- Moving the original file does not necessarily remove the copy stored by Kivo.
+- Deleting the original file does not necessarily remove the copy stored by Kivo.
+- Removing a file from Kivo does not necessarily affect the original file outside Kivo unless clearly stated.
+
+------------------------------------------------------------
+
+5. WHEN KIVO USES THE INTERNET
+
+Kivo is designed to operate primarily offline.
+
+Some actions may require an internet connection.
+
+SAVED LINK ICONS
+
+When you save a website link, Kivo may contact that website or a related service to retrieve a small website icon.
+
+The website may receive normal technical information associated with that request, similar to a request made by a web browser.
+
+Kivo may store downloaded icons locally using internal or non-readable filenames.
+
+This helps prevent the icon storage folder from becoming a readable list of websites stored in your vault.
+
+OPENING EXTERNAL LINKS
+
+When you choose to open a saved website, your default web browser may connect to that website.
+
+That connection is handled by your browser and the website itself.
+
+VAULT CONTENTS
+
+Kivo does not intentionally upload your notes, files, passwords, or other vault contents to a Kivo server.
+
+If future versions introduce optional online services, those features and their data behavior should be disclosed before use.
+
+------------------------------------------------------------
+
+6. BACKUPS ARE YOUR RESPONSIBILITY
+
+Kivo does not guarantee that your local data can always be recovered.
+
+Unless you enable a specific backup feature, Kivo does not automatically create external backups of your vault.
+
+Your vault may be lost if your device is:
+
+- Lost
+- Stolen
+- Damaged
+- Reset
+- Reformatted
+- Affected by hardware failure
+- Affected by file corruption
+
+You should regularly create backups.
+
+You can use:
+
+Settings > Backup and Restore
+
+to create a backup in a folder you choose.
+
+For better protection, keep at least one backup on another device or storage location, such as:
+
+- USB drive
+- External drive
+- Another computer
+- Another secure storage location
+
+Backups can later be restored using Kivo's restore feature.
+
+------------------------------------------------------------
+
+7. APP LOCK AND MASTER PASSWORD
+
+Kivo may allow you to create a Master Password to lock the application.
+
+Setting a Master Password may be optional during initial setup.
+
+You can also configure Kivo to lock automatically after a period of inactivity.
+
+App Lock is designed to prevent casual access to Kivo through the application interface.
+
+However, unless a specific part of your vault is encrypted, App Lock alone does not guarantee that files stored on your computer cannot be accessed directly through the operating system.
+
+Anyone with sufficient access to your computer or storage device may still be able to access unencrypted files.
+
+MASTER PASSWORD RECOVERY
+
+Kivo does not guarantee recovery of your Master Password.
+
+If your Master Password cannot be recovered or reset, you are responsible for keeping it somewhere safe.
+
+------------------------------------------------------------
+
+8. PASSWORD MANAGER
+
+Kivo may include a local Password Manager for storing login credentials.
+
+Password Manager entries may contain:
+
+- Service or website name
+- Username
+- Email address
+- Password
+- Website URL
+- Notes
+- Categories
+- Tags
+
+Saved passwords must not be stored as readable plain text.
+
+Kivo should encrypt saved password information before storing it locally.
+
+Passwords may only be decrypted when the Password Manager is unlocked.
+
+PASSWORD MANAGER PASSWORD
+
+The Password Manager may use its own password or security key.
+
+This password may be separate from the main Kivo App Lock password.
+
+If this password cannot be recovered, encrypted password entries may become permanently inaccessible.
+
+Kivo cannot guarantee recovery of encrypted passwords if the required password or encryption key is lost.
+
+------------------------------------------------------------
+
+9. PASSWORD GENERATOR
+
+Kivo may include a Password Generator.
+
+Generated passwords are created locally and are not automatically saved.
+
+A generated password is only stored if you choose to use and save it as part of a Password Manager entry.
+
+Kivo should use a cryptographically secure random generator for password generation.
+
+The generator may support:
+
+- Password length
+- Uppercase letters
+- Lowercase letters
+- Numbers
+- Symbols
+- Passphrases
+- Character exclusions
+- Password strength estimates
+
+Password strength indicators are estimates and do not guarantee that a password cannot be compromised.
+
+------------------------------------------------------------
+
+10. DELETING ITEMS
+
+Items deleted from Kivo may first be moved to Trash.
+
+Items stored in Trash may be restored.
+
+When an item is permanently deleted from Trash, Kivo will attempt to remove the associated stored data.
+
+Permanent deletion cannot normally be undone.
+
+Before permanently deleting important information, make sure you have any backup you may need.
+
+------------------------------------------------------------
+
+11. UNINSTALLING KIVO
+
+You may uninstall Kivo at any time using your operating system's application management tools.
+
+Uninstalling Kivo removes the application itself.
+
+Your vault data may remain on your device after uninstalling, depending on the installer, operating system, and Kivo configuration.
+
+If you want to preserve your vault, create a backup before uninstalling.
+
+If you want to permanently remove your vault, you may also need to remove Kivo's local application data separately.
+
+------------------------------------------------------------
+
+12. THIRD-PARTY SOFTWARE
+
+Kivo is built using third-party software and open-source libraries.
+
+These may include technologies such as:
+
+- Tauri
+- React
+- Vite
+- HeroUI
+- Tailwind CSS
+- SQLite
+- Rust libraries
+- Other open-source packages
+
+These components remain subject to their own copyright notices and license terms.
+
+Kivo does not claim ownership of third-party software.
+
+------------------------------------------------------------
+
+13. SOFTWARE UPDATES
+
+Kivo may receive updates that:
+
+- Fix bugs
+- Improve security
+- Change the interface
+- Add new features
+- Remove or replace features
+- Change file formats or internal storage behavior
+
+Future versions may behave differently from the version you originally installed.
+
+Important changes affecting privacy, security, or data storage should be disclosed when appropriate.
+
+------------------------------------------------------------
+
+14. KIVO IS PROVIDED "AS IS"
+
+Kivo is still under development and may contain bugs, errors, or unexpected behavior.
+
+To the maximum extent permitted by applicable law, Kivo is provided "as is" and "as available" without guarantees that the application will:
+
+- Always work without interruption
+- Be completely error-free
+- Prevent all forms of data loss
+- Prevent all unauthorized access
+- Be compatible with every device
+- Recover damaged or deleted data
+
+You are responsible for maintaining appropriate backups of important information.
+
+------------------------------------------------------------
+
+15. LIMITATION OF LIABILITY
+
+To the maximum extent permitted by applicable law, the developer of Kivo will not be responsible for indirect, incidental, special, or consequential losses resulting from the use or inability to use Kivo.
+
+This may include loss of:
+
+- Files
+- Notes
+- Passwords
+- Documents
+- Personal information
+- Business information
+- Device data
+
+This limitation does not exclude liability that cannot legally be excluded under applicable law.
+
+------------------------------------------------------------
+
+16. SECURITY
+
+Kivo is designed to provide useful privacy and security features, but no software can guarantee absolute security.
+
+Security may depend on:
+
+- Your operating system
+- Device security
+- Master Password strength
+- Password Manager password strength
+- File-system permissions
+- Backup security
+- Malware or unauthorized software on your device
+
+You are responsible for keeping your device, passwords, and backups secure.
+
+------------------------------------------------------------
+
+17. PERSONAL USE
+
+Kivo is currently provided free for personal use.
+
+Personal use means use primarily for your own private, non-commercial purposes.
+
+Separate terms may apply in the future for:
+
+- Commercial use
+- Business use
+- Organization-wide deployment
+- Enterprise use
+- Paid versions of Kivo
+
+Existing personal vault data remains yours regardless of changes to Kivo's licensing model.
+
+------------------------------------------------------------
+
+18. TERMINATION
+
+Your right to use Kivo may end if you materially violate this agreement.
+
+Ending the software license does not transfer ownership of your personal vault data to Kivo.
+
+You remain responsible for exporting, backing up, or deleting your local data.
+
+------------------------------------------------------------
+
+19. CHANGES TO THIS AGREEMENT
+
+This agreement may be updated as Kivo develops.
+
+Significant changes may be shown inside the application or provided with a future version.
+
+Continued use of a version that requires acceptance of updated terms may require you to accept the new agreement.
+
+------------------------------------------------------------
+
+20. CONTACT
+
+For questions regarding Kivo or this agreement, contact:
+
+Developer: Mark Adrianne Salunga
+Email: markadriannesalunga@personal.com
+
+------------------------------------------------------------
+
+21. AGREEMENT
+
+By clicking "I Agree", installing Kivo, or continuing with the installation, you confirm that:
+
+- You have read this agreement.
+- You understand how Kivo stores and manages your data.
+- You understand that Kivo is primarily a local application.
+- You understand that backups are your responsibility.
+- You understand that passwords and encryption keys may not be recoverable.
+- You agree to these terms.
