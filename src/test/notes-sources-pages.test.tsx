@@ -555,7 +555,8 @@ describe('NoteEditor', () => {
     expect(itemsMock.loadItem).not.toHaveBeenCalled()
     expect(itemsMock.saveItem).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Pin' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Delete Note' })).not.toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Note settings' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete Note' })).toBeDisabled()
   })
 
   it('creates the note on the first change and moves the URL to the saved route', async () => {

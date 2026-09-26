@@ -91,7 +91,7 @@ export function NoteEditor() {
   const contentRef = useRef('')
   const savedRef = useRef({ title: '', content: '' })
   const loadedRef = useRef(false)
-  const draftSavingRef = useRef(false)
+  const draftRef = useRef<Promise<VaultItem | null> | null>(null)
   const createdIdRef = useRef<string | null>(null)
   const editorKeyRef = useRef('draft')
   const metaRef = useRef<EditorMeta>({
@@ -101,6 +101,36 @@ export function NoteEditor() {
     isPinned: false,
   })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Creates the draft's record once; later callers share the same pending save.
+  const createDraft = useCallback((): Promise<VaultItem | null> => {
+    if (draftRef.current) return draftRef.current
+
+    const current = {
+      title: titleRef.current.trim() || UNTITLED,
+      content: contentRef.current,
+    }
+    setSaveStatus('saving')
+
+    draftRef.current = saveItem({ kind: 'note', title: current.title, content: current.content })
+      .then((created) => {
+        createdIdRef.current = created.id
+        savedRef.current = current
+        setItem(created)
+        setSaveStatus('saved')
+        setActionError(null)
+        navigate(`/notes/${created.id}`, { replace: true })
+        return created
+      })
+      .catch(() => {
+        draftRef.current = null
+        setSaveStatus('idle')
+        setActionError('Kivo could not save this note. Your changes are still here. Try again.')
+        return null
+      })
+
+    return draftRef.current
+  }, [navigate])
 
   const flush = useCallback(async () => {
     if (timerRef.current !== null) {
@@ -129,30 +159,7 @@ export function NoteEditor() {
     // A draft has no record yet. The first real change creates one, keeps the
     // new id, and swaps the URL for the saved note's route.
     if (id === 'new') {
-      if (draftSavingRef.current) return
-
-      draftSavingRef.current = true
-      setSaveStatus('saving')
-
-      try {
-        const created = await saveItem({
-          kind: 'note',
-          title: current.title,
-          content: current.content,
-        })
-        createdIdRef.current = created.id
-        savedRef.current = current
-        setItem(created)
-        setSaveStatus('saved')
-        setActionError(null)
-        navigate(`/notes/${created.id}`, { replace: true })
-      } catch {
-        setSaveStatus('idle')
-        setActionError('Kivo could not save this note. Your changes are still here. Try again.')
-      } finally {
-        draftSavingRef.current = false
-      }
-
+      await createDraft()
       return
     }
 
@@ -176,7 +183,7 @@ export function NoteEditor() {
       setSaveStatus('idle')
       setActionError('Kivo could not save this note. Your changes are still here. Try again.')
     }
-  }, [id, navigate])
+  }, [id, createDraft])
 
   const scheduleSave = useCallback(() => {
     if (timerRef.current !== null) clearTimeout(timerRef.current)
@@ -200,6 +207,7 @@ export function NoteEditor() {
     setLoadState('loading')
 
     if (id === 'new') {
+      draftRef.current = null
       setItem(null)
       setTitle('')
       setContent('')
@@ -331,7 +339,13 @@ export function NoteEditor() {
     return () => window.removeEventListener('keydown', onKey)
   }, [item])
 
+  // Side panel changes on a draft create the note first, so they have a record to attach to.
+  async function ensureItem() {
+    return item ?? (await createDraft())
+  }
+
   async function handleTags(next: string[]) {
+    const item = await ensureItem()
     if (!item) return
 
     try {
@@ -343,6 +357,7 @@ export function NoteEditor() {
   }
 
   async function handleCollection(next: string | null) {
+    const item = await ensureItem()
     if (!item) return
     const previousCollection = metaRef.current.collectionId
 
@@ -482,36 +497,34 @@ export function NoteEditor() {
           onChange={handleContentChange}
         />
 
-        {!isDraft && item ? (
-          <div className="grid gap-4">
-            <aside
-              aria-label="Note settings"
-              className="grid gap-4 rounded-3xl border border-default bg-surface p-4"
-            >
-              <NoteTagField
-                itemId={item.id}
-                value={item.tags}
-                onChange={(next) => void handleTags(next)}
-              />
+        <div className="grid gap-4">
+          <aside
+            aria-label="Note settings"
+            className="grid gap-4 rounded-3xl border border-default bg-surface p-4"
+          >
+            <NoteTagField
+              itemId={item?.id ?? ''}
+              value={item?.tags ?? []}
+              onChange={(next) => void handleTags(next)}
+            />
 
-              <Separator />
+            <Separator />
 
-              <CollectionSelect
-                label="Collection"
-                value={item.collectionId}
-                onChange={(next) => void handleCollection(next)}
-              />
-            </aside>
+            <CollectionSelect
+              label="Collection"
+              value={item?.collectionId ?? null}
+              onChange={(next) => void handleCollection(next)}
+            />
+          </aside>
 
-            {preferences.summaries ? <SummaryCard id={item.id} title={title} /> : null}
+          {preferences.summaries && item ? <SummaryCard id={item.id} title={title} /> : null}
 
-             <Button className="w-full" size="lg" variant="danger" onPress={() => setTrashOpen(true)}>
-              <HugeiconsIcon aria-hidden="true" icon={Delete02Icon} size={18} />
-              Delete Note
-             </Button>
-             <Button className="w-full" variant="secondary" onPress={() => { void flush().then(() => setHistoryOpen(true)) }}>Version history</Button>
-          </div>
-        ) : null}
+          <Button className="w-full" isDisabled={isDraft} size="lg" variant="danger" onPress={() => setTrashOpen(true)}>
+            <HugeiconsIcon aria-hidden="true" icon={Delete02Icon} size={18} />
+            Delete Note
+          </Button>
+          <Button className="w-full" isDisabled={isDraft} variant="secondary" onPress={() => { void flush().then(() => setHistoryOpen(true)) }}>Version history</Button>
+        </div>
       </div>
 
       <ConfirmDialog
