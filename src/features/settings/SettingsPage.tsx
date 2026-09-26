@@ -1,15 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Button,
   Card,
+  Description,
   FieldError,
   Input,
   Label,
   Modal,
   Radio,
   RadioGroup,
+  Separator,
   Skeleton,
   Switch,
+  Tabs,
   TextField,
   Typography,
   useOverlayState,
@@ -33,6 +36,7 @@ import {
 import { usePreferences } from '../../app/preferences'
 import PageHeader from '../../app/PageHeader'
 import { notifyError, notifySuccess } from '../../lib/feedback'
+import { cn } from '../../lib/utils'
 import { listIndexState, type IndexState } from '../../data/indexing'
 import { reindexItems } from '../../data/insights'
 import AppLockSettings from '../security/AppLockSettings'
@@ -43,9 +47,15 @@ import { ShortcutsDialog } from '../shortcuts/ShortcutsDialog'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-const stateLabelClass = 'uppercase'
-
 type Choice<Value extends string> = { value: Value; label: string }
+
+const TABS = [
+  { id: 'general', label: 'General' },
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'security', label: 'Security' },
+  { id: 'data', label: 'Data' },
+  { id: 'about', label: 'About' },
+]
 
 const THEME_OPTIONS: Choice<Theme>[] = [
   { value: 'light', label: 'Light' },
@@ -63,63 +73,183 @@ const NAVIGATION_OPTIONS: Choice<NavigationStyle>[] = [
   { value: 'sidebar', label: 'Sidebar' },
 ]
 
-const RESET_PREFERENCES: Preferences = {
+const SMART_FEATURES = [
+  {
+    key: 'semanticSearch',
+    label: 'Smarter search',
+    hint: 'Also finds items with similar words, not only exact matches.',
+  },
+  {
+    key: 'autoTag',
+    label: 'Tag suggestions',
+    hint: 'Suggests tags when you add something new.',
+  },
+  {
+    key: 'summaries',
+    label: 'Note summaries',
+    hint: 'Suggests a short summary for long notes. It is kept only if you save it.',
+  },
+] as const
+
+// Only how Kivo looks goes back to the defaults; the profile, sign-in,
+// security, and smart feature settings stay as they are.
+const RESET_APPEARANCE: Partial<Preferences> = {
   theme: 'dark',
   density: 'comfortable',
-  startAtLogin: false,
+  navigationStyle: 'dock',
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
-  navigationStyle: 'dock',
-  autoLockMinutes: 0,
-  semanticSearch: false,
-  autoTag: false,
-  summaries: false,
 }
 
-const OWNER_REQUIRED_ERROR = 'Owner name is required.'
+const SECTION_TITLE_CLASS = 'text-lg font-semibold'
+const START_AT_LOGIN_LABEL = 'Open Kivo when you sign in'
+
+const OWNER_REQUIRED_ERROR = 'Enter your name.'
 const PROFILE_SAVED_MESSAGE = 'Profile saved.'
-const PROFILE_SAVE_ERROR = 'Kivo could not save your profile. Your changes are still here. Try again.'
-const APPEARANCE_SAVE_ERROR =
-  'Kivo could not save this appearance change. Your saved settings are unchanged.'
-const NATIVE_SAVE_ERROR = 'Kivo could not change the start at login setting on this device.'
+const PROFILE_SAVE_ERROR =
+  'Kivo could not save your profile. Your changes are still here. Try again.'
+const APPEARANCE_SAVE_ERROR = 'Kivo could not save this change. Your settings are unchanged.'
+const NATIVE_SAVE_ERROR = 'Kivo could not change whether it opens when you sign in.'
 const AUTOSTART_NOT_SAVED =
-  'Start at login changed on this device, but Kivo could not save the change.'
-const RESET_SAVE_ERROR = 'Kivo could not reset your preferences. Your saved settings are unchanged.'
-const REINDEX_ERROR = 'Kivo could not rebuild the index. Try again.'
+  'Kivo will open when you sign in as set, but it could not save the change. Try again.'
+const RESET_SAVE_ERROR = 'Kivo could not reset the appearance. Your settings are unchanged.'
+const REINDEX_ERROR = 'Kivo could not refresh search. Try again.'
 
 function SettingsSkeleton({ className }: { className: string }) {
   return <Skeleton aria-hidden="true" className={className} />
 }
 
-function SettingsLoadingCard({
+function SettingsSection({
   children,
+  description,
   id,
   title,
 }: {
   children: ReactNode
+  description?: string
   id: string
   title: string
 }) {
   return (
     <Card aria-labelledby={id}>
-      <Card.Content className="grid gap-3">
-        <Typography id={id} type="h2">
-          {title}
-        </Typography>
+      <Card.Content className="grid gap-4">
+        <div className="grid gap-1">
+          <Typography className={SECTION_TITLE_CLASS} id={id} type="h2">
+            {title}
+          </Typography>
+          {description ? (
+            <Typography color="muted" type="body-sm">
+              {description}
+            </Typography>
+          ) : null}
+        </div>
         {children}
       </Card.Content>
     </Card>
   )
 }
 
-function ChoiceSkeletonRows({ count }: { count: number }) {
-  return Array.from({ length: count }, (_, index) => (
-    <div key={index} className="flex min-h-11 items-center gap-3">
-      <SettingsSkeleton className="size-4 shrink-0 rounded-full" />
-      <SettingsSkeleton className="h-4 w-20 rounded" />
+// Appearance options are cards: a small drawing of the choice above its radio
+// and label. The card is the radio's clickable label, so keyboard and screen
+// reader behavior stay HeroUI's.
+const CHOICE_CARD_CLASS =
+  'flex w-full cursor-pointer flex-col items-stretch gap-2 rounded-2xl border border-separator p-2 transition-colors hover:bg-(--default)/50 group-data-[selected]:border-accent group-data-[selected]:bg-accent/5 data-[focus-visible=true]:outline-2 data-[focus-visible=true]:outline-offset-2 data-[focus-visible=true]:outline-accent'
+
+// Light and dark previews use fixed colors on purpose: each must show its own
+// palette whatever the app theme is right now.
+function MiniWindow({ tone }: { tone: 'light' | 'dark' }) {
+  const light = tone === 'light'
+  return (
+    <div
+      className={cn('flex h-full flex-1 flex-col gap-1.5 p-2', light ? 'bg-white' : 'bg-zinc-900')}
+    >
+      <div className={cn('h-1.5 w-1/2 rounded-full', light ? 'bg-zinc-300' : 'bg-zinc-600')} />
+      <div className={cn('h-1.5 w-3/4 rounded-full', light ? 'bg-zinc-200' : 'bg-zinc-700')} />
+      <div className={cn('h-1.5 w-2/3 rounded-full', light ? 'bg-zinc-200' : 'bg-zinc-700')} />
+      <div className="mt-auto h-2 w-6 rounded-full bg-accent" />
     </div>
-  ))
+  )
+}
+
+function PreviewLines({ count, className }: { count: number; className: string }) {
+  return (
+    <div className={cn('flex flex-1 flex-col', className)}>
+      {Array.from({ length: count }, (_, index) => (
+        <div
+          key={index}
+          className={cn('h-1.5 rounded-full bg-foreground/15', index % 2 ? 'w-3/4' : 'w-full')}
+        />
+      ))}
+    </div>
+  )
+}
+
+function ChoicePreview({ value }: { value: string }) {
+  let drawing: ReactNode
+  if (value === 'light' || value === 'dark') drawing = <MiniWindow tone={value} />
+  else if (value === 'system')
+    drawing = (
+      <div className="flex h-full">
+        <MiniWindow tone="light" />
+        <MiniWindow tone="dark" />
+      </div>
+    )
+  else if (value === 'comfortable')
+    drawing = <PreviewLines count={3} className="h-full gap-2.5 p-2.5" />
+  else if (value === 'compact') drawing = <PreviewLines count={6} className="h-full gap-1 p-1.5" />
+  else if (value === 'dock')
+    drawing = (
+      <div className="relative h-full">
+        <PreviewLines count={2} className="gap-1.5 p-2" />
+        <div className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 gap-1 rounded-full bg-(--default) px-1.5 py-1">
+          <span className="size-1.5 rounded-full bg-accent" />
+          <span className="size-1.5 rounded-full bg-foreground/40" />
+          <span className="size-1.5 rounded-full bg-foreground/40" />
+          <span className="size-1.5 rounded-full bg-foreground/40" />
+        </div>
+      </div>
+    )
+  else
+    drawing = (
+      <div className="flex h-full gap-1.5 p-1.5">
+        <div className="flex w-1/4 flex-col gap-1 rounded-md bg-(--default) p-1">
+          <span className="h-1.5 rounded-full bg-accent" />
+          <span className="h-1.5 rounded-full bg-foreground/30" />
+          <span className="h-1.5 rounded-full bg-foreground/30" />
+        </div>
+        <PreviewLines count={3} className="gap-1.5 py-0.5" />
+      </div>
+    )
+
+  return (
+    <div
+      aria-hidden="true"
+      className="h-16 overflow-hidden rounded-xl border border-separator bg-background"
+    >
+      {drawing}
+    </div>
+  )
+}
+
+// One switch per row, with a short plain hint under it.
+function SettingRow({
+  children,
+  hint,
+  hintId,
+}: {
+  children: ReactNode
+  hint: string
+  hintId: string
+}) {
+  return (
+    <div className="grid gap-0.5">
+      {children}
+      <Typography className="pr-14" color="muted" id={hintId} type="body-sm">
+        {hint}
+      </Typography>
+    </div>
+  )
 }
 
 export default function SettingsPage() {
@@ -333,23 +463,11 @@ export default function SettingsPage() {
     setResetBusy(true)
     setResetError(null)
 
-    let nextStartAtLogin = startAtLogin
-
-    if (startAtLogin) {
-      try {
-        await disableAutostart()
-        nextStartAtLogin = false
-        setStartAtLogin(false)
-      } catch {
-        setStartAtLoginError(NATIVE_SAVE_ERROR)
-      }
-    }
-
     try {
-      await updatePreferences({ ...RESET_PREFERENCES, startAtLogin: nextStartAtLogin })
+      await updatePreferences(RESET_APPEARANCE)
       setAppearanceError(null)
       resetDialog.close()
-      notifySuccess('Preferences reset')
+      notifySuccess('Appearance reset')
     } catch {
       setResetError(RESET_SAVE_ERROR)
       notifyError(RESET_SAVE_ERROR)
@@ -363,7 +481,7 @@ export default function SettingsPage() {
 
     try {
       const report = await reindexItems()
-      notifySuccess('Index rebuilt', `${report.indexed} items indexed, ${report.pending} waiting.`)
+      notifySuccess('Search refreshed', `${report.indexed} items ready, ${report.pending} waiting.`)
       const states = await listIndexState()
       setIndexStates(Array.isArray(states) ? states : [])
     } catch {
@@ -378,7 +496,7 @@ export default function SettingsPage() {
 
   const heading = (
     <PageHeader
-      description="Manage Kivo presentation and local app preferences."
+      description="Choose how Kivo looks, opens, and keeps your things safe."
       title="Settings"
       titleId="settings-title"
     />
@@ -388,79 +506,25 @@ export default function SettingsPage() {
     return (
       <section aria-labelledby="settings-title" className="grid gap-5">
         {heading}
-        <div
-          aria-labelledby="settings-loading-title"
-          aria-live="polite"
-          className="grid gap-5"
-          role="status"
-        >
-          <Typography id="settings-loading-title" type="body">
-            Loading settings
-          </Typography>
-
-          <SettingsLoadingCard id="settings-loading-profile-title" title="Profile">
-            <div className="grid max-w-md gap-4">
-              <div className="grid gap-2">
-                <SettingsSkeleton className="h-4 w-24 rounded" />
-                <SettingsSkeleton className="h-10 w-full rounded-md" />
+        <div aria-label="Loading settings" className="grid gap-5" role="status">
+          <SettingsSkeleton className="h-10 w-96 max-w-full rounded-full" />
+          <Card>
+            <Card.Content className="grid gap-4">
+              <SettingsSkeleton className="h-5 w-24 rounded" />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <SettingsSkeleton className="h-10 w-full rounded-xl" />
+                <SettingsSkeleton className="h-10 w-full rounded-xl" />
               </div>
-              <div className="grid gap-2">
-                <SettingsSkeleton className="h-4 w-20 rounded" />
-                <SettingsSkeleton className="h-10 w-full rounded-md" />
-              </div>
-            </div>
-            <SettingsSkeleton className="h-10 w-32 rounded-md" />
-          </SettingsLoadingCard>
-
-          <SettingsLoadingCard id="settings-loading-appearance-title" title="Appearance">
-            <div className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))]">
-              <div className="grid content-start gap-1">
-                <SettingsSkeleton className="mb-1 h-4 w-14 rounded" />
-                <ChoiceSkeletonRows count={3} />
-              </div>
-              <div className="grid content-start gap-1">
-                <SettingsSkeleton className="mb-1 h-4 w-16 rounded" />
-                <ChoiceSkeletonRows count={2} />
-              </div>
-              <div className="grid content-start gap-1">
-                <SettingsSkeleton className="mb-1 h-4 w-20 rounded" />
-                <ChoiceSkeletonRows count={2} />
-              </div>
-            </div>
-          </SettingsLoadingCard>
-
-          <SettingsLoadingCard id="settings-loading-startup-title" title="Start at login">
-            <div className="flex min-h-11 items-center gap-3">
-              <SettingsSkeleton className="h-6 w-11 rounded-full" />
-              <SettingsSkeleton className="h-4 w-48 rounded" />
-            </div>
-          </SettingsLoadingCard>
-
-          <SettingsLoadingCard id="settings-loading-storage-title" title="Storage">
-            <div className="grid max-w-md gap-2">
-              <div className="flex flex-wrap justify-between gap-2">
-                <SettingsSkeleton className="h-4 w-16 rounded" />
-                <SettingsSkeleton className="h-4 w-24 rounded" />
-              </div>
-            </div>
-            <div className="grid max-w-xl gap-2">
+              <SettingsSkeleton className="h-10 w-28 rounded-full" />
+            </Card.Content>
+          </Card>
+          <Card>
+            <Card.Content className="grid gap-4">
+              <SettingsSkeleton className="h-5 w-32 rounded" />
               <SettingsSkeleton className="h-4 w-full rounded" />
               <SettingsSkeleton className="h-4 w-4/5 rounded" />
-            </div>
-          </SettingsLoadingCard>
-
-          <SettingsLoadingCard id="settings-loading-about-title" title="App information">
-            <dl className="grid max-w-md gap-2">
-              <div className="flex flex-wrap justify-between gap-2">
-                <SettingsSkeleton className="h-4 w-10 rounded" />
-                <SettingsSkeleton className="h-4 w-20 rounded" />
-              </div>
-              <div className="flex flex-wrap justify-between gap-2">
-                <SettingsSkeleton className="h-4 w-14 rounded" />
-                <SettingsSkeleton className="h-4 w-12 rounded" />
-              </div>
-            </dl>
-          </SettingsLoadingCard>
+            </Card.Content>
+          </Card>
         </div>
       </section>
     )
@@ -472,14 +536,11 @@ export default function SettingsPage() {
         {heading}
         <Card aria-labelledby="settings-error-title" className="border-danger" role="alert">
           <Card.Content className="grid gap-2">
-            <Typography className={stateLabelClass} color="muted" type="body-xs" weight="bold">
-              ERROR
-            </Typography>
-            <Typography id="settings-error-title" type="h2">
+            <Typography className={SECTION_TITLE_CLASS} id="settings-error-title" type="h2">
               Settings could not load
             </Typography>
             <Typography color="muted" type="body">
-              Kivo could not read your preferences. Try again to reload this screen.
+              Kivo could not read your settings. Try again to reload this screen.
             </Typography>
             <Button
               className="justify-self-start"
@@ -494,351 +555,326 @@ export default function SettingsPage() {
     )
   }
 
+  const choiceGroups = [
+    {
+      name: 'theme',
+      label: 'Theme',
+      hint: 'Light, dark, or match your computer.',
+      value: preferences.theme,
+      options: THEME_OPTIONS,
+      onChange: (value: string) => void handleAppearanceChange({ theme: value as Theme }),
+    },
+    {
+      name: 'density',
+      label: 'Spacing',
+      hint: 'How much room Kivo leaves around things.',
+      value: preferences.density,
+      options: DENSITY_OPTIONS,
+      onChange: (value: string) => void handleAppearanceChange({ density: value as Density }),
+    },
+    {
+      name: 'navigation',
+      label: 'Menu style',
+      hint: 'A dock at the bottom, or a sidebar on the left.',
+      value: preferences.navigationStyle,
+      options: NAVIGATION_OPTIONS,
+      onChange: (value: string) =>
+        void handleAppearanceChange({ navigationStyle: value as NavigationStyle }),
+    },
+  ]
+
   return (
     <section aria-labelledby="settings-title" className="grid gap-5">
       {heading}
 
-      <Card aria-labelledby="settings-profile-title">
-        <Card.Content className="grid gap-3">
-          <Typography id="settings-profile-title" type="h2">
-            Profile
-          </Typography>
-          <Typography color="muted" type="body">
-            Your name and vault name appear on the Dashboard and in this vault.
-          </Typography>
+      <Tabs defaultSelectedKey="general">
+        <Tabs.ListContainer className="overflow-x-auto">
+          <Tabs.List aria-label="Settings sections" className="w-fit">
+            {TABS.map((tab) => (
+              <Tabs.Tab key={tab.id} id={tab.id}>
+                {tab.label}
+                <Tabs.Indicator />
+              </Tabs.Tab>
+            ))}
+          </Tabs.List>
+        </Tabs.ListContainer>
 
-          <div className="grid max-w-md gap-4">
-          <TextField
-            isRequired
-            isInvalid={ownerError !== null}
-            value={ownerName}
-            onChange={(value) => {
-              setOwnerName(value)
-              setOwnerError(null)
-              setProfileSaved(false)
-            }}
+        <Tabs.Panel className="grid gap-5 pt-5" id="general">
+          <SettingsSection
+            description="Your name and vault name appear on the Dashboard."
+            id="settings-profile-title"
+            title="Profile"
           >
-            <Label>Owner name</Label>
-            <Input fullWidth autoComplete="name" variant="secondary" />
-            {ownerError ? <FieldError>{ownerError}</FieldError> : null}
-          </TextField>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                isRequired
+                isInvalid={ownerError !== null}
+                value={ownerName}
+                onChange={(value) => {
+                  setOwnerName(value)
+                  setOwnerError(null)
+                  setProfileSaved(false)
+                }}
+              >
+                <Label>Your name</Label>
+                <Input fullWidth autoComplete="name" variant="secondary" />
+                {ownerError ? <FieldError>{ownerError}</FieldError> : null}
+              </TextField>
 
-          <TextField
-            value={vaultName}
-            onChange={(value) => {
-              setVaultName(value)
-              setProfileSaved(false)
-            }}
-          >
-            <Label>Vault name</Label>
-            <Input fullWidth variant="secondary" />
-          </TextField>
-        </div>
-
-        {profileSaveError ? (
-          <Typography className="font-semibold text-danger" role="alert" type="body">
-            {profileSaveError}
-          </Typography>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button isDisabled={profileSaving} onPress={handleSaveProfile}>
-            Save profile
-          </Button>
-          <Typography aria-live="polite" className="font-bold text-accent" type="body">
-            {profileSaved ? PROFILE_SAVED_MESSAGE : ''}
-          </Typography>
-        </div>
-        </Card.Content>
-      </Card>
-
-      <Card aria-labelledby="settings-appearance-title">
-        <Card.Content className="grid gap-3">
-          <Typography id="settings-appearance-title" type="h2">
-            Appearance
-          </Typography>
-          <Typography color="muted" type="body">
-            These preferences change how Kivo looks on this device.
-          </Typography>
-
-          <div className="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))]">
-          <RadioGroup
-            name="theme"
-            value={preferences.theme}
-            onChange={(value) => void handleAppearanceChange({ theme: value as Theme })}
-          >
-            <Label>Theme</Label>
-            <div className="mt-1 grid gap-1">
-              {THEME_OPTIONS.map((option) => (
-                <Radio key={option.value} className="min-h-11" value={option.value}>
-                  <Radio.Content>
-                    <Radio.Control>
-                      <Radio.Indicator />
-                    </Radio.Control>
-                    {option.label}
-                  </Radio.Content>
-                </Radio>
-              ))}
+              <TextField
+                value={vaultName}
+                onChange={(value) => {
+                  setVaultName(value)
+                  setProfileSaved(false)
+                }}
+              >
+                <Label>Vault name</Label>
+                <Input fullWidth variant="secondary" />
+              </TextField>
             </div>
-          </RadioGroup>
 
-          <RadioGroup
-            name="density"
-            value={preferences.density}
-            onChange={(value) => void handleAppearanceChange({ density: value as Density })}
+            {profileSaveError ? (
+              <Typography className="font-semibold text-danger" role="alert" type="body">
+                {profileSaveError}
+              </Typography>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button isDisabled={profileSaving} onPress={handleSaveProfile}>
+                Save profile
+              </Button>
+              <Typography aria-live="polite" className="font-semibold text-accent" type="body-sm">
+                {profileSaved ? PROFILE_SAVED_MESSAGE : ''}
+              </Typography>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection id="settings-startup-title" title="Startup and shortcuts">
+            <SettingRow
+              hint="Kivo opens by itself when you sign in to this computer."
+              hintId="settings-startup-hint"
+            >
+              <Switch
+                aria-describedby="settings-startup-hint"
+                className="w-full"
+                isDisabled={startAtLoginBusy}
+                isSelected={startAtLogin}
+                onChange={(enabled) => void handleStartAtLoginChange(enabled)}
+              >
+                <Switch.Content className="w-full justify-between">
+                  <span className="font-medium">{START_AT_LOGIN_LABEL}</span>
+                  <Switch.Control>
+                    <Switch.Thumb />
+                  </Switch.Control>
+                </Switch.Content>
+              </Switch>
+            </SettingRow>
+            {startAtLoginError ? (
+              <Typography className="font-semibold text-danger" role="alert" type="body-sm">
+                {startAtLoginError}
+              </Typography>
+            ) : null}
+            <Separator />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="grid gap-0.5">
+                <Typography type="body" weight="medium">
+                  Keyboard shortcuts
+                </Typography>
+                <Typography color="muted" type="body-sm">
+                  Keys for search, quick add, and moving between pages.
+                </Typography>
+              </div>
+              <Button variant="secondary" onPress={() => setShortcutsOpen(true)}>
+                Show shortcuts
+              </Button>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            description="Optional helpers. They run on this device and never send anything online."
+            id="settings-smart-title"
+            title="Smart features"
           >
-            <Label>Density</Label>
-            <div className="mt-1 grid gap-1">
-              {DENSITY_OPTIONS.map((option) => (
-                <Radio key={option.value} className="min-h-11" value={option.value}>
-                  <Radio.Content>
-                    <Radio.Control>
-                      <Radio.Indicator />
-                    </Radio.Control>
-                    {option.label}
-                  </Radio.Content>
-                </Radio>
-              ))}
-            </div>
-          </RadioGroup>
-
-          <RadioGroup
-            name="navigation"
-            value={preferences.navigationStyle}
-            onChange={(value) =>
-              void handleAppearanceChange({ navigationStyle: value as NavigationStyle })
-            }
-          >
-            <Label>Navigation</Label>
-            <div className="mt-1 grid gap-1">
-              {NAVIGATION_OPTIONS.map((option) => (
-                <Radio key={option.value} className="min-h-11" value={option.value}>
-                  <Radio.Content>
-                    <Radio.Control>
-                      <Radio.Indicator />
-                    </Radio.Control>
-                    {option.label}
-                  </Radio.Content>
-                </Radio>
-              ))}
-            </div>
-          </RadioGroup>
-        </div>
-
-        {appearanceError ? (
-          <Typography className="font-semibold text-danger" role="alert" type="body">
-            {appearanceError}
-          </Typography>
-        ) : null}
-        </Card.Content>
-      </Card>
-
-      <Card aria-labelledby="settings-startup-title">
-        <Card.Content className="grid gap-3">
-          <Typography id="settings-startup-title" type="h2">
-            Start at login
-          </Typography>
-          <Typography color="muted" type="body">
-            Choose whether Kivo opens when you sign in to this device.
-          </Typography>
-
-          <Switch
-          isDisabled={startAtLoginBusy}
-          isSelected={startAtLogin}
-          onChange={(enabled) => void handleStartAtLoginChange(enabled)}
-        >
-          <Switch.Content>
-            <Switch.Control>
-              <Switch.Thumb />
-            </Switch.Control>
-            Start Kivo when you sign in
-          </Switch.Content>
-        </Switch>
-
-        {startAtLoginError ? (
-          <Typography className="font-semibold text-danger" role="alert" type="body">
-            {startAtLoginError}
-          </Typography>
-        ) : null}
-        </Card.Content>
-      </Card>
-
-      <AppLockSettings />
-      <EncryptionSettings />
-      <BackupSettings />
-      <PortabilitySettings />
-
-      <Card aria-labelledby="settings-advanced-title">
-        <Card.Content className="grid gap-3">
-          <Typography id="settings-advanced-title" type="h2">
-            Advanced features
-          </Typography>
-          <Typography color="muted" type="body">
-            These features run on this device and are off until you turn them on.
-          </Typography>
-
-          <div className="grid gap-1">
-            <Switch
-              isSelected={preferences.semanticSearch}
-              onChange={(enabled) => void handleAppearanceChange({ semanticSearch: enabled })}
-            >
-              <Switch.Content>
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-                Related search
-              </Switch.Content>
-            </Switch>
-            <Typography color="muted" type="body-xs">
-              Ranks your items when they share words with the search. Runs on this device. No AI
-              model and no network.
-            </Typography>
-          </div>
-
-          <div className="grid gap-1">
-            <Switch
-              isSelected={preferences.autoTag}
-              onChange={(enabled) => void handleAppearanceChange({ autoTag: enabled })}
-            >
-              <Switch.Content>
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-                Tag suggestions
-              </Switch.Content>
-            </Switch>
-            <Typography color="muted" type="body-xs">
-              Suggestions are created on this device; nothing is sent anywhere.
-            </Typography>
-          </div>
-
-          <div className="grid gap-1">
-            <Switch
-              isSelected={preferences.summaries}
-              onChange={(enabled) => void handleAppearanceChange({ summaries: enabled })}
-            >
-              <Switch.Content>
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
-                Note summaries
-              </Switch.Content>
-            </Switch>
-            <Typography color="muted" type="body-xs">
-              Picks the most representative sentences from a note. Made on this device. A summary
-              is only kept if you save it.
-            </Typography>
-          </div>
-
-          <Typography aria-live="polite" color="muted" type="body-xs">
-            Index: {indexReady} items ready, {indexWaiting} waiting.
-          </Typography>
-
-          {preferences.semanticSearch ? (
-            <Button
-              className="justify-self-start"
-              isDisabled={reindexBusy}
-              variant="secondary"
-              onPress={() => void handleReindex()}
-            >
-              Re-index now
-            </Button>
-          ) : null}
-        </Card.Content>
-      </Card>
-
-      <Card aria-labelledby="settings-shortcuts-title"><Card.Content className="grid gap-3"><Typography id="settings-shortcuts-title" type="h2">Keyboard shortcuts</Typography><Typography color="muted" type="body">See the fixed keys for search, quick actions, and navigation.</Typography><Button className="justify-self-start" variant="secondary" onPress={() => setShortcutsOpen(true)}>Show shortcuts</Button></Card.Content></Card>
-      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-
-      <Card aria-labelledby="settings-storage-title">
-        <Card.Content className="grid gap-3">
-          <Typography id="settings-storage-title" type="h2">
-            Storage
-          </Typography>
-          <dl className="grid max-w-md gap-2">
-            <div className="flex flex-wrap justify-between gap-2">
-              <dt className="text-muted">Storage</dt>
-              <dd className="m-0 font-bold">This Device</dd>
-            </div>
-          </dl>
-          <Typography color="muted" type="body">
-            Your vault is stored on this device only. Kivo does not send your data anywhere.
-          </Typography>
-        </Card.Content>
-      </Card>
-
-      <Card aria-labelledby="settings-about-title">
-        <Card.Content className="grid gap-3">
-          <Typography id="settings-about-title" type="h2">
-            App information
-          </Typography>
-          {appName || appVersion ? (
-            <dl className="grid max-w-md gap-2">
-              {appName ? (
-                <div className="flex flex-wrap justify-between gap-2">
-                  <dt className="text-muted">App</dt>
-                  <dd className="m-0 font-bold">{appName}</dd>
-                </div>
-              ) : null}
-              {appVersion ? (
-                <div className="flex flex-wrap justify-between gap-2">
-                  <dt className="text-muted">Version</dt>
-                  <dd className="m-0 font-bold">{appVersion}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : (
-            <Typography color="muted" type="body">
-              App information is not available in this environment.
-            </Typography>
-          )}
-        </Card.Content>
-      </Card>
-
-      <Card aria-labelledby="settings-reset-title">
-        <Card.Content className="grid gap-3">
-          <Typography id="settings-reset-title" type="h2">
-            Reset presentation preferences
-          </Typography>
-          <Typography color="muted" type="body">
-            Reset theme, density, navigation, content width, and start at login. Your profile and app
-            lock stay the same.
-          </Typography>
-          <Modal state={resetDialog}>
-            <Button ref={resetTriggerRef} className="justify-self-start" variant="secondary">
-              Reset preferences
-            </Button>
-            <Modal.Backdrop>
-              <Modal.Container>
-                <Modal.Dialog>
-                  <Modal.Header>
-                    <Modal.Heading>Reset presentation preferences?</Modal.Heading>
-                  </Modal.Header>
-                  <Modal.Body>
-                    <Typography type="body">
-                      This resets theme, density, navigation, content width, and start at login.
-                      Your profile and app lock stay the same.
+            {SMART_FEATURES.map((feature, index) => (
+              <Fragment key={feature.key}>
+                {index > 0 ? <Separator /> : null}
+                <SettingRow hint={feature.hint} hintId={`settings-${feature.key}-hint`}>
+                  <Switch
+                    aria-describedby={`settings-${feature.key}-hint`}
+                    className="w-full"
+                    isSelected={preferences[feature.key]}
+                    onChange={(enabled) => void handleAppearanceChange({ [feature.key]: enabled })}
+                  >
+                    <Switch.Content className="w-full justify-between">
+                      <span className="font-medium">{feature.label}</span>
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                    </Switch.Content>
+                  </Switch>
+                </SettingRow>
+                {feature.key === 'semanticSearch' && preferences.semanticSearch ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-(--default) px-4 py-3">
+                    <Typography aria-live="polite" type="body-sm">
+                      {indexWaiting
+                        ? `Search is ready for ${indexReady} items. ${indexWaiting} still waiting.`
+                        : indexReady
+                          ? `Search is ready for all ${indexReady} items.`
+                          : 'Nothing to search yet.'}
                     </Typography>
-                    {resetError ? (
-                      <Typography className="font-semibold text-danger" role="alert" type="body">
-                        {resetError}
-                      </Typography>
-                    ) : null}
-                  </Modal.Body>
-                  <Modal.Footer>
-                    <Button isDisabled={resetBusy} variant="secondary" onPress={resetDialog.close}>
-                      Cancel
+                    <Button
+                      isDisabled={reindexBusy}
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => void handleReindex()}
+                    >
+                      {reindexBusy ? 'Refreshing...' : 'Refresh search'}
                     </Button>
-                    <Button isDisabled={resetBusy} onPress={() => void handleResetPreferences()}>
-                      Yes, reset preferences
-                    </Button>
-                  </Modal.Footer>
-                </Modal.Dialog>
-              </Modal.Container>
-            </Modal.Backdrop>
-          </Modal>
-        </Card.Content>
-      </Card>
+                  </div>
+                ) : null}
+              </Fragment>
+            ))}
+          </SettingsSection>
+        </Tabs.Panel>
+
+        <Tabs.Panel className="grid gap-5 pt-5" id="appearance">
+          <SettingsSection id="settings-appearance-title" title="Appearance">
+            {choiceGroups.map((group, index) => (
+              <Fragment key={group.name}>
+                {index > 0 ? <Separator /> : null}
+                <RadioGroup
+                  className="grid gap-3"
+                  name={group.name}
+                  orientation="horizontal"
+                  value={group.value}
+                  variant="secondary"
+                  onChange={group.onChange}
+                >
+                  <div className="grid gap-0.5">
+                    <Label className="text-base font-medium">{group.label}</Label>
+                    <Description className="text-sm">{group.hint}</Description>
+                  </div>
+                  {/* Three columns for every group, so cards keep one width
+                      whether a group has two options or three. */}
+                  <div className="grid max-w-2xl grid-cols-3 gap-3 max-sm:grid-cols-2">
+                    {group.options.map((option) => (
+                      <Radio key={option.value} className="group" value={option.value}>
+                        <Radio.Content className={CHOICE_CARD_CLASS}>
+                          <ChoicePreview value={option.value} />
+                          <span className="flex items-center gap-2 px-1 pb-0.5">
+                            <Radio.Control>
+                              <Radio.Indicator />
+                            </Radio.Control>
+                            {option.label}
+                          </span>
+                        </Radio.Content>
+                      </Radio>
+                    ))}
+                  </div>
+                </RadioGroup>
+              </Fragment>
+            ))}
+
+            {appearanceError ? (
+              <Typography className="font-semibold text-danger" role="alert" type="body-sm">
+                {appearanceError}
+              </Typography>
+            ) : null}
+          </SettingsSection>
+
+          <SettingsSection id="settings-reset-title" title="Reset appearance">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Typography color="muted" type="body-sm">
+                Puts theme, spacing, menu style, and page layouts back to how they started.
+              </Typography>
+              <Modal state={resetDialog}>
+                <Button ref={resetTriggerRef} variant="secondary">
+                  Reset appearance
+                </Button>
+                <Modal.Backdrop>
+                  <Modal.Container>
+                    <Modal.Dialog>
+                      <Modal.Header>
+                        <Modal.Heading>Reset appearance?</Modal.Heading>
+                      </Modal.Header>
+                      <Modal.Body>
+                        <Typography type="body">
+                          Theme, spacing, menu style, and page layouts go back to how they started.
+                          Your profile, password, and data stay the same.
+                        </Typography>
+                        {resetError ? (
+                          <Typography
+                            className="font-semibold text-danger"
+                            role="alert"
+                            type="body"
+                          >
+                            {resetError}
+                          </Typography>
+                        ) : null}
+                      </Modal.Body>
+                      <Modal.Footer>
+                        <Button
+                          isDisabled={resetBusy}
+                          variant="secondary"
+                          onPress={resetDialog.close}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          isDisabled={resetBusy}
+                          onPress={() => void handleResetPreferences()}
+                        >
+                          Yes, reset
+                        </Button>
+                      </Modal.Footer>
+                    </Modal.Dialog>
+                  </Modal.Container>
+                </Modal.Backdrop>
+              </Modal>
+            </div>
+          </SettingsSection>
+        </Tabs.Panel>
+
+        <Tabs.Panel className="grid gap-5 pt-5" id="security">
+          <AppLockSettings />
+          <EncryptionSettings />
+        </Tabs.Panel>
+
+        <Tabs.Panel className="grid gap-5 pt-5" id="data">
+          <Typography color="muted" type="body-sm">
+            Your vault is saved on this device only. Kivo never sends it anywhere.
+          </Typography>
+          <BackupSettings />
+          <PortabilitySettings />
+        </Tabs.Panel>
+
+        <Tabs.Panel className="grid gap-5 pt-5" id="about">
+          <SettingsSection id="settings-about-title" title="About Kivo">
+            {appName || appVersion ? (
+              <dl className="grid max-w-md gap-2">
+                {appName ? (
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <dt className="text-muted">App</dt>
+                    <dd className="m-0 font-semibold">{appName}</dd>
+                  </div>
+                ) : null}
+                {appVersion ? (
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <dt className="text-muted">Version</dt>
+                    <dd className="m-0 font-semibold">{appVersion}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : (
+              <Typography color="muted" type="body">
+                App details are not available here.
+              </Typography>
+            )}
+          </SettingsSection>
+        </Tabs.Panel>
+      </Tabs>
+
+      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </section>
   )
 }

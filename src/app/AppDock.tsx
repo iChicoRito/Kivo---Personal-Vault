@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from '@hugeicons/react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import { NavLink } from 'react-router-dom'
 
 import { Dock, DockIcon } from '../components/ui/dock'
@@ -19,16 +19,10 @@ const STIFFNESS = 0.18
 const DAMPING = 0.8
 const TARGET_DECAY = 0.88
 
-export default function AppDock() {
-  const navRef = useRef<HTMLElement>(null)
-
-  // The dock hangs at the bottom like a weighted object: scrolling drags it in
-  // the scroll's direction and the spring swings it home once the page
-  // settles, so it joins the motion of the page instead of jumping out of the
-  // way. The transform is written straight to the node each frame; routing it
-  // through state would re-render the nav sixty times a second.
+// Shared with the sidebar so both navigation styles move with the page the same way.
+export function useScrollDrag(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
-    const nav = navRef.current
+    const nav = ref.current
     const scroller = document.getElementById('kivo-main')
     if (!nav || !scroller) return
 
@@ -80,6 +74,11 @@ export default function AppDock() {
       if (frame) cancelAnimationFrame(frame)
     }
   }, [])
+}
+
+export default function AppDock() {
+  const navRef = useRef<HTMLElement>(null)
+  useScrollDrag(navRef)
 
   return (
     // The dock floats over the bottom of the page area instead of holding a row

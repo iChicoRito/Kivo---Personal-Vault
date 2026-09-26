@@ -271,14 +271,14 @@ export function PasswordsPage() {
         titleId="passwords-title"
       />
 
-      <Tabs className="w-full" defaultSelectedKey="passwords" variant="secondary">
+      <Tabs className="w-full" defaultSelectedKey="passwords">
         <Tabs.ListContainer>
           <Tabs.List aria-label="Password sections">
-            <Tabs.Tab className="h-12 text-base" id="passwords">
+            <Tabs.Tab id="passwords">
               Password Vault
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab className="h-12 text-base" id="generator">
+            <Tabs.Tab id="generator">
               Password Generator
               <Tabs.Indicator />
             </Tabs.Tab>

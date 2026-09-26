@@ -1,5 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Button, Card, Input, Label, Radio, RadioGroup, Skeleton, TextField, Typography } from '@heroui/react'
+import {
+  Button,
+  Card,
+  Description,
+  Input,
+  Label,
+  Radio,
+  RadioGroup,
+  Separator,
+  Skeleton,
+  TextField,
+  Typography,
+} from '@heroui/react'
 
 import {
   hasAppLock,
@@ -13,6 +25,8 @@ import { changeMasterPassword, readProtectionState } from '../../data/protection
 import { usePreferences } from '../../app/preferences'
 
 type Mode = 'loading' | 'off' | 'on' | 'error'
+
+const AUTO_LOCK_MINUTES = [0, 5, 15, 30, 60]
 
 const EMPTY_PASSWORD_MESSAGE = 'Enter a Master Password.'
 const EMPTY_CURRENT_MESSAGE = 'Enter your current Master Password.'
@@ -32,6 +46,7 @@ export default function AppLockSettings() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmingRemoval, setConfirmingRemoval] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
   const busyRef = useRef(false)
   const { preferences, updatePreferences } = usePreferences()
   const [autoLockError, setAutoLockError] = useState<string | null>(null)
@@ -120,6 +135,7 @@ export default function AppLockSettings() {
     try {
       await changeMasterPassword(currentPassword, newPassword)
       resetFields()
+      setChangingPassword(false)
       setStatusMessage('Your Master Password was changed.')
       notifySuccess('Master password changed')
     } catch {
@@ -129,6 +145,18 @@ export default function AppLockSettings() {
       busyRef.current = false
       setBusy(false)
     }
+  }
+
+  function beginPasswordChange() {
+    setError(null)
+    setStatusMessage(null)
+    setChangingPassword(true)
+  }
+
+  function cancelPasswordChange() {
+    setError(null)
+    resetFields()
+    setChangingPassword(false)
   }
 
   function beginRemoval() {
@@ -189,97 +217,139 @@ export default function AppLockSettings() {
 
   return (
     <Card aria-labelledby="app-lock-title">
-      <Card.Content className="grid gap-3">
-        <Typography id="app-lock-title" type="h2">
-          App lock
-        </Typography>
-        <Typography color="muted" type="body">
-          App lock keeps Kivo closed to other people. It does not encrypt your files.
-        </Typography>
-        <Typography color="muted" type="body">If you forget your Master Password, encrypted content cannot be recovered.</Typography>
+      <Card.Content className="grid gap-4">
+        <div className="grid gap-1">
+          <Typography className="text-lg font-semibold" id="app-lock-title" type="h2">
+            App lock
+          </Typography>
+          <Typography color="muted" type="body-sm">
+            Ask for your Master Password each time Kivo opens.
+          </Typography>
+        </div>
 
         {statusMessage ? (
-          <Typography role="status" type="body">
+          <Typography role="status" type="body-sm">
             {statusMessage}
           </Typography>
         ) : null}
 
-        <div>
-          {mode === 'loading' && (
-            <div className="flex items-center gap-2">
-              <Typography color="muted" role="status" type="body">
-                Checking app lock...
-              </Typography>
-              <Skeleton aria-hidden="true" className="h-4 w-20 rounded" />
-            </div>
-          )}
-
-          {mode === 'error' && (
-            <Typography className="font-semibold text-danger" role="alert" type="body">
-              {READ_ERROR_MESSAGE}
+        {mode === 'loading' && (
+          <div className="flex items-center gap-2">
+            <Typography color="muted" role="status" type="body-sm">
+              Checking app lock...
             </Typography>
-          )}
+            <Skeleton aria-hidden="true" className="h-4 w-20 rounded" />
+          </div>
+        )}
 
-          {mode === 'off' && (
-            <div className="flex flex-col gap-5">
-              <Typography type="h3">App lock is off.</Typography>
-              <Typography color="muted" type="body">
-                Turn on app lock to ask for a Master Password when Kivo opens.
-              </Typography>
+        {mode === 'error' && (
+          <Typography className="font-semibold text-danger" role="alert" type="body">
+            {READ_ERROR_MESSAGE}
+          </Typography>
+        )}
 
-              <form className="flex flex-col gap-4" noValidate onSubmit={(event) => void turnOn(event)}>
-                <TextField
-                  isInvalid={error !== null}
-                  type="password"
-                  value={newPassword}
-                  onChange={setNewPassword}
-                >
-                  <Label>Master Password</Label>
-                  <Input fullWidth autoComplete="new-password" variant="secondary" />
-                </TextField>
+        {mode === 'off' && (
+          <form className="grid gap-4" noValidate onSubmit={(event) => void turnOn(event)}>
+            <Typography type="body" weight="medium">
+              App lock is off.
+            </Typography>
 
-                <TextField
-                  isInvalid={error !== null}
-                  type="password"
-                  value={confirmPassword}
-                  onChange={setConfirmPassword}
-                >
-                  <Label>Confirm Master Password</Label>
-                  <Input fullWidth autoComplete="new-password" variant="secondary" />
-                </TextField>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                isInvalid={error !== null}
+                type="password"
+                value={newPassword}
+                onChange={setNewPassword}
+              >
+                <Label>Master Password</Label>
+                <Input fullWidth autoComplete="new-password" variant="secondary" />
+              </TextField>
 
-                {error ? (
-                  <Typography className="font-semibold text-danger" role="alert" type="body">
-                    {error}
-                  </Typography>
-                ) : null}
-
-                <div className="flex justify-end">
-                  <Button isDisabled={busy} type="submit" onPress={() => void turnOn()}>
-                    {busy ? 'Saving...' : 'Turn on app lock'}
-                  </Button>
-                </div>
-              </form>
+              <TextField
+                isInvalid={error !== null}
+                type="password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+              >
+                <Label>Confirm Master Password</Label>
+                <Input fullWidth autoComplete="new-password" variant="secondary" />
+              </TextField>
             </div>
-          )}
 
-          {mode === 'on' && (
-            <div className="flex flex-col gap-6">
-              <Typography type="h3">App lock is on.</Typography>
-              <RadioGroup name="auto-lock" value={String(preferences.autoLockMinutes)} onChange={(value) => {
+            {error ? (
+              <Typography className="font-semibold text-danger" role="alert" type="body-sm">
+                {error}
+              </Typography>
+            ) : null}
+
+            <Button
+              className="justify-self-start"
+              isDisabled={busy}
+              type="submit"
+              onPress={() => void turnOn()}
+            >
+              {busy ? 'Saving...' : 'Turn on app lock'}
+            </Button>
+          </form>
+        )}
+
+        {mode === 'on' && (
+          <div className="grid gap-4">
+            <Typography type="body" weight="medium">
+              App lock is on.
+            </Typography>
+
+            <Separator />
+
+            <RadioGroup
+              className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3"
+              name="auto-lock"
+              orientation="horizontal"
+              variant="secondary"
+              value={String(preferences.autoLockMinutes)}
+              onChange={(value) => {
                 setAutoLockError(null)
-                void updatePreferences({ autoLockMinutes: Number(value) }).catch(() => setAutoLockError('Could not save automatic lock setting. Try again.'))
-              }}>
-                <Label>Lock after inactivity</Label>
-                <div className="grid gap-1">{[0, 5, 15, 30, 60].map((minutes) => <Radio className="min-h-11" key={minutes} value={String(minutes)}><Radio.Content><Radio.Control><Radio.Indicator /></Radio.Control>{minutes ? `${minutes} minutes` : 'Off'}</Radio.Content></Radio>)}</div>
-              </RadioGroup>
-              {autoLockError ? <Typography role="alert" className="text-danger" type="body">{autoLockError}</Typography> : null}
+                void updatePreferences({ autoLockMinutes: Number(value) }).catch(() =>
+                  setAutoLockError('Could not save this setting. Try again.'),
+                )
+              }}
+            >
+              <div className="grid gap-0.5">
+                <Label className="text-base font-medium">Lock after inactivity</Label>
+                <Description className="text-sm">
+                  Locks Kivo when you have not used it for a while.
+                </Description>
+              </div>
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                {AUTO_LOCK_MINUTES.map((minutes) => (
+                  <Radio className="min-h-11" key={minutes} value={String(minutes)}>
+                    <Radio.Content>
+                      <Radio.Control>
+                        <Radio.Indicator />
+                      </Radio.Control>
+                      {minutes ? `${minutes} min` : 'Never'}
+                    </Radio.Content>
+                  </Radio>
+                ))}
+              </div>
+            </RadioGroup>
+            {autoLockError ? (
+              <Typography role="alert" className="text-danger" type="body-sm">
+                {autoLockError}
+              </Typography>
+            ) : null}
 
+            <Separator />
+
+            {changingPassword ? (
               <form
-                className="flex flex-col gap-4"
+                className="grid gap-4"
                 noValidate
                 onSubmit={(event) => void changePassword(event)}
               >
+                <Typography type="body" weight="medium">
+                  Change password
+                </Typography>
                 <TextField
                   isInvalid={error !== null}
                   type="password"
@@ -290,97 +360,111 @@ export default function AppLockSettings() {
                   <Input fullWidth autoComplete="current-password" variant="secondary" />
                 </TextField>
 
-                <TextField
-                  isInvalid={error !== null}
-                  type="password"
-                  value={newPassword}
-                  onChange={setNewPassword}
-                >
-                  <Label>New Master Password</Label>
-                  <Input fullWidth autoComplete="new-password" variant="secondary" />
-                </TextField>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextField
+                    isInvalid={error !== null}
+                    type="password"
+                    value={newPassword}
+                    onChange={setNewPassword}
+                  >
+                    <Label>New Master Password</Label>
+                    <Input fullWidth autoComplete="new-password" variant="secondary" />
+                  </TextField>
 
-                <TextField
-                  isInvalid={error !== null}
-                  type="password"
-                  value={confirmPassword}
-                  onChange={setConfirmPassword}
-                >
-                  <Label>Confirm New Master Password</Label>
-                  <Input fullWidth autoComplete="new-password" variant="secondary" />
-                </TextField>
+                  <TextField
+                    isInvalid={error !== null}
+                    type="password"
+                    value={confirmPassword}
+                    onChange={setConfirmPassword}
+                  >
+                    <Label>Confirm New Master Password</Label>
+                    <Input fullWidth autoComplete="new-password" variant="secondary" />
+                  </TextField>
+                </div>
 
                 {error ? (
-                  <Typography className="font-semibold text-danger" role="alert" type="body">
+                  <Typography className="font-semibold text-danger" role="alert" type="body-sm">
                     {error}
                   </Typography>
                 ) : null}
 
-                <div className="flex justify-end">
+                <div className="flex flex-wrap gap-3">
                   <Button isDisabled={busy} type="submit" onPress={() => void changePassword()}>
-                    {busy ? 'Saving...' : 'Change password'}
+                    {busy ? 'Saving...' : 'Save new password'}
+                  </Button>
+                  <Button
+                    isDisabled={busy}
+                    type="button"
+                    variant="secondary"
+                    onPress={cancelPasswordChange}
+                  >
+                    Cancel
                   </Button>
                 </div>
               </form>
+            ) : confirmingRemoval ? (
+              <form
+                className="grid gap-4"
+                noValidate
+                onSubmit={(event) => void confirmRemove(event)}
+              >
+                <div className="grid gap-1">
+                  <Typography type="body" weight="medium">
+                    Remove app lock? Your files stay on this device.
+                  </Typography>
+                  <Typography color="muted" type="body-sm">
+                    Kivo will open without asking for a password. Enter your current Master Password
+                    to confirm.
+                  </Typography>
+                </div>
 
-              <div className="flex flex-col gap-3 border-t border-border pt-6">
-                <Typography className="uppercase" color="muted" type="body-xs" weight="bold">
-                  Remove app lock
-                </Typography>
-                <Typography color="muted" type="body">
-                  Removing app lock means Kivo opens without asking for a password. Your files stay on
-                  this device.
-                </Typography>
+                <TextField
+                  isInvalid={removeError !== null}
+                  type="password"
+                  value={currentPassword}
+                  onChange={setCurrentPassword}
+                >
+                  <Label>Master Password to remove app lock</Label>
+                  <Input fullWidth autoComplete="current-password" variant="secondary" />
+                </TextField>
 
-                {confirmingRemoval ? (
-                  <form
-                    className="flex flex-col gap-3"
-                    noValidate
-                    onSubmit={(event) => void confirmRemove(event)}
+                {removeError ? (
+                  <Typography className="font-semibold text-danger" role="alert" type="body-sm">
+                    {removeError}
+                  </Typography>
+                ) : null}
+
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    isDisabled={busy}
+                    type="submit"
+                    variant="danger"
+                    onPress={() => void confirmRemove()}
                   >
-                    <Typography type="body">
-                      Remove app lock? Your files stay on this device.
-                    </Typography>
-                    <Typography color="muted" type="body">
-                      Enter your current Master Password to confirm.
-                    </Typography>
-
-                    <TextField
-                      isInvalid={removeError !== null}
-                      type="password"
-                      value={currentPassword}
-                      onChange={setCurrentPassword}
-                    >
-                      <Label>Master Password to remove app lock</Label>
-                      <Input fullWidth autoComplete="current-password" variant="secondary" />
-                    </TextField>
-
-                    {removeError ? (
-                      <Typography className="font-semibold text-danger" role="alert" type="body">
-                        {removeError}
-                      </Typography>
-                    ) : null}
-
-                    <div className="flex flex-wrap gap-3">
-                      <Button variant="secondary" type="button" isDisabled={busy} onPress={cancelRemoval}>
-                        Cancel
-                      </Button>
-                      <Button isDisabled={busy} type="submit" onPress={() => void confirmRemove()}>
-                        {busy ? 'Removing...' : 'Yes, remove app lock'}
-                      </Button>
-                    </div>
-                  </form>
-                ) : (
-                  <div>
-                    <Button variant="secondary" onPress={beginRemoval}>
-                      Remove app lock
-                    </Button>
-                  </div>
-                )}
+                    {busy ? 'Removing...' : 'Yes, remove app lock'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    isDisabled={busy}
+                    onPress={cancelRemoval}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                <Button variant="secondary" onPress={beginPasswordChange}>
+                  Change password
+                </Button>
+                <Button variant="ghost" onPress={beginRemoval}>
+                  Remove app lock
+                </Button>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </Card.Content>
     </Card>
   )

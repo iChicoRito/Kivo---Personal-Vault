@@ -23,14 +23,14 @@ it('backs up only after destination selection and leaves automatic backup off', 
   render(<BackupSettings />)
   fireEvent.click(screen.getByRole('button', { name: 'Create backup' }))
   await waitFor(() => expect(getTauriInvoke()).toHaveBeenCalledWith('create_backup', { destination: 'C:/safe', replace: false }))
-  expect(screen.getByText(/automatic backups are not available/i)).toBeInTheDocument()
+  expect(screen.getByText(/does not make backups automatically/i)).toBeInTheDocument()
 })
 
-it('names plaintext exports and never imports before a file is picked', async () => {
+it('warns that exports are not encrypted and never imports before a file is picked', async () => {
   getTauriInvoke().mockResolvedValue(null)
   render(<PortabilitySettings />)
-  fireEvent.click(screen.getByRole('button', { name: 'Import Kivo JSON' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Import Kivo export' }))
   await waitFor(() => expect(getTauriInvoke()).toHaveBeenCalledWith('pick_file'))
   expect(getTauriInvoke()).not.toHaveBeenCalledWith('import_json', expect.anything())
-  expect(screen.getByText(/plaintext/i)).toBeInTheDocument()
+  expect(screen.getByText(/not encrypted/i)).toBeInTheDocument()
 })

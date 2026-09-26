@@ -340,10 +340,11 @@ describe('AppLockSettings', () => {
     render(<AppLockSettings />)
     await screen.findByText('App lock is on.')
 
+    fireEvent.click(screen.getByRole('button', { name: 'Change password' }))
     typeInto(screen.getByLabelText('Current Master Password'), PASSWORD)
     typeInto(screen.getByLabelText('New Master Password'), 'new secret')
     typeInto(screen.getByLabelText('Confirm New Master Password'), 'new secret')
-    fireEvent.click(screen.getByRole('button', { name: 'Change password' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save new password' }))
 
     expect(await screen.findByText('Your Master Password was changed.')).toBeInTheDocument()
     expect(invoke).toHaveBeenCalledWith('change_master_password', {
@@ -365,10 +366,11 @@ describe('AppLockSettings', () => {
     render(<AppLockSettings />)
     await screen.findByText('App lock is on.')
 
+    fireEvent.click(screen.getByRole('button', { name: 'Change password' }))
     typeInto(screen.getByLabelText('Current Master Password'), 'wrong password')
     typeInto(screen.getByLabelText('New Master Password'), 'new secret')
     typeInto(screen.getByLabelText('Confirm New Master Password'), 'new secret')
-    fireEvent.click(screen.getByRole('button', { name: 'Change password' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save new password' }))
 
     expect(
       await screen.findByText('We could not update app lock. Try again.'),

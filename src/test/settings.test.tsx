@@ -101,10 +101,11 @@ const RESET_PREFERENCES: Preferences = {
   summaries: false,
 }
 
-const NATIVE_SAVE_ERROR = 'Kivo could not change the start at login setting on this device.'
+const NATIVE_SAVE_ERROR = 'Kivo could not change whether it opens when you sign in.'
 const AUTOSTART_NOT_SAVED =
-  'Start at login changed on this device, but Kivo could not save the change.'
-const APPEARANCE_SAVE_ERROR = 'Kivo could not save this appearance change. Your saved settings are unchanged.'
+  'Kivo will open when you sign in as set, but it could not save the change. Try again.'
+const APPEARANCE_SAVE_ERROR = 'Kivo could not save this change. Your settings are unchanged.'
+const START_AT_LOGIN = 'Open Kivo when you sign in'
 
 async function renderSettings(overrides: Partial<Preferences> = {}) {
   render(
@@ -114,6 +115,10 @@ async function renderSettings(overrides: Partial<Preferences> = {}) {
   )
 
   return screen.findByRole('heading', { level: 1, name: 'Settings', exact: true })
+}
+
+async function openTab(name: string) {
+  fireEvent.click(await screen.findByRole('tab', { name }))
 }
 
 beforeEach(() => {
@@ -165,40 +170,37 @@ describe('settings profile', () => {
 
     const loadingStatus = screen.getByRole('status', { name: 'Loading settings' })
     expect(loadingStatus).toBeInTheDocument()
-    for (const title of ['Profile', 'Appearance', 'Start at login', 'Storage', 'App information']) {
-      expect(screen.getByRole('heading', { level: 2, name: title })).toBeInTheDocument()
-    }
     expect(loadingStatus.querySelector('.skeleton')).toBeInTheDocument()
-    expect(screen.queryByRole('textbox', { name: 'Owner name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument()
 
     await act(async () => resolveProfile({ ...PROFILE }))
 
-    expect(await screen.findByRole('textbox', { name: 'Owner name' })).toHaveValue('Ada')
+    expect(await screen.findByRole('textbox', { name: 'Your name' })).toHaveValue('Ada')
   })
 
   it('shows the saved owner and vault names', async () => {
     await renderSettings()
 
-    expect(screen.getByRole('textbox', { name: 'Owner name' })).toHaveValue('Ada')
+    expect(screen.getByRole('textbox', { name: 'Your name' })).toHaveValue('Ada')
     expect(screen.getByRole('textbox', { name: 'Vault name' })).toHaveValue("Ada's Vault")
   })
 
   it('requires a trimmed owner name and does not save', async () => {
     await renderSettings()
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Owner name' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), {
       target: { value: '   ' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save profile' }))
 
-    expect(await screen.findByText('Owner name is required.')).toBeInTheDocument()
+    expect(await screen.findByText('Enter your name.')).toBeInTheDocument()
     expect(settingsMock.saveProfile).not.toHaveBeenCalled()
   })
 
   it('persists trimmed profile changes through saveProfile', async () => {
     await renderSettings()
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Owner name' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), {
       target: { value: '  Grace  ' },
     })
     fireEvent.change(screen.getByRole('textbox', { name: 'Vault name' }), {
@@ -220,7 +222,7 @@ describe('settings profile', () => {
     settingsMock.saveProfile.mockRejectedValue(new Error('save failed'))
     await renderSettings()
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Owner name' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), {
       target: { value: 'Grace' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save profile' }))
@@ -236,6 +238,7 @@ describe('settings profile', () => {
 describe('appearance preferences', () => {
   it('persists the theme choice and applies it to the document root', async () => {
     await renderSettings()
+    await openTab('Appearance')
 
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }))
 
@@ -249,6 +252,7 @@ describe('appearance preferences', () => {
 
   it('persists the density choice and applies it', async () => {
     await renderSettings()
+    await openTab('Appearance')
 
     fireEvent.click(screen.getByRole('radio', { name: 'Compact' }))
 
@@ -263,6 +267,7 @@ describe('appearance preferences', () => {
 
   it('persists the navigation style choice', async () => {
     await renderSettings()
+    await openTab('Appearance')
 
     fireEvent.click(screen.getByRole('radio', { name: 'Sidebar' }))
 
@@ -277,6 +282,7 @@ describe('appearance preferences', () => {
   it('rolls the displayed control back to the saved value when saving fails', async () => {
     settingsMock.savePreferences.mockRejectedValue(new Error('save failed'))
     await renderSettings()
+    await openTab('Appearance')
 
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }))
 
@@ -290,6 +296,7 @@ describe('appearance preferences', () => {
 
   it('follows operating system theme changes while set to system', async () => {
     await renderSettings()
+    await openTab('Appearance')
 
     fireEvent.click(screen.getByRole('radio', { name: 'System' }))
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'))
@@ -308,7 +315,7 @@ describe('start at login', () => {
     await renderSettings()
 
     expect(autostartMock.isEnabled).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked())
+    await waitFor(() => expect(screen.getByRole('switch', { name: START_AT_LOGIN })).toBeChecked())
   })
 
   it('persists the native state on load when it differs from the saved preference', async () => {
@@ -316,28 +323,28 @@ describe('start at login', () => {
     await renderSettings()
 
     await waitFor(() => expect(settingsMock.saveStartAtLogin).toHaveBeenCalledWith(true))
-    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked()
+    expect(screen.getByRole('switch', { name: START_AT_LOGIN })).toBeChecked()
   })
 
   it('enables autostart and persists the choice', async () => {
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
+    fireEvent.click(screen.getByRole('switch', { name: START_AT_LOGIN }))
 
     await waitFor(() => expect(autostartMock.enable).toHaveBeenCalledTimes(1))
     expect(settingsMock.saveStartAtLogin).toHaveBeenCalledWith(true)
-    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked()
+    expect(screen.getByRole('switch', { name: START_AT_LOGIN })).toBeChecked()
   })
 
   it('disables autostart and persists the choice', async () => {
     autostartMock.isEnabled.mockResolvedValue(true)
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
+    fireEvent.click(screen.getByRole('switch', { name: START_AT_LOGIN }))
 
     await waitFor(() => expect(autostartMock.disable).toHaveBeenCalledTimes(1))
     expect(settingsMock.saveStartAtLogin).toHaveBeenLastCalledWith(false)
-    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: START_AT_LOGIN })).not.toBeChecked()
   })
 
   it('reconciles the switch with the native state when persistence fails after a native change', async () => {
@@ -345,38 +352,40 @@ describe('start at login', () => {
     settingsMock.saveStartAtLogin.mockRejectedValueOnce(new Error('save failed'))
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
+    fireEvent.click(screen.getByRole('switch', { name: START_AT_LOGIN }))
 
     expect(await screen.findByText(AUTOSTART_NOT_SAVED)).toBeInTheDocument()
     expect(autostartMock.enable).toHaveBeenCalledTimes(1)
     expect(autostartMock.isEnabled).toHaveBeenCalledTimes(2)
-    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked()
+    expect(screen.getByRole('switch', { name: START_AT_LOGIN })).toBeChecked()
   })
 
   it('shows a native error without changing the switch when enabling fails', async () => {
     autostartMock.enable.mockRejectedValue(new Error('native failure'))
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
+    fireEvent.click(screen.getByRole('switch', { name: START_AT_LOGIN }))
 
     expect(await screen.findByText(NATIVE_SAVE_ERROR)).toBeInTheDocument()
     expect(feedbackMock.notifyError).toHaveBeenCalledWith(NATIVE_SAVE_ERROR)
-    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: START_AT_LOGIN })).not.toBeChecked()
     expect(settingsMock.saveStartAtLogin).not.toHaveBeenCalled()
   })
 })
 
 describe('storage and app information', () => {
-  it('shows This Device without a technical path', async () => {
+  it('says the vault stays on this device without a technical path', async () => {
     await renderSettings()
+    await openTab('Data')
 
-    expect(screen.getByText('This Device')).toBeInTheDocument()
+    expect(screen.getByText(/saved on this device only/)).toBeInTheDocument()
     expect(screen.queryByText(/[A-Za-z]:\\/)).not.toBeInTheDocument()
     expect(screen.queryByText(/users\//i)).not.toBeInTheDocument()
   })
 
   it('shows the app name and version from Tauri metadata', async () => {
     await renderSettings()
+    await openTab('About')
 
     expect(await screen.findByText('Kivo')).toBeInTheDocument()
     expect(screen.getByText('0.1.0')).toBeInTheDocument()
@@ -384,11 +393,12 @@ describe('storage and app information', () => {
   })
 })
 
-describe('reset presentation preferences', () => {
+describe('reset appearance', () => {
   it('opens a confirmation dialog that closes on Escape and restores focus', async () => {
     await renderSettings()
+    await openTab('Appearance')
 
-    const trigger = screen.getByRole('button', { name: 'Reset preferences' })
+    const trigger = screen.getByRole('button', { name: 'Reset appearance' })
     trigger.focus()
     await act(async () => {
       fireEvent.click(trigger)
@@ -397,7 +407,7 @@ describe('reset presentation preferences', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(
-      within(dialog).getByRole('heading', { name: 'Reset presentation preferences?' }),
+      within(dialog).getByRole('heading', { name: 'Reset appearance?' }),
     ).toBeInTheDocument()
 
     fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' })
@@ -407,19 +417,20 @@ describe('reset presentation preferences', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
-  it('resets only presentation preferences after confirmation', async () => {
+  it('resets only appearance after confirmation', async () => {
     await renderSettings()
+    await openTab('Appearance')
 
     fireEvent.click(screen.getByRole('radio', { name: 'Dark' }))
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset preferences' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reset appearance' }))
 
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, reset preferences' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, reset' }))
 
     await waitFor(() => expect(settingsMock.savePreferences).toHaveBeenLastCalledWith(RESET_PREFERENCES))
-    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Preferences reset')
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Appearance reset')
     expect(settingsMock.saveProfile).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(document.documentElement.dataset.theme).toBe('dark')
@@ -442,6 +453,7 @@ describe('app lock', () => {
     )
 
     await renderSettings()
+    await openTab('Security')
 
     const heading = await screen.findByRole('heading', { level: 2, name: 'App lock', exact: true })
     const section = heading.closest('[data-slot="card"]') as HTMLElement
@@ -469,6 +481,7 @@ describe('app lock', () => {
 
   it('renders the shared app lock section on the settings page', async () => {
     await renderSettings()
+    await openTab('Security')
     await screen.findByRole('heading', { level: 2, name: 'App lock', exact: true })
 
     const headings = screen.getAllByRole('heading', { level: 2, name: 'App lock', exact: true })
@@ -482,6 +495,7 @@ describe('app lock', () => {
 
   it('renders the lock controls once without duplicating them', async () => {
     await renderSettings()
+    await openTab('Security')
     await screen.findByText('App lock is off.')
 
     expect(screen.getAllByLabelText('Master Password')).toHaveLength(1)
@@ -490,18 +504,21 @@ describe('app lock', () => {
   })
 })
 
-describe('advanced features', () => {
-  it('shows the three switches with honest copy and the index status', async () => {
+describe('smart features', () => {
+  it('shows the three switches with plain copy and hides search status while off', async () => {
     await renderSettings()
 
-    expect(screen.getByRole('switch', { name: 'Related search' })).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Smarter search' })).not.toBeChecked()
     expect(screen.getByRole('switch', { name: 'Tag suggestions' })).not.toBeChecked()
     expect(screen.getByRole('switch', { name: 'Note summaries' })).not.toBeChecked()
-    expect(
-      screen.getByText('Suggestions are created on this device; nothing is sent anywhere.'),
-    ).toBeInTheDocument()
-    expect(await screen.findByText('Index: 1 items ready, 1 waiting.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Re-index now' })).not.toBeInTheDocument()
+    expect(screen.getByText(/never send anything online/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Refresh search' })).not.toBeInTheDocument()
+  })
+
+  it('shows how many items search is ready for while Smarter search is on', async () => {
+    await renderSettings({ semanticSearch: true })
+
+    expect(await screen.findByText('Search is ready for 1 items. 1 still waiting.')).toBeInTheDocument()
   })
 
   it('persists a feature switch through the existing preference save', async () => {
@@ -516,29 +533,29 @@ describe('advanced features', () => {
     )
   })
 
-  it('rebuilds the index on request when Related search is on', async () => {
+  it('refreshes search on request when Smarter search is on', async () => {
     await renderSettings({ semanticSearch: true })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Re-index now' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh search' }))
 
     await waitFor(() => expect(insightsMock.reindexItems).toHaveBeenCalledTimes(1))
     await waitFor(() =>
       expect(feedbackMock.notifySuccess).toHaveBeenCalledWith(
-        'Index rebuilt',
-        '2 items indexed, 1 waiting.',
+        'Search refreshed',
+        '2 items ready, 1 waiting.',
       ),
     )
   })
 
-  it('reports a failed re-index without changing the saved settings', async () => {
+  it('reports a failed search refresh without changing the saved settings', async () => {
     insightsMock.reindexItems.mockRejectedValueOnce(new Error('no'))
     await renderSettings({ semanticSearch: true })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Re-index now' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh search' }))
 
     await waitFor(() =>
       expect(feedbackMock.notifyError).toHaveBeenCalledWith(
-        'Kivo could not rebuild the index. Try again.',
+        'Kivo could not refresh search. Try again.',
       ),
     )
     expect(settingsMock.savePreferences).not.toHaveBeenCalled()
@@ -549,14 +566,16 @@ describe('settings accessibility', () => {
   it('exposes each choice group with an accessible name', async () => {
     await renderSettings()
 
+    expect(screen.getByRole('switch', { name: START_AT_LOGIN })).toBeInTheDocument()
+    await openTab('Appearance')
     expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument()
-    expect(screen.getByRole('radiogroup', { name: 'Density' })).toBeInTheDocument()
-    expect(screen.getByRole('radiogroup', { name: 'Navigation' })).toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Spacing' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Menu style' })).toBeInTheDocument()
   })
 
   it('keeps exactly one h1 and does not skip heading levels', async () => {
     await renderSettings()
+    await openTab('Security')
     await screen.findByText('App lock is off.')
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)

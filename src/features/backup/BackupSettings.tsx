@@ -17,7 +17,7 @@ export default function BackupSettings() {
       setResult(await createBackup(path, replace)); setConflict(null)
     } catch (reason) {
       if (!replace && String(reason).toLowerCase().includes('exist')) setConflict(destination ?? null)
-      else setError('Could not create backup. Check destination and try again.')
+      else setError('Could not make the backup. Pick another folder and try again.')
     } finally { setBusy(false) }
   }
   async function check() {
@@ -25,18 +25,23 @@ export default function BackupSettings() {
     try {
       const path = await pickBackupSource()
       if (path) { const inspected = await inspectBackup(path); setResult(inspected); setRestore(inspected) }
-    } catch { setError('Could not inspect this backup. No data was changed.') }
+    } catch { setError('Could not open this backup. Nothing was changed.') }
     finally { setBusy(false) }
   }
-  return <Card aria-labelledby="backup-title"><Card.Content className="grid gap-3">
-    <Typography id="backup-title" type="h2">Backup and restore</Typography>
-    <Typography color="muted" type="body">Backups copy your database and managed files to a folder you choose. Automatic backups are not available. Keep a copy outside this device.</Typography>
-    <div className="flex flex-wrap gap-2"><Button isDisabled={busy} onPress={() => void create()}>Create backup</Button><Button isDisabled={busy} variant="secondary" onPress={() => void check()}>Check a backup</Button></div>
-    {busy ? <Typography role="status" type="body">Working with backup...</Typography> : null}
-    {result ? <Typography role="status" type="body">{result.valid ? 'Validated' : 'Invalid'} backup from {result.createdAt}. {result.itemCount} items, {result.fileCount} files. {result.path}</Typography> : null}
-    {result?.problems.map((problem) => <Typography role="alert" key={problem} type="body">{problem}</Typography>)}
-    {conflict ? <div role="alert"><Typography type="body">A backup already exists at this destination. Replace it?</Typography><Button variant="danger" onPress={() => void create(conflict, true)}>Replace backup</Button><Button variant="secondary" onPress={() => setConflict(null)}>Cancel</Button></div> : null}
-    {error ? <Typography role="alert" className="text-danger" type="body">{error}</Typography> : null}
+  return <Card aria-labelledby="backup-title"><Card.Content className="grid gap-4">
+    <div className="grid gap-1">
+      <Typography className="text-lg font-semibold" id="backup-title" type="h2">Backup and restore</Typography>
+      <Typography color="muted" type="body-sm">Save a copy of everything to a folder you choose, or bring one back. Kivo does not make backups automatically, so keep a copy on another drive.</Typography>
+    </div>
+    <div className="flex flex-wrap gap-3"><Button isDisabled={busy} onPress={() => void create()}>Create backup</Button><Button isDisabled={busy} variant="secondary" onPress={() => void check()}>Restore from backup</Button></div>
+    {busy ? <Typography role="status" type="body-sm">Working on your backup...</Typography> : null}
+    {result ? <div className="grid gap-0.5 rounded-xl bg-(--default) px-4 py-3" role="status">
+      <Typography type="body-sm" weight="medium">{result.valid ? 'This backup looks good.' : 'This backup has problems.'} {result.itemCount} items and {result.fileCount} files, made {result.createdAt}.</Typography>
+      <Typography className="break-all" color="muted" type="body-xs">{result.path}</Typography>
+    </div> : null}
+    {result?.problems.map((problem) => <Typography role="alert" className="text-danger" key={problem} type="body-sm">{problem}</Typography>)}
+    {conflict ? <div className="grid gap-3" role="alert"><Typography type="body-sm">There is already a backup in this folder. Replace it?</Typography><div className="flex flex-wrap gap-3"><Button variant="danger" onPress={() => void create(conflict, true)}>Replace backup</Button><Button variant="secondary" onPress={() => setConflict(null)}>Cancel</Button></div></div> : null}
+    {error ? <Typography role="alert" className="text-danger" type="body-sm">{error}</Typography> : null}
     <RestoreDialog backup={restore} onClose={() => setRestore(null)} />
   </Card.Content></Card>
 }

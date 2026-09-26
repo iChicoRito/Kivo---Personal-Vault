@@ -10,20 +10,25 @@ export default function PortabilitySettings() {
   async function run(action: () => Promise<ImportReport | void>) {
     setBusy(true); setError(null)
     try { const result = await action(); if (result) setReport(result) }
-    catch { setError('Could not move these items. Check the selected file and try again.') }
+    catch { setError('Could not finish. Check the file you picked and try again.') }
     finally { setBusy(false) }
   }
-  return <Card aria-labelledby="portability-title"><Card.Content className="grid gap-3">
-    <Typography id="portability-title" type="h2">Import and export</Typography>
-    <Typography color="muted" type="body">JSON and Markdown exports are plaintext, even when encryption is on. Store exports where others cannot read them. Import adds new items and never deletes source files.</Typography>
-    <Typography color="muted" type="body">Markdown loses rich formatting, managed file bytes, and exact timestamps. Kivo JSON keeps tags, collection names, favorites, pins, and dates. Unsupported files are reported below.</Typography>
-    <div className="flex flex-wrap gap-2">
-      <Button isDisabled={busy} variant="secondary" onPress={() => void run(async () => { const paths = await invoke<string[] | null>('pick_files'); return paths?.length ? importMarkdown(paths) : undefined })}>Import Markdown</Button>
-      <Button isDisabled={busy} variant="secondary" onPress={() => void run(async () => { const path = await invoke<string | null>('pick_file'); return path ? importJson(path) : undefined })}>Import Kivo JSON</Button>
-      <Button isDisabled={busy} onPress={() => void run(async () => { const path = await pickFolderDestination(); if (path) await exportVaultJson(path) })}>Export full vault</Button>
+  return <Card aria-labelledby="portability-title"><Card.Content className="grid gap-4">
+    <div className="grid gap-1">
+      <Typography className="text-lg font-semibold" id="portability-title" type="h2">Import and export</Typography>
+      <Typography color="muted" type="body-sm">Bring in notes from Markdown files or a Kivo export, or export everything to a folder. Importing only adds items; it never deletes anything.</Typography>
     </div>
-    {busy ? <Typography role="status" type="body">Moving items...</Typography> : null}
-    {report ? <div role="status"><Typography type="body">Imported {report.imported} items.</Typography>{report.skipped.map((entry, index) => <Typography key={`${entry.title}-${index}`} type="body">Skipped {entry.title}: {entry.reason}</Typography>)}{report.losses.map((loss) => <Typography key={loss} color="muted" type="body">{loss}</Typography>)}</div> : null}
-    {error ? <Typography className="text-danger" role="alert" type="body">{error}</Typography> : null}
+    <ul className="grid list-disc gap-1 pl-5 text-sm text-muted">
+      <li>Exported files are not encrypted. Keep them somewhere private.</li>
+      <li>Markdown keeps your text but not attached files, formatting, or exact dates.</li>
+    </ul>
+    <div className="flex flex-wrap gap-3">
+      <Button isDisabled={busy} variant="secondary" onPress={() => void run(async () => { const paths = await invoke<string[] | null>('pick_files'); return paths?.length ? importMarkdown(paths) : undefined })}>Import Markdown files</Button>
+      <Button isDisabled={busy} variant="secondary" onPress={() => void run(async () => { const path = await invoke<string | null>('pick_file'); return path ? importJson(path) : undefined })}>Import Kivo export</Button>
+      <Button isDisabled={busy} onPress={() => void run(async () => { const path = await pickFolderDestination(); if (path) await exportVaultJson(path) })}>Export everything</Button>
+    </div>
+    {busy ? <Typography role="status" type="body-sm">Working...</Typography> : null}
+    {report ? <div className="grid gap-1 rounded-xl bg-(--default) px-4 py-3" role="status"><Typography type="body-sm" weight="medium">Imported {report.imported} items.</Typography>{report.skipped.map((entry, index) => <Typography key={`${entry.title}-${index}`} type="body-sm">Skipped {entry.title}: {entry.reason}</Typography>)}{report.losses.map((loss) => <Typography key={loss} color="muted" type="body-xs">{loss}</Typography>)}</div> : null}
+    {error ? <Typography className="text-danger" role="alert" type="body-sm">{error}</Typography> : null}
   </Card.Content></Card>
 }

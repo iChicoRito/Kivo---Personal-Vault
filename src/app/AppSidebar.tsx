@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type Key } from 'react'
+import { Fragment, useEffect, useRef, useState, type Key } from 'react'
 
 import {
   Avatar,
@@ -22,6 +22,7 @@ import { matchPath, useHref, useLocation, useNavigate } from 'react-router-dom'
 import { loadProfile, type Profile } from '../data/settings'
 import { notifyError } from '../lib/feedback'
 import { cn } from '../lib/utils'
+import { useScrollDrag } from './AppDock'
 import { useLock } from './lock'
 import { navigationGroups } from './navigation'
 
@@ -112,10 +113,13 @@ function SidebarProfile({ pathname }: { pathname: string }) {
 export default function AppSidebar() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const navRef = useRef<HTMLElement>(null)
+  useScrollDrag(navRef)
 
   return (
     <RouterProvider navigate={navigate} useHref={useHref}>
       <nav
+        ref={navRef}
         aria-label="Primary navigation"
         className="h-full w-63 shrink-0 py-3 pl-3 max-[52.5rem]:w-21"
         id="kivo-sidebar"
