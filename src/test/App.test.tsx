@@ -135,7 +135,7 @@ async function finishOnboarding() {
   typeInto(screen.getByLabelText('Your name'), 'Ada')
   fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
   fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Create Password' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
 
   await screen.findByRole('heading', { name: 'Congrats! Your vault has been created' })
 

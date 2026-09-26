@@ -63,7 +63,7 @@ function VaultPanel({
   children: ReactNode
 }) {
   return (
-    <section aria-labelledby={titleId} className="mx-auto grid w-full max-w-xl gap-6 py-4">
+    <section aria-labelledby={titleId} className="grid w-full gap-6 py-4">
       <PageHeader description={description} title={title} titleId={titleId} />
       <Card>
         <Card.Content>{children}</Card.Content>

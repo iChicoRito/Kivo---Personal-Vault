@@ -22,6 +22,7 @@ import {
   resolveVaultName,
   toSetupInput,
   validateOwnerName,
+  validateMasterPassword,
   validatePasswordConfirmation,
   type OnboardingDraft,
   type OnboardingStep,
@@ -72,12 +73,14 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
   const [step, setStep] = useState<OnboardingStep>('welcome')
   const [draft, setDraft] = useState<OnboardingDraft>(createOnboardingDraft)
   const [ownerError, setOwnerError] = useState<string | null>(null)
+  const [masterError, setMasterError] = useState<string | null>(null)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const headingRef = useRef<HTMLHeadingElement>(null)
   const ownerInputRef = useRef<HTMLInputElement>(null)
+  const masterInputRef = useRef<HTMLInputElement>(null)
   const confirmInputRef = useRef<HTMLInputElement>(null)
 
   const currentStep = STEP_CONTENT[step]
@@ -93,6 +96,7 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
   function goForward() {
     const next = getNextStep(step)
     setOwnerError(null)
+    setMasterError(null)
     setPasswordError(null)
     setSaveError(null)
     if (next) setStep(next)
@@ -101,6 +105,7 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
   function goBack() {
     const previous = getPreviousStep(step)
     setOwnerError(null)
+    setMasterError(null)
     setPasswordError(null)
     setSaveError(null)
     if (previous) setStep(previous)
@@ -142,6 +147,15 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
   }
 
   function handleCreateVault() {
+    const emptyError = validateMasterPassword(draft.password)
+
+    setMasterError(emptyError)
+    if (emptyError) {
+      setPasswordError(null)
+      masterInputRef.current?.focus()
+      return
+    }
+
     const error = validatePasswordConfirmation(draft.password, draft.confirmPassword)
 
     setPasswordError(error)
@@ -154,6 +168,7 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
   }
 
   function handleSkipPassword() {
+    setMasterError(null)
     setPasswordError(null)
     void createVault('')
   }
@@ -221,10 +236,15 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
               onChange={(values) => updateDraft({ starterCollections: values })}
             >
               <Label className="sr-only">Starter collections</Label>
-              <div className="grid gap-x-12 gap-y-6 sm:grid-cols-2">
+              <div className="grid gap-1.5 sm:grid-cols-2">
                 {STARTER_COLLECTIONS.map((collection) => (
-                  <Checkbox key={collection} value={collection}>
-                    <Checkbox.Content>
+                  <Checkbox
+                    key={collection}
+                    value={collection}
+                    className="relative mt-0! flex cursor-pointer flex-col gap-1 rounded-3xl border border-default bg-surface p-4 transition-colors duration-200 ease-out hover:bg-surface-hover data-[selected=true]:border-accent data-[focus-visible=true]:outline-2 data-[focus-visible=true]:outline-offset-2 data-[focus-visible=true]:outline-focus"
+                  >
+                    {/* The overlay stretches the label's click area over the whole card. */}
+                    <Checkbox.Content className="static after:absolute after:inset-0 after:rounded-3xl">
                       <Checkbox.Control>
                         <Checkbox.Indicator />
                       </Checkbox.Control>
@@ -255,16 +275,19 @@ export default function OnboardingPage({ onCompleted }: OnboardingPageProps) {
             <TextField
               className="w-full"
               type="password"
+              isInvalid={masterError !== null}
               value={draft.password}
               onChange={(value) => updateDraft({ password: value })}
             >
               <Label>Master Password</Label>
               <Input
                 fullWidth
+                ref={masterInputRef}
                 autoComplete="new-password"
                 placeholder="Enter master password"
                 variant="secondary"
               />
+              {masterError ? <FieldError>{masterError}</FieldError> : null}
             </TextField>
 
             <TextField

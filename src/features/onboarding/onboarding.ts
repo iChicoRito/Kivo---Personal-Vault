@@ -57,6 +57,10 @@ export function validateOwnerName(ownerName: string): string | null {
   return 'Enter the name Kivo should use for you.'
 }
 
+export function validateMasterPassword(password: string): string | null {
+  return password ? null : 'Enter a master password, or choose Skip for now.'
+}
+
 export function validatePasswordConfirmation(
   password: string,
   confirmPassword: string,

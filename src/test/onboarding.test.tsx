@@ -63,7 +63,7 @@ function reachLock(ownerName = 'Ada') {
 
 async function createVault(ownerName = 'Ada') {
   reachLock(ownerName)
-  clickButton('Create Password')
+  clickButton('Skip for now')
 
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Congrats! Your vault has been created' })).toBeInTheDocument())
 }
@@ -132,7 +132,7 @@ describe('OnboardingPage steps', () => {
     clickButton('Submit')
     expect(screen.getByRole('heading', { name: 'Keep your vault private' })).toHaveFocus()
 
-    clickButton('Create Password')
+    clickButton('Skip for now')
     expect(
       await screen.findByRole('heading', { name: 'Congrats! Your vault has been created' }),
     ).toHaveFocus()
@@ -228,7 +228,7 @@ describe('OnboardingPage starter collections', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Projects' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'Work' }))
     clickButton('Submit')
-    clickButton('Create Password')
+    clickButton('Skip for now')
 
     await waitFor(() => expect(completeSetupMock).toHaveBeenCalledTimes(1))
     expect(lastSetupInput().starterCollections).toEqual(['Projects', 'Work'])
@@ -239,7 +239,7 @@ describe('OnboardingPage starter collections', () => {
     reachCollections()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Projects' }))
     clickButton('Skip for now')
-    clickButton('Create Password')
+    clickButton('Skip for now')
 
     await waitFor(() => expect(completeSetupMock).toHaveBeenCalledTimes(1))
     expect(lastSetupInput().starterCollections).toEqual([])
@@ -276,6 +276,17 @@ describe('OnboardingPage app lock', () => {
 
     expect(passwordInput()).toHaveAttribute('type', 'password')
     expect(confirmInput()).toHaveAttribute('type', 'password')
+  })
+
+  it('rejects an empty password, focuses the password field, and does not save', () => {
+    renderOnboarding()
+    reachLock()
+    clickButton('Create Password')
+
+    expect(passwordInput()).toHaveFocus()
+    expect(passwordInput()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText('Enter a master password, or choose Skip for now.')).toBeInTheDocument()
+    expect(completeSetupMock).not.toHaveBeenCalled()
   })
 
   it('rejects a password mismatch, focuses the confirm field, and does not save', () => {
@@ -406,7 +417,7 @@ describe('OnboardingPage completion', () => {
   it('hands off to the dashboard only after the setup resolves and Open Kivo is pressed', async () => {
     const { onCompleted } = renderOnboarding()
     reachLock()
-    clickButton('Create Password')
+    clickButton('Skip for now')
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Congrats! Your vault has been created' })).toBeInTheDocument(),
@@ -420,7 +431,7 @@ describe('OnboardingPage completion', () => {
   it('renders a safe disabled final action when no completion callback is provided', async () => {
     render(<OnboardingPage />)
     reachLock()
-    clickButton('Create Password')
+    clickButton('Skip for now')
 
     await waitFor(() =>
       expect(

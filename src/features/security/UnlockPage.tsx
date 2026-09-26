@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Button, Card, FieldError, Input, Label, TextField, Typography } from '@heroui/react'
+import { Button, FieldError, Input, Label, TextField, Typography } from '@heroui/react'
 
 import PageHeader from '../../app/PageHeader'
 import { readAppLockVerifier, verifyPassword } from '../../data/security'
@@ -63,42 +63,38 @@ export default function UnlockPage({ onUnlocked }: UnlockPageProps) {
     <section
       aria-busy={checking}
       aria-labelledby="unlock-title"
-      className="min-h-screen bg-background px-6 py-12 text-foreground sm:px-10"
+      className="grid min-h-screen place-items-center bg-background px-6 py-12 text-foreground sm:px-10"
     >
-      <div className="mx-auto grid max-w-xl gap-8">
+      <div className="grid w-full max-w-xl gap-8">
         <PageHeader
           description="Enter your Master Password to open Kivo on this device."
           title="Unlock your vault"
           titleId="unlock-title"
         />
 
-        <Card>
-          <Card.Content>
-            <form className="grid gap-5" noValidate onSubmit={(event) => void submit(event)}>
-              <TextField
-                isRequired
-                isInvalid={error !== null}
-                type="password"
-                value={password}
-                onChange={setPassword}
-              >
-                <Label>Master Password</Label>
-                <Input fullWidth ref={passwordRef} autoComplete="current-password" variant="secondary" />
-                {error ? <FieldError>{error}</FieldError> : null}
-              </TextField>
+        <form className="grid gap-5" noValidate onSubmit={(event) => void submit(event)}>
+          <TextField
+            isRequired
+            isInvalid={error !== null}
+            type="password"
+            value={password}
+            onChange={setPassword}
+          >
+            <Label>Master Password</Label>
+            <Input fullWidth ref={passwordRef} autoComplete="current-password" />
+            {error ? <FieldError>{error}</FieldError> : null}
+          </TextField>
 
-              <Typography color="muted" type="body">
-                App lock keeps Kivo closed to other people. It does not encrypt your files.
-              </Typography>
+          <Typography color="muted" type="body">
+            App lock keeps Kivo closed to other people. It does not encrypt your files.
+          </Typography>
 
-              <div className="flex justify-end">
-                <Button isDisabled={checking} type="submit" onPress={() => void submit()}>
-                  {checking ? 'Checking password...' : 'Unlock Kivo'}
-                </Button>
-              </div>
-            </form>
-          </Card.Content>
-        </Card>
+          <div className="flex justify-end">
+            <Button isDisabled={checking} type="submit" onPress={() => void submit()}>
+              {checking ? 'Checking password...' : 'Unlock Kivo'}
+            </Button>
+          </div>
+        </form>
       </div>
     </section>
   )
