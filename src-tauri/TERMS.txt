@@ -1,7 +1,5 @@
 KIVO END USER LICENSE AGREEMENT AND DATA NOTICE
 
-Effective Date: [Insert Date]
-
 Please read this agreement before installing or using Kivo.
 
 By installing Kivo or clicking "I Agree", you confirm that you have read and accepted these terms.
