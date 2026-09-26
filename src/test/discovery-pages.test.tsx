@@ -332,10 +332,10 @@ describe('DashboardPage', () => {
 
     for (const sectionName of ['Favorites', 'Collections', 'Storage']) {
       const heading = screen.getByRole('heading', { level: 2, name: sectionName })
-      expect(heading.parentElement?.querySelector('[aria-hidden="true"]')).toBeInTheDocument()
+      expect(heading.closest('section')?.querySelector('[aria-hidden="true"]')).toBeInTheDocument()
     }
     expect(loadingStatus.querySelector('ul[aria-hidden="true"] li')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Work (3)' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Work, 3 items' })).not.toBeInTheDocument()
 
     await act(async () => {
       pendingSummary.resolve({ ...POPULATED_SUMMARY })
@@ -343,9 +343,9 @@ describe('DashboardPage', () => {
       pendingCollections.resolve([{ ...COLLECTION }])
     })
 
-    expect(await screen.findByText('Starred note')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Work (3)' })).toBeInTheDocument()
-    expect(screen.getByText('42')).toBeInTheDocument()
+    expect((await screen.findAllByText('Starred note')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Work, 3 items' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Items 42/ })).toBeInTheDocument()
     expect(screen.queryByRole('status', { name: 'Loading your dashboard' })).not.toBeInTheDocument()
   })
 
@@ -362,9 +362,7 @@ describe('DashboardPage', () => {
     ).toBeInTheDocument()
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
 
-    expect(
-      await screen.findByRole('heading', { level: 2, name: 'No favorites yet.' }),
-    ).toBeInTheDocument()
+    expect(await screen.findByText('No favorites yet.')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(dashboardMock.loadVaultSummary).toHaveBeenCalledTimes(2)
   })
@@ -376,18 +374,34 @@ describe('DashboardPage', () => {
 
     renderRoute('/dashboard')
 
-    expect(await screen.findByText('Starred note')).toBeInTheDocument()
+    const favorites = within(
+      screen.getByRole('heading', { level: 2, name: 'Favorites' }).closest('section')!,
+    )
+    expect(await favorites.findByText('Starred note')).toBeInTheDocument()
 
-    expect(screen.getByRole('heading', { level: 2, name: 'Favorites' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Collections' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Storage' })).toBeInTheDocument()
 
-    expect(screen.getByRole('button', { name: 'Work (3)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Work, 3 items' })).toBeInTheDocument()
 
-    expect(screen.getByText('Items')).toBeInTheDocument()
-    expect(screen.getByText('42')).toBeInTheDocument()
-    expect(screen.getByText('2 KB')).toBeInTheDocument()
-    expect(screen.getByText('1 MB')).toBeInTheDocument()
+    const storage = within(
+      screen.getByRole('heading', { level: 2, name: 'Storage' }).closest('section')!,
+    )
+    expect(storage.getByText('Managed files', { selector: 'dt' })).toBeInTheDocument()
+    expect(storage.getAllByText('2 KB').length).toBeGreaterThan(0)
+    expect(storage.getAllByText('1 MB').length).toBeGreaterThan(0)
+
+    expect(screen.getByRole('link', { name: /^Items 42/ })).toHaveAttribute('href', '/items')
+    expect(screen.getByRole('heading', { level: 2, name: 'Activity' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Recent' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Notes 7, sources 5, files 3.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Quick add' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^New note/ })).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('navigation', { name: 'Go to' })).getByRole('link', {
+        name: 'Password Manager',
+      }),
+    ).toBeInTheDocument()
   })
 
   it('shows the empty vault message and the four start actions for an empty vault', async () => {
@@ -424,7 +438,7 @@ describe('DashboardPage', () => {
 
     renderRoute('/dashboard')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Work (3)' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Work, 3 items' }))
 
     await waitFor(() =>
       expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: COLLECTION.id }),

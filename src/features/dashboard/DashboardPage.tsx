@@ -1,21 +1,71 @@
-import { useEffect, useState } from 'react'
-import { Alert, Button, Card, EmptyState, Skeleton, Typography } from '@heroui/react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Alert, Button, Card, Kbd, Skeleton, Typography } from '@heroui/react'
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
+import {
+  Delete02Icon,
+  FileImportIcon,
+  FolderOpenIcon,
+  HardDriveIcon,
+  Layers01Icon,
+  LibraryIcon,
+  Link02Icon,
+  NoteEditIcon,
+  StarIcon,
+} from '@hugeicons/core-free-icons'
+import { Link, useNavigate } from 'react-router-dom'
 
 import PageHeader from '../../app/PageHeader'
-import { ItemList, ItemListSkeleton } from '../../components/items/ItemList'
+import { navigationGroups } from '../../app/navigation'
+import { MonoActivityHeatmap } from '../../components/charts/MonoActivityHeatmap'
+import { MonoRoundedDonutChart } from '../../components/charts/MonoRoundedDonutChart'
+import { MonoRoundedTreemapChart } from '../../components/charts/MonoRoundedTreemapChart'
 import { listCollections, type Collection } from '../../data/collections'
 import { loadVaultSummary, type VaultSummary } from '../../data/dashboard'
-import { listItems, type ItemSummary } from '../../data/items'
+import { listItems, type ItemKind, type ItemSummary } from '../../data/items'
 import { useVaultChanged } from '../../lib/useVaultChanged'
 import { QuickAddDialog } from '../quick-add/QuickAddDialog'
+import { QuickAddMenu } from '../quick-add/QuickAddMenu'
 import { ItemDetailsDialog } from '../items/ItemDetailsDialog'
+import { buildActivityWeeks } from './activity'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 type InitialAction = 'note' | 'file' | 'source' | 'collection'
 
-const panelLabelClass = 'uppercase'
+const ACTIVITY_WEEKS = 26
+const LIST_LIMIT = 6
+
+const navigationLinks = navigationGroups.flatMap((group) => group.links)
+const shortcutPages = ['All Items', 'Notes', 'Sources', 'Files', 'Password Manager', 'Trash']
+  .map((label) => navigationLinks.find((link) => link.label === label))
+  .filter((link) => link !== undefined)
+
+const quickAddActions: Array<{
+  label: string
+  hint: string
+  action: InitialAction
+  icon: IconSvgElement
+}> = [
+  { label: 'New note', hint: 'Write in the editor', action: 'note', icon: NoteEditIcon },
+  { label: 'Save link', hint: 'Keep a web source', action: 'source', icon: Link02Icon },
+  { label: 'Import file', hint: 'Copy into the vault', action: 'file', icon: FileImportIcon },
+  { label: 'New collection', hint: 'Group related items', action: 'collection', icon: Layers01Icon },
+]
+
+const KIND_ICONS: Record<ItemKind, IconSvgElement> = {
+  note: NoteEditIcon,
+  source: Link02Icon,
+  file: FolderOpenIcon,
+}
+
+const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus'
+
+const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+
+function formatDate(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : shortDate.format(date)
+}
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
@@ -34,11 +84,112 @@ function formatBytes(bytes: number) {
   return `${rounded} ${units[unitIndex]}`
 }
 
+function plural(count: number, word: string) {
+  return `${count} ${word}${count === 1 ? '' : 's'}`
+}
+
+function Panel({
+  id,
+  title,
+  meta,
+  className = '',
+  children,
+}: {
+  id: string
+  title: string
+  meta?: ReactNode
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <section aria-labelledby={id} className={`min-w-0 ${className}`}>
+      <Card className="h-full">
+        <div className="flex min-h-6 items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold" id={id}>
+            {title}
+          </h2>
+          {meta}
+        </div>
+        {children}
+      </Card>
+    </section>
+  )
+}
+
+function PanelLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link
+      className={`rounded-sm text-xs text-muted no-underline hover:text-foreground ${focusRing}`}
+      to={to}
+    >
+      {children}
+    </Link>
+  )
+}
+
+function RowsSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <ul aria-hidden="true" className="grid gap-1">
+      {Array.from({ length: rows }, (_, index) => (
+        <li key={index} className="flex items-center gap-3 py-1.5">
+          <Skeleton animationType="shimmer" className="size-7 rounded-md" />
+          <Skeleton animationType="shimmer" className="h-3.5 flex-1 rounded-md" />
+          <Skeleton animationType="shimmer" className="h-3 w-10 rounded-md" />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function EmptyNote({ children }: { children: ReactNode }) {
+  return <p className="m-0 py-6 text-center text-sm text-muted">{children}</p>
+}
+
+function ItemRows({
+  items,
+  empty,
+  onOpen,
+}: {
+  items: ItemSummary[]
+  empty: string
+  onOpen: (id: string) => void
+}) {
+  if (items.length === 0) return <EmptyNote>{empty}</EmptyNote>
+
+  return (
+    <ul className="-mx-2 m-0 grid list-none p-0">
+      {items.map((item) => (
+        <li key={item.id} className="min-w-0">
+          <button
+            className={`flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-default ${focusRing}`}
+            type="button"
+            onClick={() => onOpen(item.id)}
+          >
+            <span className="grid size-7 shrink-0 place-items-center rounded-md bg-default">
+              <HugeiconsIcon
+                aria-hidden="true"
+                className="text-muted"
+                icon={KIND_ICONS[item.kind]}
+                size={14}
+                strokeWidth={1.75}
+              />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm">{item.title}</span>
+            <time className="shrink-0 text-xs text-muted tabular-nums" dateTime={item.updatedAt}>
+              {formatDate(item.updatedAt)}
+            </time>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate()
 
   const [summary, setSummary] = useState<VaultSummary | null>(null)
-  const [favorites, setFavorites] = useState<ItemSummary[]>([])
+  const [items, setItems] = useState<ItemSummary[]>([])
   const [collections, setCollections] = useState<Collection[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [attempt, setAttempt] = useState(0)
@@ -55,13 +206,14 @@ export default function DashboardPage() {
 
     Promise.all([
       loadVaultSummary(),
-      listItems({ favorite: true }),
+      // ponytail: loads every item summary for the heatmap; add a per-day count command if vaults get large
+      listItems(),
       listCollections(),
     ])
-      .then(([loadedSummary, loadedFavorites, loadedCollections]) => {
+      .then(([loadedSummary, loadedItems, loadedCollections]) => {
         if (!active) return
         setSummary(loadedSummary)
-        setFavorites(loadedFavorites)
+        setItems(loadedItems)
         setCollections(loadedCollections)
         setLoadState('ready')
       })
@@ -83,206 +235,379 @@ export default function DashboardPage() {
     setQuickAddOpen(true)
   }
 
+  const loading = loadState === 'loading'
+  const ready = loadState === 'ready' && summary !== null
+  const favorites = items.filter((item) => item.isFavorite).slice(0, LIST_LIMIT)
+  const recent = [...items]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, LIST_LIMIT)
+  const topCollections = collections.slice(0, LIST_LIMIT)
+  const maxCollectionCount = Math.max(1, ...topCollections.map((collection) => collection.itemCount))
+  // ItemSummary has no createdAt, so activity means "last edited".
+  const activity = buildActivityWeeks(items, new Date(), ACTIVITY_WEEKS)
+  const activityDays = activity.weeks.flat()
+  const activityStats = [
+    ['Active days', String(activityDays.filter((day) => day.count > 0).length)],
+    ['Busiest day', plural(Math.max(0, ...activityDays.map((day) => day.count)), 'edit')],
+    ['This week', plural(activity.weeks.at(-1)?.reduce((sum, day) => sum + day.count, 0) ?? 0, 'edit')],
+  ]
+
+  const kpis = summary
+    ? [
+        {
+          label: 'Items',
+          value: summary.itemCount,
+          hint: `${summary.noteCount} notes · ${summary.sourceCount} sources · ${summary.fileCount} files`,
+          to: '/items',
+          icon: LibraryIcon,
+        },
+        {
+          label: 'Favorites',
+          value: summary.favoriteCount,
+          hint: `${summary.itemCount > 0 ? Math.round((summary.favoriteCount / summary.itemCount) * 100) : 0}% of items`,
+          to: '/favorites',
+          icon: StarIcon,
+        },
+        {
+          label: 'Collections',
+          value: summary.collectionCount,
+          hint: plural(summary.tagCount, 'tag'),
+          to: '/collections',
+          icon: Layers01Icon,
+        },
+        {
+          label: 'Trash',
+          value: summary.trashCount,
+          hint: 'Waiting to be cleared',
+          to: '/trash',
+          icon: Delete02Icon,
+        },
+        {
+          label: 'Storage used',
+          value: formatBytes(summary.fileBytes + summary.databaseBytes),
+          hint: `${formatBytes(summary.fileBytes)} files · ${formatBytes(summary.databaseBytes)} database`,
+          to: '/storage',
+          icon: HardDriveIcon,
+        },
+      ]
+    : []
+
+  const quickAddPanel = (
+    <Panel
+      className="lg:col-span-4"
+      id="dashboard-quick-add"
+      meta={
+        <Kbd aria-hidden="true" className="text-[11px]">
+          <Kbd.Abbr keyValue="ctrl" />
+          <Kbd.Content>Shift+N</Kbd.Content>
+        </Kbd>
+      }
+      title="Quick add"
+    >
+      <div className="grid grid-cols-2 gap-2">
+        {quickAddActions.map((entry) => (
+          <button
+            key={entry.action}
+            className={`group grid content-start gap-2 rounded-xl border border-separator p-3 text-left transition-colors hover:border-accent/40 hover:bg-accent/5 ${focusRing}`}
+            type="button"
+            onClick={() => openQuickAdd(entry.action)}
+          >
+            <span className="grid size-8 place-items-center rounded-lg bg-accent/10 text-accent">
+              <HugeiconsIcon aria-hidden="true" icon={entry.icon} size={16} strokeWidth={1.75} />
+            </span>
+            <span className="grid gap-0.5">
+              <span className="text-sm font-medium">{entry.label}</span>
+              <span className="text-xs text-muted">{entry.hint}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <nav aria-label="Go to" className="flex flex-wrap gap-1 border-t border-separator pt-3">
+        {shortcutPages.map((link) => (
+          <Link
+            key={link.to}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted no-underline transition-colors hover:bg-default hover:text-foreground ${focusRing}`}
+            to={link.to}
+          >
+            <HugeiconsIcon aria-hidden="true" icon={link.icon} size={14} strokeWidth={1.75} />
+            {link.label}
+          </Link>
+        ))}
+      </nav>
+    </Panel>
+  )
+
   return (
-    <section aria-labelledby="dashboard-title" className="grid gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <section aria-labelledby="dashboard-title" className="grid gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <PageHeader
           description="Your vault at a glance."
           title="Dashboard"
           titleId="dashboard-title"
         />
-        <Button onPress={() => openQuickAdd(null)}>Quick Add</Button>
+        <QuickAddMenu onAdded={reload} />
       </div>
-
-      {loadState === 'loading' ? (
-        <div
-          aria-labelledby="dashboard-loading-title"
-          aria-live="polite"
-          className="grid gap-8"
-          role="status"
-        >
-          <Typography className="sr-only" id="dashboard-loading-title" type="h2">
-            Loading your dashboard
-          </Typography>
-          <Typography color="muted" type="body">
-            Kivo is reading this vault.
-          </Typography>
-
-          <div className="grid gap-3">
-            <Typography type="h2">Favorites</Typography>
-            <ItemListSkeleton />
-          </div>
-
-          <div className="grid gap-3">
-            <Typography type="h2">Collections</Typography>
-            <div aria-hidden="true" className="flex flex-wrap gap-3">
-              {['w-24', 'w-32', 'w-28', 'w-20', 'w-36', 'w-24'].map((width, index) => (
-                <Skeleton
-                  key={`${width}-${index}`}
-                  className={`h-9 ${width} rounded-full`}
-                  animationType="shimmer"
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-3">
-            <Typography type="h2">Storage</Typography>
-            <Card>
-              <Card.Content>
-                <dl aria-hidden="true" className="grid gap-2">
-                  {[
-                    ['w-12', 'w-8'],
-                    ['w-14', 'w-8'],
-                    ['w-16', 'w-8'],
-                    ['w-12', 'w-8'],
-                    ['w-16', 'w-8'],
-                    ['w-20', 'w-8'],
-                    ['w-12', 'w-8'],
-                    ['w-28', 'w-12'],
-                    ['w-24', 'w-12'],
-                  ].map(([labelWidth, valueWidth], index) => (
-                    <div key={index} className="flex flex-wrap justify-between gap-2">
-                      <Skeleton
-                        className={`h-4 ${labelWidth} rounded-md`}
-                        animationType="shimmer"
-                      />
-                      <Skeleton
-                        className={`h-4 ${valueWidth} rounded-md`}
-                        animationType="shimmer"
-                      />
-                    </div>
-                  ))}
-                </dl>
-              </Card.Content>
-            </Card>
-          </div>
-        </div>
-      ) : null}
 
       {loadState === 'error' ? (
         <Alert aria-labelledby="dashboard-error-title" role="alert" status="danger">
-          <Alert.Content className="grid gap-3">
-            <Typography className={panelLabelClass} color="muted" type="body-xs" weight="bold">
-              ERROR
-            </Typography>
-            <Typography id="dashboard-error-title" type="h2">
+          <Alert.Content className="grid gap-2">
+            <h2 className="m-0 text-sm font-semibold" id="dashboard-error-title">
               Your dashboard could not load
-            </Typography>
-            <Typography type="body">
-              Kivo could not read this vault. Try again.
-            </Typography>
-            <Button className="justify-self-start" variant="secondary" onPress={reload}>
+            </h2>
+            <p className="m-0 text-sm">Kivo could not read this vault. Try again.</p>
+            <Button className="justify-self-start" size="sm" variant="secondary" onPress={reload}>
               Try again
             </Button>
           </Alert.Content>
         </Alert>
       ) : null}
 
-      {loadState === 'ready' && summary ? (
-        summary.itemCount === 0 ? (
-          <Card aria-labelledby="dashboard-empty-title">
-            <Card.Content className="grid gap-4">
-              <Typography id="dashboard-empty-title" type="h2">
-                Your vault is looking a little empty.
-              </Typography>
-              <Typography color="muted" type="body">
-                Start adding the things that matter to you.
-              </Typography>
-              <div className="flex flex-wrap gap-3">
-                <Button onPress={() => openQuickAdd('note')}>Add Note</Button>
-                <Button variant="secondary" onPress={() => openQuickAdd('file')}>
-                  Add File
-                </Button>
-                <Button variant="secondary" onPress={() => openQuickAdd('source')}>
-                  Save Link
-                </Button>
-                <Button variant="secondary" onPress={() => openQuickAdd('collection')}>
-                  Create Collection
-                </Button>
-              </div>
-            </Card.Content>
+      {ready && summary.itemCount === 0 ? (
+        <div className="grid gap-3 lg:grid-cols-12">
+          <Card aria-labelledby="dashboard-empty-title" className="lg:col-span-8">
+            <h2 className="m-0 text-sm font-semibold" id="dashboard-empty-title">
+              Your vault is looking a little empty.
+            </h2>
+            <p className="m-0 text-sm text-muted">Start adding the things that matter to you.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onPress={() => openQuickAdd('note')}>
+                Add Note
+              </Button>
+              <Button size="sm" variant="secondary" onPress={() => openQuickAdd('file')}>
+                Add File
+              </Button>
+              <Button size="sm" variant="secondary" onPress={() => openQuickAdd('source')}>
+                Save Link
+              </Button>
+              <Button size="sm" variant="secondary" onPress={() => openQuickAdd('collection')}>
+                Create Collection
+              </Button>
+            </div>
           </Card>
-        ) : (
-          <div className="grid gap-8">
-            <div className="grid gap-3">
-              <Typography type="h2">Favorites</Typography>
-              <ItemList
-                emptyTitle="No favorites yet."
-                items={favorites.slice(0, 5)}
-                view="list"
-                onOpen={setOpenItemId}
-              />
-            </div>
+        </div>
+      ) : null}
 
-            <div className="grid gap-3">
-              <Typography type="h2">Collections</Typography>
-              {collections.length === 0 ? (
-                <EmptyState className="grid justify-items-start gap-3">
-                  <Typography type="h2">No collections yet.</Typography>
-                </EmptyState>
-              ) : (
-                <div className="flex flex-wrap gap-3">
-                  {collections.slice(0, 6).map((collection) => (
-                    <Button
-                      key={collection.id}
-                      variant="secondary"
-                      onPress={() => navigate(`/items?collection=${collection.id}`)}
+      {loading || (ready && summary.itemCount > 0) ? (
+        <div
+          aria-labelledby={loading ? 'dashboard-loading-title' : undefined}
+          aria-live={loading ? 'polite' : undefined}
+          className="grid gap-3"
+          role={loading ? 'status' : undefined}
+        >
+          {loading ? (
+            <Typography className="sr-only" id="dashboard-loading-title" type="h2">
+              Loading your dashboard
+            </Typography>
+          ) : null}
+
+          <Card className="overflow-hidden p-0">
+            <ul className="m-0 grid list-none grid-cols-2 gap-px bg-separator p-0 lg:grid-cols-5">
+              {loading
+                ? Array.from({ length: 5 }, (_, index) => (
+                    <li
+                      key={index}
+                      aria-hidden="true"
+                      className="grid gap-2 bg-surface p-4 last:col-span-2 lg:last:col-span-1"
                     >
-                      {collection.name} ({collection.itemCount})
-                    </Button>
+                      <Skeleton animationType="shimmer" className="h-3 w-16 rounded-md" />
+                      <Skeleton animationType="shimmer" className="h-7 w-12 rounded-md" />
+                      <Skeleton animationType="shimmer" className="h-3 w-24 rounded-md" />
+                    </li>
+                  ))
+                : kpis.map((kpi) => (
+                    <li key={kpi.label} className="min-w-0 bg-surface last:col-span-2 lg:last:col-span-1">
+                      <Link
+                        aria-label={`${kpi.label} ${kpi.value}. ${kpi.hint}`}
+                        className={`grid h-full gap-1 p-4 no-underline transition-colors hover:bg-surface-hover ${focusRing} focus-visible:-outline-offset-2`}
+                        to={kpi.to}
+                      >
+                        <span className="flex items-center gap-1.5 text-xs text-muted">
+                          <HugeiconsIcon
+                            aria-hidden="true"
+                            icon={kpi.icon}
+                            size={14}
+                            strokeWidth={1.75}
+                          />
+                          {kpi.label}
+                        </span>
+                        <span className="text-2xl font-semibold tracking-tight text-foreground tabular-nums">
+                          {kpi.value}
+                        </span>
+                        <span className="truncate text-xs text-muted">{kpi.hint}</span>
+                      </Link>
+                    </li>
                   ))}
-                </div>
-              )}
-            </div>
+            </ul>
+          </Card>
 
-            <div className="grid gap-3">
-              <Typography type="h2">Storage</Typography>
-              <Card>
-                <Card.Content>
-                  <dl className="grid gap-2">
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Items</dt>
-                      <dd className="m-0 font-bold">{summary.itemCount}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Notes</dt>
-                      <dd className="m-0 font-bold">{summary.noteCount}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Sources</dt>
-                      <dd className="m-0 font-bold">{summary.sourceCount}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Files</dt>
-                      <dd className="m-0 font-bold">{summary.fileCount}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Favorites</dt>
-                      <dd className="m-0 font-bold">{summary.favoriteCount}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Collections</dt>
-                      <dd className="m-0 font-bold">{summary.collectionCount}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Trash</dt>
-                      <dd className="m-0 font-bold">{summary.trashCount}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Managed file bytes</dt>
-                      <dd className="m-0 font-bold">{formatBytes(summary.fileBytes)}</dd>
-                    </div>
-                    <div className="flex flex-wrap justify-between gap-2">
-                      <dt className="text-muted">Database size</dt>
-                      <dd className="m-0 font-bold">{formatBytes(summary.databaseBytes)}</dd>
-                    </div>
+          <div className="grid gap-3 lg:grid-cols-12">
+            <Panel
+              className="lg:col-span-8"
+              id="dashboard-activity"
+              meta={
+                ready ? (
+                  <span className="text-xs text-muted tabular-nums">
+                    {plural(activity.total, 'edit')} · last {ACTIVITY_WEEKS} weeks
+                  </span>
+                ) : null
+              }
+              title="Activity"
+            >
+              {ready ? (
+                <>
+                  <MonoActivityHeatmap
+                    label={`Items last edited per day over the last ${ACTIVITY_WEEKS} weeks: ${activity.total} in total.`}
+                    weeks={activity.weeks}
+                  />
+                  <dl className="m-0 mt-auto grid grid-cols-3 gap-3">
+                    {activityStats.map(([label, value]) => (
+                      <div key={label} className="grid gap-0.5">
+                        <dt className="text-xs text-muted">{label}</dt>
+                        <dd className="m-0 text-sm font-semibold tabular-nums">{value}</dd>
+                      </div>
+                    ))}
                   </dl>
-                </Card.Content>
-              </Card>
-            </div>
+                </>
+              ) : (
+                <Skeleton aria-hidden="true" animationType="shimmer" className="h-48 rounded-[14px]" />
+              )}
+            </Panel>
+
+            {quickAddPanel}
+
+            <Panel
+              className="lg:col-span-4"
+              id="dashboard-recent"
+              meta={ready ? <PanelLink to="/items">View all</PanelLink> : null}
+              title="Recent"
+            >
+              {ready ? (
+                <ItemRows empty="Nothing edited yet." items={recent} onOpen={setOpenItemId} />
+              ) : (
+                <RowsSkeleton />
+              )}
+            </Panel>
+
+            <Panel
+              className="lg:col-span-4"
+              id="dashboard-favorites"
+              meta={ready ? <PanelLink to="/favorites">View all</PanelLink> : null}
+              title="Favorites"
+            >
+              {ready ? (
+                <ItemRows empty="No favorites yet." items={favorites} onOpen={setOpenItemId} />
+              ) : (
+                <RowsSkeleton />
+              )}
+            </Panel>
+
+            <Panel
+              className="lg:col-span-4"
+              id="dashboard-collections"
+              meta={ready ? <PanelLink to="/collections">View all</PanelLink> : null}
+              title="Collections"
+            >
+              {!ready ? (
+                <RowsSkeleton />
+              ) : topCollections.length === 0 ? (
+                <EmptyNote>No collections yet.</EmptyNote>
+              ) : (
+                <ul className="-mx-2 m-0 grid list-none p-0">
+                  {topCollections.map((collection) => (
+                    <li key={collection.id}>
+                      <button
+                        className={`flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-default ${focusRing}`}
+                        aria-label={`${collection.name}, ${plural(collection.itemCount, 'item')}`}
+                        type="button"
+                        onClick={() => navigate(`/items?collection=${collection.id}`)}
+                      >
+                        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-default">
+                          <HugeiconsIcon
+                            aria-hidden="true"
+                            className="text-muted"
+                            icon={Layers01Icon}
+                            size={14}
+                            strokeWidth={1.75}
+                          />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm">{collection.name}</span>
+                        <span
+                          aria-hidden="true"
+                          className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-default"
+                        >
+                          <span
+                            className="block h-full rounded-full bg-accent"
+                            style={{ width: `${(collection.itemCount / maxCollectionCount) * 100}%` }}
+                          />
+                        </span>
+                        <span className="w-6 shrink-0 text-right text-xs text-muted tabular-nums">
+                          {collection.itemCount}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+
+            <Panel className="lg:col-span-4" id="dashboard-types" title="Items by type">
+              {ready ? (
+                <MonoRoundedDonutChart
+                  data={[
+                    { name: 'Notes', value: summary.noteCount },
+                    { name: 'Sources', value: summary.sourceCount },
+                    { name: 'Files', value: summary.fileCount },
+                  ]}
+                  label={`Notes ${summary.noteCount}, sources ${summary.sourceCount}, files ${summary.fileCount}.`}
+                />
+              ) : (
+                <Skeleton aria-hidden="true" animationType="shimmer" className="h-44 rounded-[14px]" />
+              )}
+            </Panel>
+
+            <Panel
+              className="lg:col-span-8"
+              id="dashboard-storage"
+              meta={ready ? <PanelLink to="/storage">Manage</PanelLink> : null}
+              title="Storage"
+            >
+              {ready ? (
+                <>
+                  <MonoRoundedTreemapChart
+                    label={`Managed files ${formatBytes(summary.fileBytes)}, database ${formatBytes(summary.databaseBytes)}.`}
+                    tiles={[
+                      {
+                        name: 'Managed files',
+                        value: summary.fileBytes,
+                        display: formatBytes(summary.fileBytes),
+                      },
+                      {
+                        name: 'Database',
+                        value: summary.databaseBytes,
+                        display: formatBytes(summary.databaseBytes),
+                      },
+                    ]}
+                  />
+                  <dl className="m-0 grid grid-cols-3 gap-3">
+                    {[
+                      ['Managed files', formatBytes(summary.fileBytes)],
+                      ['Database', formatBytes(summary.databaseBytes)],
+                      ['Files stored', String(summary.fileCount)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="grid gap-0.5">
+                        <dt className="text-xs text-muted">{label}</dt>
+                        <dd className="m-0 text-sm font-semibold tabular-nums">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </>
+              ) : (
+                <Skeleton aria-hidden="true" animationType="shimmer" className="h-52 rounded-[14px]" />
+              )}
+            </Panel>
           </div>
-        )
+        </div>
       ) : null}
 
       <ItemDetailsDialog

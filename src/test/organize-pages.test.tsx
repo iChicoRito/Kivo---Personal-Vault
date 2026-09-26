@@ -907,15 +907,34 @@ describe('QuickAddDialog', () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/collections'))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('opens only the collection form for a direct collection action, with Cancel', async () => {
+    const onClose = vi.fn()
+
+    renderInRouter(<QuickAddDialog initialAction="collection" open onClose={onClose} />)
+
+    expect(await screen.findByRole('textbox', { name: 'Collection name' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New note' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('never shows the menu for a direct file action', async () => {
+    filesMock.pickFile.mockResolvedValue(null)
+
+    renderInRouter(<QuickAddDialog initialAction="file" open onClose={vi.fn()} />)
+
+    await waitFor(() => expect(filesMock.pickFile).toHaveBeenCalled())
+    expect(screen.queryByRole('heading', { name: 'Quick add' })).not.toBeInTheDocument()
+  })
 })
 
 describe('Dashboard quick add entry', () => {
-  it('opens the quick add dialog from the header button', async () => {
+  it('opens the quick add menu from the header button', async () => {
     renderInRouter(<DashboardPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Quick Add' }))
 
-    expect(await screen.findByRole('heading', { name: 'Quick add' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'New note' })).toBeInTheDocument()
+    expect(await screen.findByRole('menuitem', { name: 'New note' })).toBeInTheDocument()
   })
 })

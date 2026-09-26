@@ -39,6 +39,8 @@ export function QuickAddDialog({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
+  // Opened for one action: skip the menu, so it never flashes or shows after cancel.
+  const direct = initialAction !== null || initialMode === 'collection'
 
   function close() {
     setMode(initialMode)
@@ -127,7 +129,7 @@ export function QuickAddDialog({
   return (
     <>
       <Modal
-        isOpen={open}
+        isOpen={open && (!direct || mode === 'collection')}
         onOpenChange={(isOpen) => {
           if (!isOpen) close()
         }}
@@ -136,7 +138,7 @@ export function QuickAddDialog({
           <Modal.Container>
             <Modal.Dialog>
               <Modal.Header>
-                <Modal.Heading>Quick add</Modal.Heading>
+                <Modal.Heading>{direct ? 'New collection' : 'Quick add'}</Modal.Heading>
               </Modal.Header>
               <Modal.Body className="grid gap-4">
                 {error ? (
@@ -182,8 +184,11 @@ export function QuickAddDialog({
               <Modal.Footer>
                 {mode === 'collection' ? (
                   <>
-                    <Button variant="secondary" onPress={() => setMode('menu')}>
-                      Back
+                    <Button
+                      variant="secondary"
+                      onPress={direct ? close : () => setMode('menu')}
+                    >
+                      {direct ? 'Cancel' : 'Back'}
                     </Button>
                     <Button isDisabled={busy} onPress={() => void handleNewCollection()}>
                       Create collection
