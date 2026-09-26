@@ -51,6 +51,7 @@ export const navigationGroups: Array<{ label: string; links: NavigationLink[] }>
     label: 'SYSTEM',
     links: [
       { label: 'Trash', to: '/trash', icon: Delete02Icon },
+      { label: 'Storage Manager', to: '/storage', icon: FolderOpenIcon },
       { label: 'Settings', to: '/settings', icon: Settings01Icon },
     ],
   },

@@ -1,7 +1,10 @@
 import { useId, useState } from 'react'
 import { Button, Input, Label, Tag, TagGroup, TextField, Typography } from '@heroui/react'
 
+import { TagSuggestions } from '../../components/items/TagSuggestions'
+
 type NoteTagFieldProps = {
+  itemId: string
   value: string[]
   onChange: (next: string[]) => void
 }
@@ -11,7 +14,7 @@ type NoteTagFieldProps = {
  * note's tags as chips below. Each chip carries its own remove control, which
  * `globals.css` keeps out of sight until the chip is hovered or focused.
  */
-export function NoteTagField({ value, onChange }: NoteTagFieldProps) {
+export function NoteTagField({ itemId, value, onChange }: NoteTagFieldProps) {
   const [draft, setDraft] = useState('')
   const tagsLabelId = useId()
 
@@ -72,6 +75,8 @@ export function NoteTagField({ value, onChange }: NoteTagFieldProps) {
           No tags yet.
         </Typography>
       )}
+
+      <TagSuggestions itemId={itemId} value={value} onChange={onChange} />
     </div>
   )
 }

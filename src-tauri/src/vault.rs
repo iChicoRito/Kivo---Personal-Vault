@@ -1,13 +1,16 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::database::DatabaseState;
+use crate::encryption::{self, ProtectedItem};
 use crate::security::{hash_secret, secret_matches};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -53,6 +56,7 @@ pub struct ItemSummary {
     pub file_missing: bool,
     /// Raw note body, so list cards can show a short text preview.
     pub content: Option<String>,
+    pub match_snippet: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -76,19 +80,63 @@ pub struct Tag {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ActivityEntry {
-    pub id: i64,
-    pub item_id: Option<String>,
-    pub action: String,
+pub struct IndexState {
+    pub item_id: String,
+    pub needs_index: bool,
+    pub indexed_at: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemVersion {
+    pub id: String,
+    pub item_id: String,
+    pub title: String,
+    pub content: String,
     pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IndexState {
+pub struct ItemFilePreview {
+    pub preview: String,
+    pub mime: Option<String>,
+    pub text: Option<String>,
+    pub payload_base64: Option<String>,
+    pub byte_size: i64,
+    pub original_name: String,
+    pub imported_at: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageGroup {
+    pub label: String,
+    pub count: i64,
+    pub bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageFile {
     pub item_id: String,
-    pub needs_index: bool,
-    pub indexed_at: Option<String>,
+    pub title: String,
+    pub original_name: String,
+    pub byte_size: i64,
+    pub imported_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageReport {
+    pub total_bytes: i64,
+    pub database_bytes: i64,
+    pub file_bytes: i64,
+    pub file_count: i64,
+    pub groups: Vec<StorageGroup>,
+    pub largest: Vec<StorageFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -193,9 +241,10 @@ fn upsert_index_state(connection: &Connection, item_id: &str) -> rusqlite::Resul
         "INSERT INTO index_state (item_id, needs_index, indexed_at, updated_at)
          VALUES (?1, 1, NULL, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          ON CONFLICT(item_id) DO UPDATE SET
-           needs_index = 1,
-           indexed_at = NULL,
-           updated_at = excluded.updated_at",
+            needs_index = 1,
+            indexed_at = NULL,
+            status = 'pending',
+            updated_at = excluded.updated_at",
         params![item_id],
     )?;
 
@@ -333,6 +382,7 @@ fn map_summary_row(row: &rusqlite::Row<'_>, files_dir: &Path) -> rusqlite::Resul
         file,
         file_missing,
         content: row.get(12)?,
+        match_snippet: None,
     })
 }
 
@@ -340,7 +390,8 @@ fn read_item_summaries(
     connection: &Connection,
     files_dir: &Path,
     filter: Option<&ItemFilter>,
-) -> rusqlite::Result<Vec<ItemSummary>> {
+    key: Option<&[u8; 32]>,
+) -> Result<Vec<ItemSummary>, String> {
     // Trashed listings flip the scope and always order by the deletion stamp.
     let trashed = filter.and_then(|filter| filter.trashed) == Some(true);
     let mut sql = format!(
@@ -351,6 +402,7 @@ fn read_item_summaries(
         if trashed { "NOT NULL" } else { "NULL" }
     );
     let mut values: Vec<rusqlite::types::Value> = Vec::new();
+    let mut matches = HashMap::new();
 
     if let Some(filter) = filter {
         if let Some(kind) = filter.kind.as_deref().filter(|value| !value.is_empty()) {
@@ -386,6 +438,26 @@ fn read_item_summaries(
             .map(str::trim)
             .filter(|q| !q.is_empty())
         {
+            let phrase = format!("\"{}\"", query.replace('"', "\"\""));
+            if let Ok(mut statement) = connection.prepare(
+                "SELECT item_id, snippet(item_search, 3, '', '', '…', 12), bm25(item_search) FROM item_search WHERE item_search MATCH ?1"
+            ) {
+                if let Ok(rows) = statement.query_map(params![phrase], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, f64>(2)?))) {
+                    matches = rows.flatten().map(|(id, snippet, rank)| (id, (snippet, rank))).collect();
+                }
+            }
+            matches.retain(|id, _| {
+                connection
+                    .query_row(
+                        "SELECT f.stored_name FROM files f WHERE f.item_id = ?1",
+                        params![id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .ok()
+                    .flatten()
+                    .is_none_or(|name| files_dir.join(name).is_file())
+            });
             let pattern = escaped_like_pattern(query);
             sql.push_str(
                 " AND (i.title LIKE ? ESCAPE '\\'
@@ -396,12 +468,19 @@ fn read_item_summaries(
                     OR EXISTS (SELECT 1 FROM json_each(i.tags)
                                WHERE value LIKE ? ESCAPE '\\')
                     OR EXISTS (SELECT 1 FROM collections c
-                               WHERE c.id = i.collection_id AND c.name LIKE ? ESCAPE '\\'))",
+                               WHERE c.id = i.collection_id AND c.name LIKE ? ESCAPE '\\')",
             );
 
             for _ in 0..7 {
                 values.push(rusqlite::types::Value::Text(pattern.clone()));
             }
+            if !matches.is_empty() {
+                sql.push_str(" OR i.id IN (");
+                sql.push_str(&vec!["?"; matches.len()].join(","));
+                sql.push(')');
+                values.extend(matches.keys().cloned().map(rusqlite::types::Value::Text));
+            }
+            sql.push(')');
         }
     }
 
@@ -419,14 +498,49 @@ fn read_item_summaries(
     sql.push_str(" ORDER BY ");
     sql.push_str(order);
 
-    let mut statement = connection.prepare(&sql)?;
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| error.to_string())?;
 
-    let summaries = statement
+    let mut summaries = statement
         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
             map_summary_row(row, files_dir)
-        })?
-        .collect::<rusqlite::Result<Vec<ItemSummary>>>()?;
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<ItemSummary>>>()
+        .map_err(|error| error.to_string())?;
 
+    // Summaries only expose the note body, so decrypt just that value. The
+    // plaintext columns stay blank while encryption is on and the text never
+    // reaches the frontend as ciphertext.
+    if let Some(key) = key {
+        for summary in &mut summaries {
+            summary.content = encryption::read_secret(connection, key, &summary.id)?.content;
+        }
+    }
+
+    for summary in &mut summaries {
+        if summary.file_missing {
+            matches.remove(&summary.id);
+        }
+        summary.match_snippet = matches.get(&summary.id).map(|(text, _)| text.clone());
+    }
+    if !trashed
+        && filter
+            .and_then(|filter| filter.query.as_deref())
+            .is_some_and(|q| !q.trim().is_empty())
+        && filter.and_then(|filter| filter.sort.as_deref()).is_none()
+    {
+        summaries.sort_by(|a, b| {
+            let rank = |item: &ItemSummary| {
+                matches
+                    .get(&item.id)
+                    .map(|(_, rank)| *rank)
+                    .unwrap_or(f64::INFINITY)
+            };
+            rank(a).total_cmp(&rank(b))
+        });
+    }
     Ok(summaries)
 }
 
@@ -508,31 +622,9 @@ pub(crate) fn read_tags(connection: &Connection) -> rusqlite::Result<Vec<Tag>> {
     Ok(tags)
 }
 
-fn read_activity(connection: &Connection) -> rusqlite::Result<Vec<ActivityEntry>> {
-    let mut statement = connection.prepare(
-        "SELECT id, item_id, action, created_at
-         FROM activity
-         ORDER BY id DESC
-         LIMIT 100",
-    )?;
-
-    let entries = statement
-        .query_map([], |row| {
-            Ok(ActivityEntry {
-                id: row.get(0)?,
-                item_id: row.get(1)?,
-                action: row.get(2)?,
-                created_at: row.get(3)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<ActivityEntry>>>()?;
-
-    Ok(entries)
-}
-
 fn read_index_state(connection: &Connection) -> rusqlite::Result<Vec<IndexState>> {
     let mut statement = connection.prepare(
-        "SELECT item_id, needs_index, indexed_at
+        "SELECT item_id, needs_index, indexed_at, status
          FROM index_state
          ORDER BY updated_at DESC, item_id ASC",
     )?;
@@ -543,6 +635,7 @@ fn read_index_state(connection: &Connection) -> rusqlite::Result<Vec<IndexState>
                 item_id: row.get(0)?,
                 needs_index: row.get::<_, i64>(1)? != 0,
                 indexed_at: row.get(2)?,
+                status: row.get(3)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<IndexState>>>()?;
@@ -550,9 +643,117 @@ fn read_index_state(connection: &Connection) -> rusqlite::Result<Vec<IndexState>
     Ok(rows)
 }
 
+fn plain_text(html: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+                result.push(' ');
+            }
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(ch),
+            _ => {}
+        }
+    }
+    result
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+fn insert_version(
+    connection: &Connection,
+    item_id: &str,
+    title: &str,
+    content: &str,
+    key: Option<&[u8; 32]>,
+) -> Result<(), String> {
+    // The version id is the associated-data binding, so it is chosen before the
+    // snapshot is encrypted and stored.
+    let version_id = new_id(connection).map_err(|error| error.to_string())?;
+    match key {
+        Some(key) => {
+            let encrypted = encryption::encrypt_version(key, &version_id, content)?;
+            connection
+                .execute(
+                    "INSERT INTO item_versions(id, item_id, title, content, encrypted_content, created_at)
+                     VALUES (?1, ?2, ?3, '', ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                    params![version_id, item_id, title, encrypted],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        None => {
+            connection
+                .execute(
+                    "INSERT INTO item_versions(id, item_id, title, content, created_at)
+                     VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                    params![version_id, item_id, title, content],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    connection
+        .execute(
+            "DELETE FROM item_versions WHERE item_id = ?1 AND id NOT IN
+             (SELECT id FROM item_versions WHERE item_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 20)",
+            params![item_id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn read_versions(
+    connection: &Connection,
+    item_id: &str,
+    key: Option<&[u8; 32]>,
+) -> Result<Vec<ItemVersion>, String> {
+    let mut statement = connection
+        .prepare("SELECT id, item_id, title, content, encrypted_content, created_at FROM item_versions WHERE item_id = ?1 ORDER BY created_at DESC, rowid DESC")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![item_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<Vec<u8>>>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+
+    let mut versions = Vec::with_capacity(rows.len());
+    for (id, item_id, title, content, encrypted, created_at) in rows {
+        let content = match (key, encrypted) {
+            (Some(key), Some(bytes)) => encryption::decrypt_version(key, &id, &bytes)?,
+            _ => content,
+        };
+        versions.push(ItemVersion {
+            id,
+            item_id,
+            title,
+            content,
+            created_at,
+        });
+    }
+    Ok(versions)
+}
+
 // Validation failures keep their exact user-facing text; SQL failures carry the
 // same "Could not save the item" prefix as the phase-one commands.
-fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, String> {
+fn write_item(
+    connection: &mut Connection,
+    input: &ItemInput,
+    key: Option<&[u8; 32]>,
+) -> Result<String, String> {
     let title = input.title.trim().to_string();
 
     if title.is_empty() {
@@ -575,11 +776,21 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
                 .optional()
                 .map_err(|error| format!("Could not save the item: {error}"))?;
 
-            let (stored_kind, stored_content, stored_url) =
+            let (stored_kind, mut stored_content, mut stored_url) =
                 stored.ok_or_else(|| "Item was not found".to_string())?;
 
             if input.kind != stored_kind {
                 return Err("Item type cannot change".to_string());
+            }
+
+            // While encryption is on the columns are blank; the previous values
+            // live in item_secrets, so read them decrypted for the comparison,
+            // the version snapshot, and a file item's kept content and url.
+            if let Some(key) = key {
+                let previous = encryption::read_secret(connection, key, id)
+                    .map_err(|error| format!("Could not save the item: {error}"))?;
+                stored_content = previous.content;
+                stored_url = previous.url;
             }
 
             (id.clone(), stored_kind, stored_content, stored_url)
@@ -628,72 +839,176 @@ fn write_item(connection: &mut Connection, input: &ItemInput) -> Result<String, 
 
             (input.content.clone(), Some(url.to_string()))
         }
-        _ => (stored_content, stored_url),
+        _ => (stored_content.clone(), stored_url),
     };
 
     let description = input.description.clone();
     let is_favorite = i64::from(input.is_favorite.unwrap_or(false));
     let is_pinned = i64::from(input.is_pinned.unwrap_or(false));
-    let action = if is_update { "updated" } else { "created" };
 
     let transaction = connection
         .transaction()
         .map_err(|error| format!("Could not save the item: {error}"))?;
 
+    let old_title = if kind == "note" && is_update {
+        Some(
+            transaction
+                .query_row(
+                    "SELECT title FROM items WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| format!("Could not save the item: {error}"))?,
+        )
+    } else {
+        None
+    };
+    if kind == "note" && is_update && stored_content != content {
+        let previous = (
+            old_title.as_deref().unwrap_or_default().to_string(),
+            stored_content.as_deref().unwrap_or_default().to_string(),
+        );
+        let recent: i64 = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM item_versions WHERE item_id = ?1 AND created_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-5 minutes'))",
+            params![id], |row| row.get(0),
+        ).map_err(|error| format!("Could not save the item: {error}"))?;
+        if recent == 0 {
+            insert_version(&transaction, &id, &previous.0, &previous.1, key)
+                .map_err(|error| format!("Could not save the item: {error}"))?;
+        }
+    }
+
     if is_update {
+        match key {
+            Some(key) => {
+                transaction
+                    .execute(
+                        "UPDATE items
+                         SET title = ?1, description = '', content = NULL, url = NULL,
+                             collection_id = ?2, is_favorite = ?3, is_pinned = ?4,
+                             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                         WHERE id = ?5",
+                        params![title, collection_id, is_favorite, is_pinned, id],
+                    )
+                    .map_err(|error| format!("Could not save the item: {error}"))?;
+                encryption::write_secret(
+                    &transaction,
+                    key,
+                    &id,
+                    &ProtectedItem {
+                        description: description.clone(),
+                        content: content.clone(),
+                        url: url.clone(),
+                    },
+                )
+                .map_err(|error| format!("Could not save the item: {error}"))?;
+            }
+            None => {
+                transaction
+                    .execute(
+                        "UPDATE items
+                         SET title = ?1, description = ?2, content = ?3, url = ?4,
+                             collection_id = ?5, is_favorite = ?6, is_pinned = ?7,
+                             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                         WHERE id = ?8",
+                        params![
+                            title,
+                            description,
+                            content,
+                            url,
+                            collection_id,
+                            is_favorite,
+                            is_pinned,
+                            id
+                        ],
+                    )
+                    .map_err(|error| format!("Could not save the item: {error}"))?;
+            }
+        }
+    } else {
+        match key {
+            Some(key) => {
+                transaction
+                    .execute(
+                        "INSERT INTO items
+                           (id, kind, title, description, content, url, collection_id, is_favorite,
+                            is_pinned, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, '', NULL, NULL, ?4, ?5, ?6,
+                                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                        params![id, kind, title, collection_id, is_favorite, is_pinned],
+                    )
+                    .map_err(|error| format!("Could not save the item: {error}"))?;
+                encryption::write_secret(
+                    &transaction,
+                    key,
+                    &id,
+                    &ProtectedItem {
+                        description: description.clone(),
+                        content: content.clone(),
+                        url: url.clone(),
+                    },
+                )
+                .map_err(|error| format!("Could not save the item: {error}"))?;
+            }
+            None => {
+                transaction
+                    .execute(
+                        "INSERT INTO items
+                           (id, kind, title, description, content, url, collection_id, is_favorite,
+                            is_pinned, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                        params![
+                            id,
+                            kind,
+                            title,
+                            description,
+                            content,
+                            url,
+                            collection_id,
+                            is_favorite,
+                            is_pinned
+                        ],
+                    )
+                    .map_err(|error| format!("Could not save the item: {error}"))?;
+            }
+        }
+    }
+
+    if key.is_some() {
+        // Protected content never reaches the plaintext index. Drop any existing
+        // row and mark the item dirty so a rebuild runs after an unlock.
+        transaction
+            .execute("DELETE FROM item_search WHERE item_id = ?1", params![id])
+            .map_err(|error| format!("Could not save the item: {error}"))?;
+        upsert_index_state(&transaction, &id)
+            .map_err(|error| format!("Could not save the item: {error}"))?;
+    } else if kind == "note"
+        && (old_title.as_deref() != Some(title.as_str()) || stored_content != content)
+    {
+        transaction
+            .execute("DELETE FROM item_search WHERE item_id = ?1", params![id])
+            .map_err(|error| format!("Could not save the item: {error}"))?;
         transaction
             .execute(
-                "UPDATE items
-                 SET title = ?1, description = ?2, content = ?3, url = ?4,
-                     collection_id = ?5, is_favorite = ?6, is_pinned = ?7,
-                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                 WHERE id = ?8",
-                params![
-                    title,
-                    description,
-                    content,
-                    url,
-                    collection_id,
-                    is_favorite,
-                    is_pinned,
-                    id
-                ],
+                "INSERT INTO item_search(item_id, kind, title, body) VALUES (?1, 'note', ?2, ?3)",
+                params![id, title, plain_text(content.as_deref().unwrap_or(""))],
+            )
+            .map_err(|error| format!("Could not save the item: {error}"))?;
+        transaction.execute("INSERT INTO index_state(item_id, needs_index, indexed_at, updated_at, status) VALUES (?1, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'indexed') ON CONFLICT(item_id) DO UPDATE SET needs_index=0, indexed_at=excluded.indexed_at, updated_at=excluded.updated_at, status='indexed'", params![id]).map_err(|error| format!("Could not save the item: {error}"))?;
+    } else if kind == "file" {
+        transaction
+            .execute(
+                "UPDATE item_search SET title = ?2 WHERE item_id = ?1",
+                params![id, title],
             )
             .map_err(|error| format!("Could not save the item: {error}"))?;
     } else {
-        transaction
-            .execute(
-                "INSERT INTO items
-                   (id, kind, title, description, content, url, collection_id, is_favorite,
-                    is_pinned, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-                params![
-                    id,
-                    kind,
-                    title,
-                    description,
-                    content,
-                    url,
-                    collection_id,
-                    is_favorite,
-                    is_pinned
-                ],
-            )
+        upsert_index_state(&transaction, &id)
             .map_err(|error| format!("Could not save the item: {error}"))?;
     }
-
-    transaction
-        .execute(
-            "INSERT INTO activity (item_id, action, created_at)
-             VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            params![id, action],
-        )
-        .map_err(|error| format!("Could not save the item: {error}"))?;
-
-    upsert_index_state(&transaction, &id)
-        .map_err(|error| format!("Could not save the item: {error}"))?;
 
     transaction
         .commit()
@@ -748,14 +1063,6 @@ fn replace_item_tags(
              SET tags = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = ?1",
             params![item_id, encoded],
-        )
-        .map_err(|error| format!("Could not save the item tags: {error}"))?;
-
-    transaction
-        .execute(
-            "INSERT INTO activity (item_id, action, created_at)
-             VALUES (?1, 'updated', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            params![item_id],
         )
         .map_err(|error| format!("Could not save the item tags: {error}"))?;
 
@@ -844,7 +1151,7 @@ fn write_items_collection(
     for id in ids {
         transaction
             .execute(
-                "UPDATE items SET collection_id = ?1 WHERE id = ?2",
+                "UPDATE items SET collection_id = ?1 WHERE id = ?2 AND collection_id IS NOT ?1",
                 params![collection_id, id],
             )
             .map_err(|error| format!("Could not move the items: {error}"))?;
@@ -877,14 +1184,6 @@ fn write_trashed_items(connection: &mut Connection, ids: &[String]) -> Result<()
         if updated == 0 {
             continue;
         }
-
-        transaction
-            .execute(
-                "INSERT INTO activity (item_id, action, created_at)
-                 VALUES (?1, 'trashed', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-                params![id],
-            )
-            .map_err(|error| format!("Could not move the items to Trash: {error}"))?;
     }
 
     transaction
@@ -913,14 +1212,6 @@ fn write_restored_items(connection: &mut Connection, ids: &[String]) -> Result<(
         if updated == 0 {
             continue;
         }
-
-        transaction
-            .execute(
-                "INSERT INTO activity (item_id, action, created_at)
-                 VALUES (?1, 'restored', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-                params![id],
-            )
-            .map_err(|error| format!("Could not restore the items: {error}"))?;
     }
 
     transaction
@@ -969,6 +1260,7 @@ fn remove_items_permanently(
         .map_err(|error| format!("Could not delete the items: {error}"))?;
 
     for id in ids {
+        transaction.execute("DELETE FROM item_search WHERE item_id = ?1 AND EXISTS (SELECT 1 FROM items WHERE id = ?1 AND deleted_at IS NOT NULL)", params![id]).map_err(|error| format!("Could not delete the items: {error}"))?;
         transaction
             .execute(
                 "DELETE FROM items WHERE id = ?1 AND deleted_at IS NOT NULL",
@@ -1178,6 +1470,7 @@ fn write_import(
     source: &Path,
     original_name: &str,
     byte_size: i64,
+    key: Option<&[u8; 32]>,
 ) -> Result<String, String> {
     let transaction = connection
         .transaction()
@@ -1203,19 +1496,27 @@ fn write_import(
         )
         .map_err(|error| format!("Could not import the file: {error}"))?;
 
-    transaction
-        .execute(
-            "INSERT INTO files (item_id, stored_name, original_name, byte_size, imported_at)
-             VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            params![id, stored_name, original_name, byte_size],
+    // Every item carries a secret row while encryption is on, even when its
+    // protected fields are empty, so reads never miss the row.
+    if let Some(key) = key {
+        encryption::write_secret(
+            &transaction,
+            key,
+            &id,
+            &ProtectedItem {
+                description: String::new(),
+                content: None,
+                url: None,
+            },
         )
         .map_err(|error| format!("Could not import the file: {error}"))?;
+    }
 
     transaction
         .execute(
-            "INSERT INTO activity (item_id, action, created_at)
-             VALUES (?1, 'imported', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            params![id],
+            "INSERT INTO files (item_id, stored_name, original_name, byte_size, imported_at, encrypted)
+             VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?5)",
+            params![id, stored_name, original_name, byte_size, i64::from(key.is_some())],
         )
         .map_err(|error| format!("Could not import the file: {error}"))?;
 
@@ -1223,9 +1524,24 @@ fn write_import(
         .map_err(|error| format!("Could not import the file: {error}"))?;
 
     // The transaction holds the rows; the bytes land on disk before the commit.
-    if let Err(error) = fs::copy(source, &target) {
+    // The plaintext size stays in `byte_size` even when the stored bytes are
+    // encrypted.
+    let write_result = match key {
+        Some(key) => {
+            let bytes = fs::read(source)
+                .map_err(|error| format!("Could not read the source file: {error}"))?;
+            let encrypted = encryption::encrypt_file(key, &id, &bytes)
+                .map_err(|error| format!("Could not import the file: {error}"))?;
+            fs::write(&target, &encrypted)
+                .map_err(|error| format!("Could not copy file into managed storage: {error}"))
+        }
+        None => fs::copy(source, &target)
+            .map(|_| ())
+            .map_err(|error| format!("Could not copy file into managed storage: {error}")),
+    };
+    if let Err(error) = write_result {
         let _ = fs::remove_file(&target);
-        return Err(format!("Could not copy file into managed storage: {error}"));
+        return Err(error);
     }
 
     transaction
@@ -1237,15 +1553,27 @@ fn write_import(
 
 fn load_item_with_state(state: &DatabaseState, id: &str) -> Result<Item, String> {
     let connection = state.require_connection()?;
+    let connection = connection.as_ref().expect("checked above");
+    let key = encryption::key_if_enabled(connection, state.content_key())?;
 
-    let item = read_item(
-        connection.as_ref().expect("checked above"),
-        state.files_dir(),
-        id,
-    )
-    .map_err(|error| format!("Could not read the item: {error}"))?;
+    let item = read_item(connection, state.files_dir(), id)
+        .map_err(|error| format!("Could not read the item: {error}"))?;
 
-    item.ok_or_else(|| "Item was not found".to_string())
+    let Some(mut item) = item else {
+        return Err("Item was not found".to_string());
+    };
+
+    // A missing key already returned "Vault is locked"; with it present the
+    // protected values are decrypted in memory and never exposed as ciphertext.
+    if let Some(key) = key.as_ref() {
+        let secret = encryption::read_secret(connection, key, id)
+            .map_err(|error| format!("Could not read the item: {error}"))?;
+        item.description = secret.description;
+        item.content = secret.content;
+        item.url = secret.url;
+    }
+
+    Ok(item)
 }
 
 fn list_items_with_state(
@@ -1253,19 +1581,19 @@ fn list_items_with_state(
     filter: Option<&ItemFilter>,
 ) -> Result<Vec<ItemSummary>, String> {
     let connection = state.require_connection()?;
+    let connection = connection.as_ref().expect("checked above");
+    let key = encryption::key_if_enabled(connection, state.content_key())?;
 
-    read_item_summaries(
-        connection.as_ref().expect("checked above"),
-        state.files_dir(),
-        filter,
-    )
-    .map_err(|error| format!("Could not list the items: {error}"))
+    read_item_summaries(connection, state.files_dir(), filter, key.as_ref())
+        .map_err(|error| format!("Could not list the items: {error}"))
 }
 
 fn save_item_with_state(state: &DatabaseState, input: &ItemInput) -> Result<Item, String> {
     let id = {
         let mut connection = state.require_connection()?;
-        write_item(connection.as_mut().expect("checked above"), input)?
+        let connection = connection.as_mut().expect("checked above");
+        let key = encryption::key_if_enabled(connection, state.content_key())?;
+        write_item(connection, input, key.as_ref())?
     };
 
     load_item_with_state(state, &id)
@@ -1288,18 +1616,288 @@ fn list_collections_with_state(state: &DatabaseState) -> Result<Vec<Collection>,
         .map_err(|error| format!("Could not list the collections: {error}"))
 }
 
-fn list_activity_with_state(state: &DatabaseState) -> Result<Vec<ActivityEntry>, String> {
-    let connection = state.require_connection()?;
-
-    read_activity(connection.as_ref().expect("checked above"))
-        .map_err(|error| format!("Could not list the activity: {error}"))
-}
-
 fn list_index_state_with_state(state: &DatabaseState) -> Result<Vec<IndexState>, String> {
     let connection = state.require_connection()?;
 
     read_index_state(connection.as_ref().expect("checked above"))
         .map_err(|error| format!("Could not list the index state: {error}"))
+}
+
+fn list_item_versions_with_state(
+    state: &DatabaseState,
+    item_id: &str,
+) -> Result<Vec<ItemVersion>, String> {
+    let connection = state.require_connection()?;
+    let connection = connection.as_ref().expect("checked above");
+    let key = encryption::key_if_enabled(connection, state.content_key())?;
+    let kind: Option<String> = connection
+        .query_row(
+            "SELECT kind FROM items WHERE id = ?1",
+            params![item_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("Could not list versions: {error}"))?;
+    if kind.as_deref() != Some("note") {
+        return Err("Item is not a note".into());
+    }
+    read_versions(connection, item_id, key.as_ref())
+        .map_err(|error| format!("Could not list versions: {error}"))
+}
+
+fn restore_item_version_with_state(
+    state: &DatabaseState,
+    version_id: &str,
+) -> Result<Item, String> {
+    let id = {
+        let mut guard = state.require_connection()?;
+        let connection = guard.as_mut().expect("checked above");
+        let key = encryption::key_if_enabled(connection, state.content_key())?;
+        let tx = connection
+            .transaction()
+            .map_err(|error| format!("Could not restore version: {error}"))?;
+        let version: Option<(String, String, String, Option<Vec<u8>>)> = tx.query_row(
+            "SELECT v.item_id, v.title, v.content, v.encrypted_content FROM item_versions v JOIN items i ON i.id = v.item_id WHERE v.id = ?1 AND i.kind = 'note' AND i.deleted_at IS NULL",
+            params![version_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional().map_err(|error| format!("Could not restore version: {error}"))?;
+        let (id, title, stored_content, encrypted) =
+            version.ok_or_else(|| "Version was not found".to_string())?;
+        let content = match (&key, encrypted) {
+            (Some(key), Some(bytes)) => encryption::decrypt_version(key, version_id, &bytes)
+                .map_err(|error| format!("Could not restore version: {error}"))?,
+            _ => stored_content,
+        };
+        let current_title: String = tx
+            .query_row(
+                "SELECT title FROM items WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("Could not restore version: {error}"))?;
+        let current_content = match &key {
+            Some(key) => encryption::read_secret(&tx, key, &id)
+                .map_err(|error| format!("Could not restore version: {error}"))?
+                .content
+                .unwrap_or_default(),
+            None => tx
+                .query_row(
+                    "SELECT COALESCE(content, '') FROM items WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("Could not restore version: {error}"))?,
+        };
+        insert_version(&tx, &id, &current_title, &current_content, key.as_ref())
+            .map_err(|error| format!("Could not restore version: {error}"))?;
+        match &key {
+            Some(key) => {
+                let mut secret = encryption::read_secret(&tx, key, &id)
+                    .map_err(|error| format!("Could not restore version: {error}"))?;
+                secret.content = Some(content.clone());
+                encryption::write_secret(&tx, key, &id, &secret)
+                    .map_err(|error| format!("Could not restore version: {error}"))?;
+                tx.execute("UPDATE items SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1", params![id, title]).map_err(|error| format!("Could not restore version: {error}"))?;
+            }
+            None => {
+                tx.execute("UPDATE items SET title = ?2, content = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1", params![id, title, content]).map_err(|error| format!("Could not restore version: {error}"))?;
+            }
+        }
+        if key.is_some() {
+            tx.execute("DELETE FROM item_search WHERE item_id = ?1", params![id])
+                .map_err(|error| format!("Could not restore version: {error}"))?;
+            upsert_index_state(&tx, &id)
+                .map_err(|error| format!("Could not restore version: {error}"))?;
+        } else {
+            tx.execute("DELETE FROM item_search WHERE item_id = ?1", params![id])
+                .map_err(|error| format!("Could not restore version: {error}"))?;
+            tx.execute(
+                "INSERT INTO item_search(item_id, kind, title, body) VALUES (?1, 'note', ?2, ?3)",
+                params![id, title, plain_text(&content)],
+            )
+            .map_err(|error| format!("Could not restore version: {error}"))?;
+        }
+        tx.commit()
+            .map_err(|error| format!("Could not restore version: {error}"))?;
+        id
+    };
+    load_item_with_state(state, &id)
+}
+
+fn read_item_file_with_state(state: &DatabaseState, id: &str) -> Result<ItemFilePreview, String> {
+    let (path, original_name, byte_size, imported_at, encrypted, key) = {
+        let connection = state.require_connection()?;
+        let connection = connection.as_ref().expect("checked above");
+        let key = encryption::key_if_enabled(connection, state.content_key())?;
+        let row: Option<(String, String, i64, String, i64)> = connection.query_row(
+            "SELECT f.stored_name, f.original_name, f.byte_size, f.imported_at, f.encrypted FROM files f JOIN items i ON i.id = f.item_id WHERE i.id = ?1 AND i.kind = 'file' AND i.deleted_at IS NULL",
+            params![id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        ).optional().map_err(|error| format!("Could not read the file: {error}"))?;
+        let (stored, name, size, imported, encrypted) =
+            row.ok_or_else(|| "File was not found".to_string())?;
+        (
+            state.files_dir().join(stored),
+            name,
+            size,
+            imported,
+            encrypted != 0,
+            key,
+        )
+    };
+    let actual_size = fs::metadata(&path)
+        .map_err(|_| "The file is missing".to_string())?
+        .len();
+    let ext = Path::new(&original_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let (preview, mime) = match ext.as_str() {
+        "txt" | "md" | "markdown" => ("text", Some("text/plain")),
+        "png" => ("image", Some("image/png")),
+        "jpg" | "jpeg" => ("image", Some("image/jpeg")),
+        "gif" => ("image", Some("image/gif")),
+        "webp" => ("image", Some("image/webp")),
+        "pdf" => ("pdf", Some("application/pdf")),
+        _ => ("unsupported", None),
+    };
+    // The stored size of an encrypted file is ciphertext; the plaintext size in
+    // `byte_size` drives the 25 MB image and PDF rule.
+    let too_large = (preview == "image" || preview == "pdf") && byte_size > 25 * 1024 * 1024;
+    let preview = if too_large { "unsupported" } else { preview };
+    let mut text = None;
+    let mut payload_base64 = None;
+    let mut truncated = false;
+    if preview == "text" {
+        if encrypted {
+            let key = key.as_ref().ok_or_else(|| "Vault is locked".to_string())?;
+            let stored =
+                fs::read(&path).map_err(|error| format!("Could not read the file: {error}"))?;
+            let mut bytes = encryption::decrypt_file(key, id, &stored)
+                .map_err(|error| format!("Could not read the file: {error}"))?;
+            truncated = bytes.len() > 1024 * 1024;
+            bytes.truncate(1024 * 1024);
+            text = Some(String::from_utf8_lossy(&bytes).into_owned());
+        } else {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            fs::File::open(&path)
+                .and_then(|file| file.take(1024 * 1024 + 1).read_to_end(&mut bytes))
+                .map_err(|error| format!("Could not read the file: {error}"))?;
+            truncated = bytes.len() > 1024 * 1024;
+            bytes.truncate(1024 * 1024);
+            text = Some(String::from_utf8_lossy(&bytes).into_owned());
+        }
+    } else if preview == "image" || preview == "pdf" {
+        let bytes = if encrypted {
+            let key = key.as_ref().ok_or_else(|| "Vault is locked".to_string())?;
+            let stored =
+                fs::read(&path).map_err(|error| format!("Could not read the file: {error}"))?;
+            encryption::decrypt_file(key, id, &stored)
+                .map_err(|error| format!("Could not read the file: {error}"))?
+        } else {
+            fs::read(&path).map_err(|error| format!("Could not read the file: {error}"))?
+        };
+        payload_base64 = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
+    }
+    Ok(ItemFilePreview {
+        preview: preview.into(),
+        mime: mime.map(str::to_string),
+        text,
+        payload_base64,
+        byte_size: if encrypted {
+            byte_size
+        } else if actual_size <= i64::MAX as u64 {
+            actual_size as i64
+        } else {
+            byte_size
+        },
+        original_name,
+        imported_at,
+        truncated,
+    })
+}
+
+// A decrypted file opened by another application lives outside the vault. The
+// item id keeps the name unique and the original name keeps it readable.
+fn temp_file_name(id: &str, original_name: &str) -> String {
+    let base = Path::new(original_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let cleaned: String = base
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_' | ' ') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim_matches(|character| character == '.' || character == ' ');
+    if cleaned.is_empty() {
+        format!("{id}-file")
+    } else {
+        format!("{id}-{cleaned}")
+    }
+}
+
+fn load_storage_report_with_state(state: &DatabaseState) -> Result<StorageReport, String> {
+    let connection = state.require_connection()?;
+    let connection = connection.as_ref().expect("checked above");
+    let page_count: i64 = connection
+        .query_row("PRAGMA page_count", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    let page_size: i64 = connection
+        .query_row("PRAGMA page_size", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT f.item_id, i.title, f.original_name, f.byte_size, f.imported_at FROM files f JOIN items i ON i.id=f.item_id ORDER BY f.byte_size DESC, f.item_id ASC").map_err(|error| error.to_string())?;
+    let files: Vec<StorageFile> = statement
+        .query_map([], |row| {
+            Ok(StorageFile {
+                item_id: row.get(0)?,
+                title: row.get(1)?,
+                original_name: row.get(2)?,
+                byte_size: row.get(3)?,
+                imported_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(|error| error.to_string())?;
+    let mut groups: Vec<StorageGroup> = ["Images", "PDFs", "Text", "Other"]
+        .iter()
+        .map(|label| StorageGroup {
+            label: (*label).into(),
+            count: 0,
+            bytes: 0,
+        })
+        .collect();
+    for file in &files {
+        let ext = Path::new(&file.original_name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let index = match ext.as_str() {
+            "png" | "jpg" | "jpeg" | "gif" | "webp" => 0,
+            "pdf" => 1,
+            "txt" | "md" | "markdown" => 2,
+            _ => 3,
+        };
+        groups[index].count += 1;
+        groups[index].bytes += file.byte_size;
+    }
+    let file_bytes = files.iter().map(|file| file.byte_size).sum();
+    let database_bytes = page_count * page_size;
+    Ok(StorageReport {
+        total_bytes: database_bytes + file_bytes,
+        database_bytes,
+        file_bytes,
+        file_count: files.len() as i64,
+        groups,
+        largest: files.into_iter().take(10).collect(),
+    })
 }
 
 fn set_item_pinned_with_state(
@@ -1486,24 +2084,30 @@ fn list_tags_with_state(state: &DatabaseState) -> Result<Vec<Tag>, String> {
 
 // Resolves the managed file for a file item, rejecting a missing item, a
 // non-file item, and a file that is no longer on disk.
+// The item kind, managed name, encryption flag, and original name for a file.
+type ManagedFileRow = (String, Option<String>, Option<i64>, Option<String>);
+
 fn managed_file_path_with_state(state: &DatabaseState, id: &str) -> Result<PathBuf, String> {
-    let connection = state.require_connection()?;
+    let (kind, stored_name, encrypted, original_name, key) = {
+        let connection = state.require_connection()?;
+        let connection = connection.as_ref().expect("checked above");
+        let key = encryption::key_if_enabled(connection, state.content_key())?;
+        let row: Option<ManagedFileRow> = connection
+            .query_row(
+                "SELECT i.kind, f.stored_name, f.encrypted, f.original_name
+                 FROM items i
+                 LEFT JOIN files f ON f.item_id = i.id
+                 WHERE i.id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()
+            .map_err(|error| format!("Could not read the item: {error}"))?;
 
-    let row: Option<(String, Option<String>)> = connection
-        .as_ref()
-        .expect("checked above")
-        .query_row(
-            "SELECT i.kind, f.stored_name
-             FROM items i
-             LEFT JOIN files f ON f.item_id = i.id
-             WHERE i.id = ?1",
-            params![id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(|error| format!("Could not read the item: {error}"))?;
-
-    let (kind, stored_name) = row.ok_or_else(|| "Item was not found".to_string())?;
+        let (kind, stored_name, encrypted, original_name) =
+            row.ok_or_else(|| "Item was not found".to_string())?;
+        (kind, stored_name, encrypted, original_name, key)
+    };
 
     if kind != "file" {
         return Err("This item is not a file".to_string());
@@ -1516,15 +2120,36 @@ fn managed_file_path_with_state(state: &DatabaseState, id: &str) -> Result<PathB
         return Err("The file is missing".to_string());
     }
 
+    // An encrypted file is opened through a decrypted temporary copy. The copy
+    // sits outside the vault and the UI names that boundary.
+    if encrypted == Some(1) {
+        let key = key.as_ref().ok_or_else(|| "Vault is locked".to_string())?;
+        let stored =
+            fs::read(&path).map_err(|error| format!("Could not read the file: {error}"))?;
+        let bytes = encryption::decrypt_file(key, id, &stored)
+            .map_err(|error| format!("Could not read the file: {error}"))?;
+        return write_temp_file(id, original_name.as_deref(), &bytes);
+    }
+
+    Ok(path)
+}
+
+fn write_temp_file(id: &str, original_name: Option<&str>, bytes: &[u8]) -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("kivo-decrypted");
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("Could not prepare a temporary copy: {error}"))?;
+    let path = dir.join(temp_file_name(id, original_name.unwrap_or("file")));
+    fs::write(&path, bytes)
+        .map_err(|error| format!("Could not prepare a temporary copy: {error}"))?;
     Ok(path)
 }
 
 fn source_url_with_state(state: &DatabaseState, id: &str) -> Result<String, String> {
     let connection = state.require_connection()?;
+    let connection = connection.as_ref().expect("checked above");
+    let key = encryption::key_if_enabled(connection, state.content_key())?;
 
     let row: Option<(String, Option<String>)> = connection
-        .as_ref()
-        .expect("checked above")
         .query_row(
             "SELECT kind, url FROM items WHERE id = ?1",
             params![id],
@@ -1533,12 +2158,20 @@ fn source_url_with_state(state: &DatabaseState, id: &str) -> Result<String, Stri
         .optional()
         .map_err(|error| format!("Could not read the item: {error}"))?;
 
-    let (kind, url) = row.ok_or_else(|| "Item was not found".to_string())?;
+    let (kind, stored_url) = row.ok_or_else(|| "Item was not found".to_string())?;
 
     if kind != "source" {
         return Err("This item is not a source".to_string());
     }
 
+    let url = match key {
+        Some(key) => {
+            encryption::read_secret(connection, &key, id)
+                .map_err(|error| format!("Could not read the item: {error}"))?
+                .url
+        }
+        None => stored_url,
+    };
     let url = url.unwrap_or_default();
     let url = url.trim();
 
@@ -1581,22 +2214,108 @@ fn import_file_with_state(state: &DatabaseState, source_path: &str) -> Result<It
 
     let id = {
         let mut connection = state.require_connection()?;
-
+        let connection = connection.as_mut().expect("checked above");
+        let key = encryption::key_if_enabled(connection, state.content_key())?;
         write_import(
-            connection.as_mut().expect("checked above"),
+            connection,
             state.files_dir(),
             source,
             &original_name,
             byte_size,
+            key.as_ref(),
         )?
     };
 
     load_item_with_state(state, &id)
 }
 
+fn index_file_with_state(state: &DatabaseState, id: &str) -> Result<IndexState, String> {
+    {
+        // Extraction writes plaintext into item_search, which must stay empty
+        // while encryption is on. Reject before touching any state.
+        let connection = state.require_connection()?;
+        if encryption::is_enabled(connection.as_ref().expect("checked above"))? {
+            return Err("Encryption is on; PDF text indexing is unavailable".to_string());
+        }
+    }
+
+    let path = {
+        let connection = state.require_connection()?;
+        let connection = connection.as_ref().expect("checked above");
+        let stored: Option<String> = connection.query_row(
+            "SELECT f.stored_name FROM files f JOIN items i ON i.id = f.item_id WHERE i.id = ?1 AND i.deleted_at IS NULL AND lower(f.original_name) LIKE '%.pdf'",
+            params![id], |row| row.get(0),
+        ).optional().map_err(|error| format!("Could not index PDF: {error}"))?;
+        let stored = stored.ok_or_else(|| "Item is not a live PDF".to_string())?;
+        connection.execute("UPDATE index_state SET needs_index=1, indexed_at=NULL, status='pending', updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE item_id=?1", params![id]).map_err(|error| format!("Could not index PDF: {error}"))?;
+        state.files_dir().join(stored)
+    };
+
+    // Extraction may take seconds; no database mutex is held while reading PDF bytes.
+    let extracted = pdf_extract::extract_text(&path);
+    let mut connection = state.require_connection()?;
+    let connection = connection.as_mut().expect("checked above");
+    let tx = connection
+        .transaction()
+        .map_err(|error| format!("Could not index PDF: {error}"))?;
+    let live: Option<String> = tx.query_row(
+        "SELECT f.stored_name FROM files f JOIN items i ON i.id=f.item_id WHERE i.id=?1 AND i.deleted_at IS NULL",
+        params![id], |row| row.get(0),
+    ).optional().map_err(|error| format!("Could not index PDF: {error}"))?;
+    if live.as_deref().map(|name| state.files_dir().join(name)) != Some(path) {
+        return Err("PDF was removed before indexing finished".into());
+    }
+    tx.execute("DELETE FROM item_search WHERE item_id=?1", params![id])
+        .map_err(|error| format!("Could not index PDF: {error}"))?;
+    let status = match &extracted {
+        Ok(text) if !text.trim().is_empty() => "indexed",
+        Ok(_) => "no_text",
+        Err(_) => "failed",
+    };
+    if let Ok(text) = &extracted {
+        if status == "indexed" {
+            tx.execute("INSERT INTO item_search(item_id, kind, title, body) SELECT i.id, i.kind, i.title, ?2 FROM items i WHERE i.id=?1", params![id, text]).map_err(|error| format!("Could not index PDF: {error}"))?;
+        }
+    }
+    tx.execute("UPDATE index_state SET status=?2, needs_index=?3, indexed_at=CASE WHEN ?2='indexed' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE item_id=?1", params![id, status, i64::from(status == "failed")]).map_err(|error| format!("Could not index PDF: {error}"))?;
+    tx.commit()
+        .map_err(|error| format!("Could not index PDF: {error}"))?;
+    let state_row = read_index_state(connection)
+        .map_err(|error| format!("Could not index PDF: {error}"))?
+        .into_iter()
+        .find(|row| row.item_id == id)
+        .ok_or_else(|| "Index state was not found".to_string())?;
+    extracted
+        .map_err(|error| format!("Could not extract PDF text: {error}"))
+        .map(|_| state_row)
+}
+
 #[tauri::command]
-pub fn import_file(source_path: String, state: State<'_, DatabaseState>) -> Result<Item, String> {
-    import_file_with_state(state.inner(), &source_path)
+pub async fn import_file(source_path: String, app: AppHandle) -> Result<Item, String> {
+    let state = app.state::<DatabaseState>();
+    let item = import_file_with_state(state.inner(), &source_path)?;
+    if item
+        .file
+        .as_ref()
+        .is_some_and(|file| file.original_name.to_ascii_lowercase().ends_with(".pdf"))
+    {
+        let app = app.clone();
+        let id = item.id.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let result = index_file_with_state(app.state::<DatabaseState>().inner(), &id);
+            let _ = app.emit("file-index-complete", serde_json::json!({"itemId": id, "status": result.as_ref().map(|row| row.status.as_str()).unwrap_or("failed")}));
+        });
+    }
+    Ok(item)
+}
+
+#[tauri::command]
+pub async fn index_file(item_id: String, app: AppHandle) -> Result<IndexState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = index_file_with_state(app.state::<DatabaseState>().inner(), &item_id);
+        let _ = app.emit("file-index-complete", serde_json::json!({"itemId": item_id, "status": result.as_ref().map(|row| row.status.as_str()).unwrap_or("failed")}));
+        result
+    }).await.map_err(|error| format!("Could not index PDF: {error}"))?
 }
 
 #[tauri::command]
@@ -1632,8 +2351,32 @@ pub fn list_collections(state: State<'_, DatabaseState>) -> Result<Vec<Collectio
 }
 
 #[tauri::command]
-pub fn list_activity(state: State<'_, DatabaseState>) -> Result<Vec<ActivityEntry>, String> {
-    list_activity_with_state(state.inner())
+pub fn list_item_versions(
+    item_id: String,
+    state: State<'_, DatabaseState>,
+) -> Result<Vec<ItemVersion>, String> {
+    list_item_versions_with_state(state.inner(), &item_id)
+}
+
+#[tauri::command]
+pub fn restore_item_version(
+    version_id: String,
+    state: State<'_, DatabaseState>,
+) -> Result<Item, String> {
+    restore_item_version_with_state(state.inner(), &version_id)
+}
+
+#[tauri::command]
+pub fn read_item_file(
+    id: String,
+    state: State<'_, DatabaseState>,
+) -> Result<ItemFilePreview, String> {
+    read_item_file_with_state(state.inner(), &id)
+}
+
+#[tauri::command]
+pub fn load_storage_report(state: State<'_, DatabaseState>) -> Result<StorageReport, String> {
+    load_storage_report_with_state(state.inner())
 }
 
 #[tauri::command]
@@ -1888,6 +2631,222 @@ mod tests {
     }
 
     #[test]
+    fn note_body_search_returns_snippet_and_updates_after_edit() {
+        let vault = TempVault::new("fts-note");
+        let state = vault.state();
+        let saved = save_item_with_state(
+            &state,
+            &note_input("Plain title", "<p>uniqueorchid blooms</p>"),
+        )
+        .expect("save note");
+        let filter = ItemFilter {
+            query: Some("uniqueorchid".into()),
+            ..Default::default()
+        };
+        let results = list_items_with_state(&state, Some(&filter)).expect("search");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, saved.id);
+        assert!(results[0]
+            .match_snippet
+            .as_deref()
+            .unwrap_or("")
+            .contains("uniqueorchid"));
+
+        let mut updated = note_input("Plain title", "<p>differentflower blooms</p>");
+        updated.id = Some(saved.id);
+        save_item_with_state(&state, &updated).expect("update");
+        assert!(list_items_with_state(&state, Some(&filter))
+            .expect("search old")
+            .is_empty());
+    }
+
+    #[test]
+    fn note_versions_snapshot_previous_body_and_restore_current_body() {
+        let vault = TempVault::new("versions");
+        let state = vault.state();
+        let saved =
+            save_item_with_state(&state, &note_input("First", "first body")).expect("create");
+        let mut edit = note_input("Second", "second body");
+        edit.id = Some(saved.id.clone());
+        save_item_with_state(&state, &edit).expect("edit");
+        let versions = list_item_versions_with_state(&state, &saved.id).expect("versions");
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].content, "first body");
+        let restored = restore_item_version_with_state(&state, &versions[0].id).expect("restore");
+        assert_eq!(restored.content.as_deref(), Some("first body"));
+        assert!(list_item_versions_with_state(&state, &saved.id)
+            .expect("versions after restore")
+            .iter()
+            .any(|v| v.content == "second body"));
+    }
+
+    #[test]
+    fn rapid_note_saves_do_not_make_duplicate_snapshots() {
+        let vault = TempVault::new("version-throttle");
+        let state = vault.state();
+        let note = save_item_with_state(&state, &note_input("Note", "first")).expect("create");
+        for body in ["second", "third", "third"] {
+            let mut input = note_input("Note", body);
+            input.id = Some(note.id.clone());
+            save_item_with_state(&state, &input).expect("save");
+        }
+        assert_eq!(
+            list_item_versions_with_state(&state, &note.id)
+                .expect("versions")
+                .len(),
+            1
+        );
+        let connection = state.require_connection().expect("connection");
+        connection
+            .as_ref()
+            .unwrap()
+            .execute(
+                "UPDATE item_versions SET created_at='2020-01-01T00:00:00.000Z' WHERE item_id=?1",
+                params![note.id],
+            )
+            .expect("age snapshot");
+        drop(connection);
+        let mut input = note_input("Note", "fourth");
+        input.id = Some(note.id.clone());
+        save_item_with_state(&state, &input).expect("save after five minutes");
+        assert_eq!(
+            list_item_versions_with_state(&state, &note.id)
+                .expect("versions")
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn version_history_prunes_to_twenty_and_rejects_files() {
+        let vault = TempVault::new("version-prune");
+        let state = vault.state();
+        let note = save_item_with_state(&state, &note_input("Note", "body")).expect("note");
+        {
+            let connection = state.require_connection().expect("connection");
+            let connection = connection.as_ref().unwrap();
+            for number in 0..25 {
+                insert_version(
+                    connection,
+                    &note.id,
+                    "Note",
+                    &format!("version {number}"),
+                    None,
+                )
+                .expect("snapshot");
+            }
+        }
+        let versions = list_item_versions_with_state(&state, &note.id).expect("versions");
+        assert_eq!(versions.len(), 20);
+        assert_eq!(versions[0].content, "version 24");
+        assert_eq!(versions[19].content, "version 5");
+        let source = vault.root.join("binary.bin");
+        fs::write(&source, b"binary").expect("fixture");
+        let file = import_file_with_state(&state, &source.to_string_lossy()).expect("import");
+        assert!(list_item_versions_with_state(&state, &file.id).is_err());
+    }
+
+    #[test]
+    fn pdf_index_failure_sets_failed_status_without_locking_out_other_reads() {
+        let vault = TempVault::new("pdf-failure");
+        let state = vault.state();
+        let source = vault.root.join("broken.pdf");
+        fs::write(&source, b"not actually a PDF").expect("fixture");
+        let item = import_file_with_state(&state, &source.to_string_lossy()).expect("import");
+        assert!(index_file_with_state(&state, &item.id).is_err());
+        let rows = list_index_state_with_state(&state).expect("index status");
+        assert_eq!(rows[0].status, "failed");
+        assert!(load_item_with_state(&state, &item.id).is_ok());
+    }
+
+    #[test]
+    fn pdf_text_indexes_and_search_finds_body_only_term() {
+        let vault = TempVault::new("pdf-search");
+        let state = vault.state();
+        let source = vault.root.join("report.pdf");
+        let stream = "BT /F1 12 Tf 40 100 Td (quasarneedle) Tj ET";
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            format!("<< /Length {} >>\nstream\n{}\nendstream", stream.len(), stream),
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (number, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", number + 1, object).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 6\n0000000000 65535 f \n{}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", offsets.iter().map(|offset| format!("{offset:010} 00000 n \n")).collect::<String>(), xref).as_bytes());
+        fs::write(&source, pdf).expect("write PDF fixture");
+        let item = import_file_with_state(&state, &source.to_string_lossy()).expect("import PDF");
+        assert_eq!(
+            index_file_with_state(&state, &item.id)
+                .expect("index PDF")
+                .status,
+            "indexed"
+        );
+        let results = list_items_with_state(
+            &state,
+            Some(&ItemFilter {
+                query: Some("quasarneedle".into()),
+                ..Default::default()
+            }),
+        )
+        .expect("search PDF");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, item.id);
+        assert!(results[0]
+            .match_snippet
+            .as_deref()
+            .unwrap_or("")
+            .contains("quasarneedle"));
+    }
+
+    #[test]
+    fn preview_reads_managed_text_and_storage_groups_files() {
+        let vault = TempVault::new("preview-storage");
+        let state = vault.state();
+        let source = vault.root.join("readme.md");
+        fs::write(&source, b"private content").expect("fixture");
+        let item = import_file_with_state(&state, &source.to_string_lossy()).expect("import");
+        let preview = read_item_file_with_state(&state, &item.id).expect("preview");
+        assert_eq!(preview.preview, "text");
+        assert_eq!(preview.text.as_deref(), Some("private content"));
+        assert!(preview.payload_base64.is_none());
+        let report = load_storage_report_with_state(&state).expect("storage");
+        assert_eq!(report.file_count, 1);
+        assert_eq!(report.file_bytes, 15);
+        assert_eq!(report.total_bytes, report.database_bytes + 15);
+        assert_eq!(
+            report
+                .groups
+                .iter()
+                .find(|group| group.label == "Text")
+                .unwrap()
+                .count,
+            1
+        );
+        assert_eq!(report.largest[0].item_id, item.id);
+    }
+
+    #[test]
+    fn preview_truncates_large_text_instead_of_refusing_it() {
+        let vault = TempVault::new("preview-large-text");
+        let state = vault.state();
+        let source = vault.root.join("large.txt");
+        fs::write(&source, vec![b'x'; 26 * 1024 * 1024]).expect("fixture");
+        let item = import_file_with_state(&state, &source.to_string_lossy()).expect("import");
+
+        let preview = read_item_file_with_state(&state, &item.id).expect("preview");
+        assert_eq!(preview.preview, "text");
+        assert!(preview.truncated);
+        assert_eq!(preview.text.unwrap().len(), 1024 * 1024);
+    }
+
+    #[test]
     fn saved_note_reads_back_with_its_fields() {
         let vault = TempVault::new("note-round-trip");
         let state = vault.state();
@@ -2049,18 +3008,6 @@ mod tests {
         assert_eq!(tags.len(), 1);
         assert_eq!(tags[0].name, "home");
         assert_eq!(tags[0].count, 1);
-
-        let connection = state.require_connection().expect("lock connection");
-        let connection = connection.as_ref().expect("connection is initialized");
-
-        let activity_count: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM activity WHERE item_id = ?1 AND action = 'updated'",
-                params![saved.id],
-                |row| row.get(0),
-            )
-            .expect("count tag activity");
-        assert_eq!(activity_count, 3);
     }
 
     #[test]
@@ -2093,18 +3040,6 @@ mod tests {
 
         let copied = fs::read(state.files_dir().join(&name)).expect("read copied file");
         assert_eq!(copied, b"hello world".to_vec());
-
-        let connection = state.require_connection().expect("lock connection");
-        let action: String = connection
-            .as_ref()
-            .expect("connection is initialized")
-            .query_row(
-                "SELECT action FROM activity WHERE item_id = ?1",
-                params![item.id],
-                |row| row.get(0),
-            )
-            .expect("read activity");
-        assert_eq!(action, "imported");
     }
 
     #[test]
@@ -2342,8 +3277,8 @@ mod tests {
     }
 
     #[test]
-    fn activity_and_index_state_are_recorded_in_order() {
-        let vault = TempVault::new("activity-index");
+    fn index_state_is_recorded_in_order() {
+        let vault = TempVault::new("index-state");
         let state = vault.state();
 
         let saved =
@@ -2352,8 +3287,9 @@ mod tests {
         let index_rows = list_index_state_with_state(&state).expect("list index state");
         assert_eq!(index_rows.len(), 1);
         assert_eq!(index_rows[0].item_id, saved.id);
-        assert!(index_rows[0].needs_index);
-        assert_eq!(index_rows[0].indexed_at, None);
+        assert!(!index_rows[0].needs_index);
+        assert_eq!(index_rows[0].status, "indexed");
+        assert!(index_rows[0].indexed_at.is_some());
 
         {
             let connection = state.require_connection().expect("lock connection");
@@ -2381,13 +3317,7 @@ mod tests {
         save_item_with_state(&state, &update).expect("update note");
 
         let index_rows = list_index_state_with_state(&state).expect("list after update");
-        assert!(index_rows[0].needs_index, "an update marks the item again");
-
-        let activity = list_activity_with_state(&state).expect("list activity");
-        assert_eq!(activity.len(), 2);
-        assert_eq!(activity[0].action, "updated");
-        assert_eq!(activity[1].action, "created");
-        assert_eq!(activity[0].item_id.as_deref(), Some(saved.id.as_str()));
+        assert!(!index_rows[0].needs_index, "a note indexes during save");
     }
 
     #[test]
@@ -2721,8 +3651,8 @@ mod tests {
     }
 
     #[test]
-    fn trash_writes_one_activity_row_per_item() {
-        let vault = TempVault::new("trash-activity");
+    fn trash_marks_items_deleted_and_is_idempotent() {
+        let vault = TempVault::new("trash");
         let state = vault.state();
 
         let first = save_item_with_state(&state, &note_input("First", "body")).expect("save first");
@@ -2731,45 +3661,16 @@ mod tests {
 
         trash_items_with_state(&state, &[first.id.clone(), second.id.clone()]).expect("trash both");
 
-        {
-            let connection = state.require_connection().expect("lock connection");
-            let connection = connection.as_ref().expect("connection is initialized");
-
-            for id in [&first.id, &second.id] {
-                let (deleted_at, trashed): (Option<String>, i64) = connection
-                    .query_row(
-                        "SELECT i.deleted_at,
-                                (SELECT COUNT(*) FROM activity a
-                                 WHERE a.item_id = i.id AND a.action = 'trashed')
-                         FROM items i
-                         WHERE i.id = ?1",
-                        params![id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .expect("read trashed state");
-
-                assert!(deleted_at.is_some());
-                assert_eq!(trashed, 1);
-            }
+        for id in [&first.id, &second.id] {
+            let loaded = load_item_with_state(&state, id).expect("load trashed");
+            assert!(loaded.deleted_at.is_some());
         }
 
-        // Trashing an already-trashed item does not add a second activity row.
+        // Trashing an already-trashed item leaves it trashed.
         trash_items_with_state(&state, std::slice::from_ref(&first.id)).expect("trash again");
 
-        {
-            let connection = state.require_connection().expect("lock connection");
-            let trashed: i64 = connection
-                .as_ref()
-                .expect("connection is initialized")
-                .query_row(
-                    "SELECT COUNT(*) FROM activity
-                     WHERE item_id = ?1 AND action = 'trashed'",
-                    params![first.id],
-                    |row| row.get(0),
-                )
-                .expect("count trash activity");
-            assert_eq!(trashed, 1);
-        }
+        let loaded = load_item_with_state(&state, &first.id).expect("load trashed again");
+        assert!(loaded.deleted_at.is_some());
     }
 
     #[test]
@@ -3095,7 +3996,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_clears_deleted_at_and_writes_one_activity_row() {
+    fn restore_clears_deleted_at() {
         let vault = TempVault::new("restore");
         let state = vault.state();
 
@@ -3106,21 +4007,9 @@ mod tests {
         let loaded = load_item_with_state(&state, &item.id).expect("load restored");
         assert!(loaded.deleted_at.is_none());
 
-        // A live item and an empty list never add another restored row.
+        // A live item and an empty list restore without error.
         restore_items_with_state(&state, std::slice::from_ref(&item.id)).expect("restore again");
         restore_items_with_state(&state, &[]).expect("restore nothing");
-
-        let connection = state.require_connection().expect("lock connection");
-        let restored: i64 = connection
-            .as_ref()
-            .expect("connection is initialized")
-            .query_row(
-                "SELECT COUNT(*) FROM activity WHERE item_id = ?1 AND action = 'restored'",
-                params![item.id],
-                |row| row.get(0),
-            )
-            .expect("count restored activity");
-        assert_eq!(restored, 1);
     }
 
     #[test]
@@ -3439,5 +4328,274 @@ mod tests {
         // Nothing is written when validation fails.
         let collections = list_collections_with_state(&state).expect("list collections");
         assert!(collections.is_empty());
+    }
+
+    fn enable_content_encryption(state: &DatabaseState, password: &str) -> [u8; 32] {
+        let key = {
+            let mut connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_mut().expect("connection is initialized");
+            crate::database::write_password_verifier(
+                connection,
+                &crate::security::hash_secret(password).expect("hash password"),
+            )
+            .expect("store password verifier");
+            encryption::enable(connection, state.files_dir(), password).expect("enable encryption")
+        };
+        state.content_key().store(key).expect("store content key");
+        key
+    }
+
+    #[test]
+    fn encrypted_note_round_trips_without_plaintext_at_rest() {
+        let vault = TempVault::new("encrypt-round-trip");
+        let state = vault.state();
+        enable_content_encryption(&state, "master-pass");
+
+        let mut input = note_input("Secret title", "secret body");
+        input.description = "private description".to_string();
+        let saved = save_item_with_state(&state, &input).expect("save encrypted note");
+        assert_eq!(saved.description, "private description");
+        assert_eq!(saved.content.as_deref(), Some("secret body"));
+
+        let loaded = load_item_with_state(&state, &saved.id).expect("load encrypted note");
+        assert_eq!(loaded.description, "private description");
+        assert_eq!(loaded.content.as_deref(), Some("secret body"));
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_ref().expect("connection is initialized");
+            let (description, content, url): (String, Option<String>, Option<String>) = connection
+                .query_row(
+                    "SELECT description, content, url FROM items WHERE id = ?1",
+                    params![saved.id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("read stored item");
+            assert_eq!(
+                description, "",
+                "the plaintext description column stays blank"
+            );
+            assert!(content.is_none());
+            assert!(url.is_none());
+
+            let secrets: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM item_secrets WHERE item_id = ?1",
+                    params![saved.id],
+                    |row| row.get(0),
+                )
+                .expect("count secrets");
+            assert_eq!(secrets, 1);
+
+            let search: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM item_search WHERE item_id = ?1",
+                    params![saved.id],
+                    |row| row.get(0),
+                )
+                .expect("count search rows");
+            assert_eq!(search, 0, "protected content never reaches the index");
+
+            let (needs_index, status): (i64, String) = connection
+                .query_row(
+                    "SELECT needs_index, status FROM index_state WHERE item_id = ?1",
+                    params![saved.id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("read index state");
+            assert_eq!(needs_index, 1);
+            assert_eq!(status, "pending");
+        }
+    }
+
+    #[test]
+    fn encrypted_reads_without_the_key_report_locked() {
+        let vault = TempVault::new("encrypt-locked");
+        let state = vault.state();
+        enable_content_encryption(&state, "master-pass");
+        let saved = save_item_with_state(&state, &note_input("Locked", "body")).expect("save note");
+        state.content_key().clear().expect("drop key");
+
+        assert_eq!(
+            load_item_with_state(&state, &saved.id).expect_err("load while locked"),
+            "Vault is locked"
+        );
+        assert_eq!(
+            list_items_with_state(&state, None).expect_err("list while locked"),
+            "Vault is locked"
+        );
+        assert_eq!(
+            save_item_with_state(&state, &note_input("Another", "body"))
+                .expect_err("save while locked"),
+            "Vault is locked"
+        );
+    }
+
+    #[test]
+    fn encrypted_list_items_decrypts_summary_content() {
+        let vault = TempVault::new("encrypt-list");
+        let state = vault.state();
+        enable_content_encryption(&state, "master-pass");
+        let saved =
+            save_item_with_state(&state, &note_input("Listed", "preview body")).expect("save note");
+
+        let summaries = list_items_with_state(&state, None).expect("list items");
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.id == saved.id)
+            .expect("summary present");
+        assert_eq!(summary.content.as_deref(), Some("preview body"));
+    }
+
+    #[test]
+    fn encrypted_versions_store_ciphertext_and_restore_plaintext() {
+        let vault = TempVault::new("encrypt-versions");
+        let state = vault.state();
+        let key = enable_content_encryption(&state, "master-pass");
+        let saved =
+            save_item_with_state(&state, &note_input("First", "first body")).expect("create note");
+        let mut edit = note_input("Second", "second body");
+        edit.id = Some(saved.id.clone());
+        save_item_with_state(&state, &edit).expect("edit note");
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_ref().expect("connection is initialized");
+            let (version_id, content, encrypted): (String, String, Option<Vec<u8>>) = connection
+                .query_row(
+                    "SELECT id, content, encrypted_content FROM item_versions WHERE item_id = ?1",
+                    params![saved.id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("read version");
+            assert_eq!(content, "", "the plaintext version column stays blank");
+            let encrypted = encrypted.expect("version stored encrypted");
+            assert!(!encrypted
+                .windows("first body".len())
+                .any(|window| window == b"first body"));
+            assert_eq!(
+                encryption::decrypt_version(&key, &version_id, &encrypted)
+                    .expect("decrypt version"),
+                "first body"
+            );
+        }
+
+        let versions = list_item_versions_with_state(&state, &saved.id).expect("list versions");
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].content, "first body");
+
+        let restored = restore_item_version_with_state(&state, &versions[0].id).expect("restore");
+        assert_eq!(restored.content.as_deref(), Some("first body"));
+        let versions = list_item_versions_with_state(&state, &saved.id).expect("versions after");
+        assert!(versions
+            .iter()
+            .any(|version| version.content == "second body"));
+    }
+
+    #[test]
+    fn a_protected_value_only_reads_under_its_own_item_id() {
+        let vault = TempVault::new("encrypt-binding");
+        let state = vault.state();
+        let key = enable_content_encryption(&state, "master-pass");
+        let first = save_item_with_state(&state, &note_input("One", "body one")).expect("first");
+        let second = save_item_with_state(&state, &note_input("Two", "body two")).expect("second");
+
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let connection = connection.as_ref().expect("connection is initialized");
+            let (nonce, ciphertext): (Vec<u8>, Vec<u8>) = connection
+                .query_row(
+                    "SELECT nonce, ciphertext FROM item_secrets WHERE item_id = ?1",
+                    params![first.id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("read first secret");
+            // The same ciphertext cannot be read under another item id.
+            connection
+                .execute(
+                    "UPDATE item_secrets SET nonce = ?2, ciphertext = ?3 WHERE item_id = ?1",
+                    params![second.id, nonce, ciphertext],
+                )
+                .expect("move ciphertext");
+            assert!(encryption::read_secret(connection, &key, &second.id).is_err());
+        }
+    }
+
+    #[test]
+    fn encrypted_file_import_stores_ciphertext_and_previews_plaintext() {
+        let vault = TempVault::new("encrypt-file");
+        let state = vault.state();
+        enable_content_encryption(&state, "master-pass");
+        let source = vault.root.join("secret.txt");
+        fs::write(&source, b"private bytes").expect("write source");
+        let item = import_file_with_state(&state, &source.to_string_lossy()).expect("import");
+
+        let name = stored_name(&state, &item.id);
+        let stored = fs::read(state.files_dir().join(&name)).expect("read stored bytes");
+        assert!(
+            !stored
+                .windows(b"private bytes".len())
+                .any(|window| window == b"private bytes"),
+            "the managed file holds no plaintext"
+        );
+        {
+            let connection = state.require_connection().expect("lock connection");
+            let encrypted: i64 = connection
+                .as_ref()
+                .expect("connection is initialized")
+                .query_row(
+                    "SELECT encrypted FROM files WHERE item_id = ?1",
+                    params![item.id],
+                    |row| row.get(0),
+                )
+                .expect("read encrypted flag");
+            assert_eq!(encrypted, 1);
+        }
+
+        let preview = read_item_file_with_state(&state, &item.id).expect("preview");
+        assert_eq!(preview.preview, "text");
+        assert_eq!(preview.text.as_deref(), Some("private bytes"));
+        assert_eq!(preview.byte_size, 13);
+
+        state.content_key().clear().expect("drop key");
+        assert_eq!(
+            read_item_file_with_state(&state, &item.id).expect_err("preview while locked"),
+            "Vault is locked"
+        );
+    }
+
+    #[test]
+    fn disabling_encryption_restores_plaintext_reads() {
+        let vault = TempVault::new("encrypt-disable");
+        let state = vault.state();
+        enable_content_encryption(&state, "master-pass");
+        let saved = save_item_with_state(&state, &note_input("Disable", "disable body"))
+            .expect("save note");
+
+        {
+            let mut connection = state.require_connection().expect("lock connection");
+            encryption::disable(
+                connection.as_mut().expect("connection is initialized"),
+                state.files_dir(),
+                "master-pass",
+            )
+            .expect("disable encryption");
+        }
+        state.content_key().clear().expect("drop key");
+
+        let loaded = load_item_with_state(&state, &saved.id).expect("load plaintext note");
+        assert_eq!(loaded.content.as_deref(), Some("disable body"));
+
+        let connection = state.require_connection().expect("lock connection");
+        let content: Option<String> = connection
+            .as_ref()
+            .expect("connection is initialized")
+            .query_row(
+                "SELECT content FROM items WHERE id = ?1",
+                params![saved.id],
+                |row| row.get(0),
+            )
+            .expect("read content column");
+        assert_eq!(content.as_deref(), Some("disable body"));
     }
 }

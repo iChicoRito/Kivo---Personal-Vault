@@ -1,5 +1,20 @@
 import { invoke } from './runtime'
 
+export type ItemFilePreview = {
+  preview: 'image' | 'pdf' | 'text' | 'unsupported'
+  mime: string | null
+  text: string | null
+  payloadBase64: string | null
+  byteSize: number
+  originalName: string
+  importedAt: string
+  truncated: boolean
+}
+
+export async function readItemFile(id: string): Promise<ItemFilePreview> {
+  return invoke<ItemFilePreview>('read_item_file', { id })
+}
+
 export async function pickFile(): Promise<string | null> {
   return invoke<string | null>('pick_file')
 }

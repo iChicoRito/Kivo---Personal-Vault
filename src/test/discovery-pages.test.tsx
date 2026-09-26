@@ -255,12 +255,12 @@ describe('Navbar search', () => {
     expect(await screen.findByText('No matches.')).toBeInTheDocument()
   })
 
-  it('opens the dialog from the Ctrl K shortcut', async () => {
+  it('opens the dialog from the Ctrl F shortcut', async () => {
     renderRoute('/collections')
 
-    expect(screen.getByTitle('Control').closest('kbd')).toHaveTextContent('K')
+    expect(screen.getByTitle('Control').closest('kbd')).toHaveTextContent('F')
 
-    fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+    fireEvent.keyDown(document, { key: 'f', ctrlKey: true })
 
     expect(await screen.findByRole('heading', { name: 'Search the vault' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Search' })).toHaveFocus()

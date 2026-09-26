@@ -35,8 +35,29 @@ const feedbackMock = vi.hoisted(() => ({
   notifyError: vi.fn(),
 }))
 
+const protectionMock = vi.hoisted(() => ({
+  readProtectionState: vi.fn(),
+  unlockVault: vi.fn(),
+  lockVault: vi.fn(),
+  enableEncryption: vi.fn(),
+  disableEncryption: vi.fn(),
+  changeMasterPassword: vi.fn(),
+}))
+
+const insightsMock = vi.hoisted(() => ({
+  reindexItems: vi.fn(),
+}))
+
+const indexingMock = vi.hoisted(() => ({
+  listIndexState: vi.fn(),
+  indexFile: vi.fn(),
+}))
+
 vi.mock('../data/settings', () => settingsMock)
 vi.mock('../data/security', () => securityMock)
+vi.mock('../data/protection', () => protectionMock)
+vi.mock('../data/insights', () => insightsMock)
+vi.mock('../data/indexing', () => indexingMock)
 vi.mock('@tauri-apps/plugin-autostart', () => autostartMock)
 vi.mock('@tauri-apps/api/app', () => appMock)
 vi.mock('../lib/feedback', () => feedbackMock)
@@ -59,6 +80,10 @@ const PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  autoLockMinutes: 0,
+  semanticSearch: false,
+  autoTag: false,
+  summaries: false,
 }
 
 const RESET_PREFERENCES: Preferences = {
@@ -68,6 +93,10 @@ const RESET_PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  autoLockMinutes: 0,
+  semanticSearch: false,
+  autoTag: false,
+  summaries: false,
 }
 
 const NATIVE_SAVE_ERROR = 'Kivo could not change the start at login setting on this device.'
@@ -75,9 +104,9 @@ const AUTOSTART_NOT_SAVED =
   'Start at login changed on this device, but Kivo could not save the change.'
 const APPEARANCE_SAVE_ERROR = 'Kivo could not save this appearance change. Your saved settings are unchanged.'
 
-async function renderSettings() {
+async function renderSettings(overrides: Partial<Preferences> = {}) {
   render(
-    <PreferencesProvider initialPreferences={{ ...PREFERENCES }}>
+    <PreferencesProvider initialPreferences={{ ...PREFERENCES, ...overrides }}>
       <SettingsPage />
     </PreferencesProvider>,
   )
@@ -103,6 +132,16 @@ beforeEach(() => {
   securityMock.removeAppLock.mockResolvedValue(undefined)
   securityMock.setAppLock.mockResolvedValue(undefined)
   securityMock.verifyPassword.mockResolvedValue(false)
+  protectionMock.readProtectionState.mockResolvedValue({
+    lockEnabled: false,
+    encryptionEnabled: false,
+  })
+  protectionMock.changeMasterPassword.mockResolvedValue(undefined)
+  insightsMock.reindexItems.mockResolvedValue({ indexed: 2, pending: 1 })
+  indexingMock.listIndexState.mockResolvedValue([
+    { itemId: 'i1', needsIndex: false, indexedAt: '2026-01-01T00:00:00Z', status: 'indexed' },
+    { itemId: 'i2', needsIndex: true, indexedAt: null, status: 'pending' },
+  ])
 })
 
 afterEach(() => {
@@ -254,7 +293,7 @@ describe('start at login', () => {
     await renderSettings()
 
     expect(autostartMock.isEnabled).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(screen.getByRole('switch')).toBeChecked())
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked())
   })
 
   it('persists the native state on load when it differs from the saved preference', async () => {
@@ -262,28 +301,28 @@ describe('start at login', () => {
     await renderSettings()
 
     await waitFor(() => expect(settingsMock.saveStartAtLogin).toHaveBeenCalledWith(true))
-    expect(screen.getByRole('switch')).toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked()
   })
 
   it('enables autostart and persists the choice', async () => {
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
 
     await waitFor(() => expect(autostartMock.enable).toHaveBeenCalledTimes(1))
     expect(settingsMock.saveStartAtLogin).toHaveBeenCalledWith(true)
-    expect(screen.getByRole('switch')).toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked()
   })
 
   it('disables autostart and persists the choice', async () => {
     autostartMock.isEnabled.mockResolvedValue(true)
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
 
     await waitFor(() => expect(autostartMock.disable).toHaveBeenCalledTimes(1))
     expect(settingsMock.saveStartAtLogin).toHaveBeenLastCalledWith(false)
-    expect(screen.getByRole('switch')).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).not.toBeChecked()
   })
 
   it('reconciles the switch with the native state when persistence fails after a native change', async () => {
@@ -291,23 +330,23 @@ describe('start at login', () => {
     settingsMock.saveStartAtLogin.mockRejectedValueOnce(new Error('save failed'))
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
 
     expect(await screen.findByText(AUTOSTART_NOT_SAVED)).toBeInTheDocument()
     expect(autostartMock.enable).toHaveBeenCalledTimes(1)
     expect(autostartMock.isEnabled).toHaveBeenCalledTimes(2)
-    expect(screen.getByRole('switch')).toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).toBeChecked()
   })
 
   it('shows a native error without changing the switch when enabling fails', async () => {
     autostartMock.enable.mockRejectedValue(new Error('native failure'))
     await renderSettings()
 
-    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByRole('switch', { name: 'Start Kivo when you sign in' }))
 
     expect(await screen.findByText(NATIVE_SAVE_ERROR)).toBeInTheDocument()
     expect(feedbackMock.notifyError).toHaveBeenCalledWith(NATIVE_SAVE_ERROR)
-    expect(screen.getByRole('switch')).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Start Kivo when you sign in' })).not.toBeChecked()
     expect(settingsMock.saveStartAtLogin).not.toHaveBeenCalled()
   })
 })
@@ -390,7 +429,7 @@ describe('app lock', () => {
     await renderSettings()
 
     const heading = await screen.findByRole('heading', { level: 2, name: 'App lock', exact: true })
-    const section = heading.closest('section') as HTMLElement
+    const section = heading.closest('[data-slot="card"]') as HTMLElement
     const loadingStatus = within(section).getByRole('status')
     expect(loadingStatus).toHaveTextContent('Checking app lock...')
     expect(section.querySelector('.skeleton')).toBeInTheDocument()
@@ -433,6 +472,61 @@ describe('app lock', () => {
     expect(screen.getAllByLabelText('Master Password')).toHaveLength(1)
     expect(screen.getAllByLabelText('Confirm Master Password')).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: 'Turn on app lock' })).toHaveLength(1)
+  })
+})
+
+describe('advanced features', () => {
+  it('shows the three switches with honest copy and the index status', async () => {
+    await renderSettings()
+
+    expect(screen.getByRole('switch', { name: 'Related search' })).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Tag suggestions' })).not.toBeChecked()
+    expect(screen.getByRole('switch', { name: 'Note summaries' })).not.toBeChecked()
+    expect(
+      screen.getByText('Suggestions are created on this device; nothing is sent anywhere.'),
+    ).toBeInTheDocument()
+    expect(await screen.findByText('Index: 1 items ready, 1 waiting.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Re-index now' })).not.toBeInTheDocument()
+  })
+
+  it('persists a feature switch through the existing preference save', async () => {
+    await renderSettings()
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Tag suggestions' }))
+
+    await waitFor(() =>
+      expect(settingsMock.savePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ autoTag: true }),
+      ),
+    )
+  })
+
+  it('rebuilds the index on request when Related search is on', async () => {
+    await renderSettings({ semanticSearch: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Re-index now' }))
+
+    await waitFor(() => expect(insightsMock.reindexItems).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(feedbackMock.notifySuccess).toHaveBeenCalledWith(
+        'Index rebuilt',
+        '2 items indexed, 1 waiting.',
+      ),
+    )
+  })
+
+  it('reports a failed re-index without changing the saved settings', async () => {
+    insightsMock.reindexItems.mockRejectedValueOnce(new Error('no'))
+    await renderSettings({ semanticSearch: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Re-index now' }))
+
+    await waitFor(() =>
+      expect(feedbackMock.notifyError).toHaveBeenCalledWith(
+        'Kivo could not rebuild the index. Try again.',
+      ),
+    )
+    expect(settingsMock.savePreferences).not.toHaveBeenCalled()
   })
 })
 

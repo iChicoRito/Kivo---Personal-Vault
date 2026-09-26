@@ -19,6 +19,7 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import PageHeader, { textLinkClass } from '../../app/PageHeader'
+import { usePreferences } from '../../app/preferences'
 import { CollectionSelect, ConfirmDialog } from '../../components/items/dialogs'
 import {
   loadItem,
@@ -31,7 +32,12 @@ import {
 import { trashWithUndo } from '../../lib/feedback'
 import { NoteContentEditor } from './NoteContentEditor'
 import { NoteTagField } from './NoteTagField'
+import { SummaryCard } from './SummaryCard'
 import { toEditorHtml, toStoredContent } from './noteContent'
+import { matchesShortcut } from '../../app/shortcuts'
+import { VersionHistoryDialog } from './VersionHistoryDialog'
+import { exportNoteMarkdown, pickSaveFile } from '../../data/portability'
+import { notifySuccess } from '../../lib/feedback'
 
 const AUTOSAVE_DELAY = 800
 
@@ -61,6 +67,7 @@ type EditorMeta = {
 export function NoteEditor() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const { preferences } = usePreferences()
 
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [item, setItem] = useState<VaultItem | null>(null)
@@ -69,6 +76,15 @@ export function NoteEditor() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [actionError, setActionError] = useState<string | null>(null)
   const [trashOpen, setTrashOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  async function exportMarkdown() {
+    if (!item) return
+    try {
+      await flush()
+      const path = await pickSaveFile(`${item.title.replace(/[\\/:*?"<>|]/g, '_')}.md`)
+      if (path) { await exportNoteMarkdown(item.id, path); notifySuccess('Note exported as Markdown') }
+    } catch { setActionError('Could not export this note. Try again.') }
+  }
 
   const titleRef = useRef('')
   const titleFieldRef = useRef<HTMLInputElement | null>(null)
@@ -304,6 +320,17 @@ export function NoteEditor() {
     }
   }
 
+  useEffect(() => {
+    if (!item) return
+    function onKey(event: KeyboardEvent) {
+      if (!matchesShortcut(event, 'favorite')) return
+      event.preventDefault()
+      void handleFavorite(!item!.isFavorite)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [item])
+
   async function handleTags(next: string[]) {
     if (!item) return
 
@@ -435,6 +462,7 @@ export function NoteEditor() {
                 />
                 {item.isFavorite ? 'Remove from Favorite' : 'Add to Favorite'}
               </Button>
+              <Button onPress={() => void exportMarkdown()}>Export as Markdown</Button>
             </ButtonGroup>
           </div>
         ) : null}
@@ -460,7 +488,11 @@ export function NoteEditor() {
               aria-label="Note settings"
               className="grid gap-4 rounded-3xl border border-default bg-surface p-4"
             >
-              <NoteTagField value={item.tags} onChange={(next) => void handleTags(next)} />
+              <NoteTagField
+                itemId={item.id}
+                value={item.tags}
+                onChange={(next) => void handleTags(next)}
+              />
 
               <Separator />
 
@@ -471,10 +503,13 @@ export function NoteEditor() {
               />
             </aside>
 
-            <Button className="w-full" size="lg" variant="danger" onPress={() => setTrashOpen(true)}>
+            {preferences.summaries ? <SummaryCard id={item.id} title={title} /> : null}
+
+             <Button className="w-full" size="lg" variant="danger" onPress={() => setTrashOpen(true)}>
               <HugeiconsIcon aria-hidden="true" icon={Delete02Icon} size={18} />
               Delete Note
-            </Button>
+             </Button>
+             <Button className="w-full" variant="secondary" onPress={() => { void flush().then(() => setHistoryOpen(true)) }}>Version history</Button>
           </div>
         ) : null}
       </div>
@@ -488,6 +523,14 @@ export function NoteEditor() {
         onCancel={() => setTrashOpen(false)}
         onConfirm={() => void confirmTrash()}
       />
+      <VersionHistoryDialog itemId={historyOpen ? item?.id ?? null : null} onClose={() => setHistoryOpen(false)} onRestore={(restored) => {
+        const next = restored.content ?? ''
+        setItem(restored); setTitle(restored.title); setContent(next)
+        titleRef.current = restored.title; contentRef.current = next
+        savedRef.current = { title: restored.title, content: next }
+        editorKeyRef.current = `${restored.id}-${Date.now()}`
+        setSaveStatus('saved')
+      }} />
     </section>
   )
 }

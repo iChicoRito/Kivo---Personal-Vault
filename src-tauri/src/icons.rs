@@ -304,11 +304,7 @@ mod tests {
                 let mut buffer = [0; 2048];
                 let read = stream.read(&mut buffer).unwrap_or(0);
                 let request = String::from_utf8_lossy(&buffer[..read]);
-                let path = request
-                    .split_whitespace()
-                    .nth(1)
-                    .unwrap_or("/")
-                    .to_string();
+                let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
 
                 let route = routes.iter().find(|route| route.0 == path);
 
@@ -351,7 +347,10 @@ mod tests {
     #[test]
     fn rejects_unsafe_hosts() {
         assert_eq!(normalize_host(""), None);
-        assert_eq!(normalize_host("github.com/../etc"), Some("github.com".to_string()));
+        assert_eq!(
+            normalize_host("github.com/../etc"),
+            Some("github.com".to_string())
+        );
         assert_eq!(normalize_host("user@github.com"), None);
         assert_eq!(normalize_host("github com"), None);
         assert_eq!(normalize_host("github..com"), None);
@@ -360,7 +359,10 @@ mod tests {
     #[test]
     fn sniffs_image_types() {
         assert_eq!(sniff_mime(PNG), Some("image/png"));
-        assert_eq!(sniff_mime(b"<svg xmlns=\"x\"></svg>"), Some("image/svg+xml"));
+        assert_eq!(
+            sniff_mime(b"<svg xmlns=\"x\"></svg>"),
+            Some("image/svg+xml")
+        );
         assert_eq!(sniff_mime(b"<html></html>"), None);
     }
 
@@ -409,7 +411,12 @@ mod tests {
 
     #[test]
     fn fetches_the_root_favicon() {
-        let base = serve(vec![("/favicon.ico".to_string(), 200, "image/png", PNG.to_vec())]);
+        let base = serve(vec![(
+            "/favicon.ico".to_string(),
+            200,
+            "image/png",
+            PNG.to_vec(),
+        )]);
         let client = client().unwrap();
         let (mime, bytes) = fetch_icon_at(&client, &base).unwrap();
 
@@ -421,12 +428,7 @@ mod tests {
     fn falls_back_to_the_page_link() {
         let page = br#"<html><head><link rel="icon" href="/icon.png"></head></html>"#.to_vec();
         let base = serve(vec![
-            (
-                "/".to_string(),
-                200,
-                "text/html",
-                page,
-            ),
+            ("/".to_string(), 200, "text/html", page),
             ("/icon.png".to_string(), 200, "image/png", PNG.to_vec()),
         ]);
         let client = client().unwrap();

@@ -49,6 +49,7 @@ function lockHandlers(
   return {
     has_password_verifier: () => present,
     load_password_verifier: () => rawVerifier,
+    read_protection_state: () => ({ lockEnabled: present, encryptionEnabled: false }),
   }
 }
 
@@ -141,7 +142,11 @@ describe('app lock data wrappers', () => {
 describe('UnlockPage', () => {
   beforeEach(() => {
     invoke.mockReset()
-    stubInvoke({ load_password_verifier: () => VERIFIER, verify_password: () => true })
+    stubInvoke({
+      load_password_verifier: () => VERIFIER,
+      verify_password: () => true,
+      read_protection_state: () => ({ lockEnabled: true, encryptionEnabled: false }),
+    })
   })
 
   it('focuses the password field and states that app lock does not encrypt files', async () => {
@@ -159,7 +164,11 @@ describe('UnlockPage', () => {
   })
 
   it('rejects a wrong password with generic copy and stays on the page', async () => {
-    stubInvoke({ load_password_verifier: () => VERIFIER, verify_password: () => false })
+    stubInvoke({
+      load_password_verifier: () => VERIFIER,
+      verify_password: () => false,
+      read_protection_state: () => ({ lockEnabled: true, encryptionEnabled: false }),
+    })
     const onUnlocked = vi.fn()
 
     render(<UnlockPage onUnlocked={onUnlocked} />)
@@ -197,7 +206,11 @@ describe('UnlockPage', () => {
 
   it('shows a busy state while verifying the password', async () => {
     const checking = deferred<boolean>()
-    stubInvoke({ load_password_verifier: () => VERIFIER, verify_password: () => checking.promise })
+    stubInvoke({
+      load_password_verifier: () => VERIFIER,
+      verify_password: () => checking.promise,
+      read_protection_state: () => ({ lockEnabled: true, encryptionEnabled: false }),
+    })
 
     render(<UnlockPage />)
     typeInto(passwordInput(), PASSWORD)
@@ -218,6 +231,7 @@ describe('UnlockPage', () => {
       verify_password: () => {
         throw new Error('ipc failed')
       },
+      read_protection_state: () => ({ lockEnabled: true, encryptionEnabled: false }),
     })
 
     render(<UnlockPage />)
@@ -320,9 +334,7 @@ describe('AppLockSettings', () => {
   it('changes the password after confirming the current one', async () => {
     stubInvoke({
       ...lockHandlers(true),
-      verify_password: () => true,
-      hash_password: () => ENCODED,
-      set_password_verifier: () => undefined,
+      change_master_password: () => undefined,
     })
 
     render(<AppLockSettings />)
@@ -334,18 +346,20 @@ describe('AppLockSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Change password' }))
 
     expect(await screen.findByText('Your Master Password was changed.')).toBeInTheDocument()
-    expect(invoke).toHaveBeenCalledWith('verify_password', {
-      password: PASSWORD,
-      verifier: VERIFIER,
+    expect(invoke).toHaveBeenCalledWith('change_master_password', {
+      current: PASSWORD,
+      next: 'new secret',
     })
-    expect(invoke).toHaveBeenCalledWith('set_password_verifier', { verifier: ENCODED })
+    expect(invoke).not.toHaveBeenCalledWith('set_password_verifier', expect.anything())
     expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Master password changed')
   })
 
-  it('rejects a change when the current password is wrong', async () => {
+  it('surfaces a failed password change and keeps the lock on', async () => {
     stubInvoke({
       ...lockHandlers(true),
-      verify_password: () => false,
+      change_master_password: () => {
+        throw new Error('wrong password')
+      },
     })
 
     render(<AppLockSettings />)
@@ -356,8 +370,11 @@ describe('AppLockSettings', () => {
     typeInto(screen.getByLabelText('Confirm New Master Password'), 'new secret')
     fireEvent.click(screen.getByRole('button', { name: 'Change password' }))
 
-    expect(await screen.findByText('That password did not match. Try again.')).toBeInTheDocument()
+    expect(
+      await screen.findByText('We could not update app lock. Try again.'),
+    ).toBeInTheDocument()
     expect(invoke).not.toHaveBeenCalledWith('set_password_verifier', expect.anything())
+    expect(screen.getByText('App lock is on.')).toBeInTheDocument()
   })
 
   it('removes the app lock only after confirming the current password', async () => {

@@ -1,20 +1,14 @@
 import { invoke } from './runtime'
 
-export type ActivityEntry = {
-  id: number
-  itemId: string | null
-  action: string
-  createdAt: string
-}
-
 export type IndexState = {
   itemId: string
   needsIndex: boolean
   indexedAt: string | null
+  status: 'pending' | 'indexed' | 'no_text' | 'failed'
 }
 
-export async function listActivity(): Promise<ActivityEntry[]> {
-  return invoke<ActivityEntry[]>('list_activity')
+export async function indexFile(itemId: string): Promise<IndexState> {
+  return invoke<IndexState>('index_file', { itemId })
 }
 
 export async function listIndexState(): Promise<IndexState[]> {

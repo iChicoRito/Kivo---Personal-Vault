@@ -32,7 +32,13 @@ import {
 import { usePreferences } from '../../app/preferences'
 import PageHeader from '../../app/PageHeader'
 import { notifyError, notifySuccess } from '../../lib/feedback'
+import { listIndexState, type IndexState } from '../../data/indexing'
+import { reindexItems } from '../../data/insights'
 import AppLockSettings from '../security/AppLockSettings'
+import EncryptionSettings from '../security/EncryptionSettings'
+import BackupSettings from '../backup/BackupSettings'
+import PortabilitySettings from '../portability/PortabilitySettings'
+import { ShortcutsDialog } from '../shortcuts/ShortcutsDialog'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
@@ -58,6 +64,10 @@ const RESET_PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  autoLockMinutes: 0,
+  semanticSearch: false,
+  autoTag: false,
+  summaries: false,
 }
 
 const OWNER_REQUIRED_ERROR = 'Owner name is required.'
@@ -69,6 +79,7 @@ const NATIVE_SAVE_ERROR = 'Kivo could not change the start at login setting on t
 const AUTOSTART_NOT_SAVED =
   'Start at login changed on this device, but Kivo could not save the change.'
 const RESET_SAVE_ERROR = 'Kivo could not reset your preferences. Your saved settings are unchanged.'
+const REINDEX_ERROR = 'Kivo could not rebuild the index. Try again.'
 
 function SettingsSkeleton({ className }: { className: string }) {
   return <Skeleton aria-hidden="true" className={className} />
@@ -130,6 +141,9 @@ export default function SettingsPage() {
   const resetWasOpen = useRef(false)
   const [resetBusy, setResetBusy] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [indexStates, setIndexStates] = useState<IndexState[]>([])
+  const [reindexBusy, setReindexBusy] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -193,6 +207,22 @@ export default function SettingsPage() {
         // Leave app information empty when Tauri metadata is unavailable.
       }
     })()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    void listIndexState()
+      .then((states) => {
+        if (active) setIndexStates(Array.isArray(states) ? states : [])
+      })
+      .catch(() => {
+        if (active) setIndexStates([])
+      })
 
     return () => {
       active = false
@@ -320,6 +350,24 @@ export default function SettingsPage() {
       setResetBusy(false)
     }
   }
+
+  async function handleReindex() {
+    setReindexBusy(true)
+
+    try {
+      const report = await reindexItems()
+      notifySuccess('Index rebuilt', `${report.indexed} items indexed, ${report.pending} waiting.`)
+      const states = await listIndexState()
+      setIndexStates(Array.isArray(states) ? states : [])
+    } catch {
+      notifyError(REINDEX_ERROR)
+    } finally {
+      setReindexBusy(false)
+    }
+  }
+
+  const indexReady = indexStates.filter((state) => !state.needsIndex).length
+  const indexWaiting = indexStates.filter((state) => state.needsIndex).length
 
   const heading = (
     <PageHeader
@@ -583,6 +631,91 @@ export default function SettingsPage() {
       </Card>
 
       <AppLockSettings />
+      <EncryptionSettings />
+      <BackupSettings />
+      <PortabilitySettings />
+
+      <Card aria-labelledby="settings-advanced-title">
+        <Card.Content className="grid gap-3">
+          <Typography id="settings-advanced-title" type="h2">
+            Advanced features
+          </Typography>
+          <Typography color="muted" type="body">
+            These features run on this device and are off until you turn them on.
+          </Typography>
+
+          <div className="grid gap-1">
+            <Switch
+              isSelected={preferences.semanticSearch}
+              onChange={(enabled) => void handleAppearanceChange({ semanticSearch: enabled })}
+            >
+              <Switch.Content>
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+                Related search
+              </Switch.Content>
+            </Switch>
+            <Typography color="muted" type="body-xs">
+              Ranks your items when they share words with the search. Runs on this device. No AI
+              model and no network.
+            </Typography>
+          </div>
+
+          <div className="grid gap-1">
+            <Switch
+              isSelected={preferences.autoTag}
+              onChange={(enabled) => void handleAppearanceChange({ autoTag: enabled })}
+            >
+              <Switch.Content>
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+                Tag suggestions
+              </Switch.Content>
+            </Switch>
+            <Typography color="muted" type="body-xs">
+              Suggestions are created on this device; nothing is sent anywhere.
+            </Typography>
+          </div>
+
+          <div className="grid gap-1">
+            <Switch
+              isSelected={preferences.summaries}
+              onChange={(enabled) => void handleAppearanceChange({ summaries: enabled })}
+            >
+              <Switch.Content>
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+                Note summaries
+              </Switch.Content>
+            </Switch>
+            <Typography color="muted" type="body-xs">
+              Picks the most representative sentences from a note. Made on this device. A summary
+              is only kept if you save it.
+            </Typography>
+          </div>
+
+          <Typography aria-live="polite" color="muted" type="body-xs">
+            Index: {indexReady} items ready, {indexWaiting} waiting.
+          </Typography>
+
+          {preferences.semanticSearch ? (
+            <Button
+              className="justify-self-start"
+              isDisabled={reindexBusy}
+              variant="secondary"
+              onPress={() => void handleReindex()}
+            >
+              Re-index now
+            </Button>
+          ) : null}
+        </Card.Content>
+      </Card>
+
+      <Card aria-labelledby="settings-shortcuts-title"><Card.Content className="grid gap-3"><Typography id="settings-shortcuts-title" type="h2">Keyboard shortcuts</Typography><Typography color="muted" type="body">See the fixed keys for search, quick actions, and navigation.</Typography><Button className="justify-self-start" variant="secondary" onPress={() => setShortcutsOpen(true)}>Show shortcuts</Button></Card.Content></Card>
+      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       <Card aria-labelledby="settings-storage-title">
         <Card.Content className="grid gap-3">

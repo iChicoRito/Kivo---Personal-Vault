@@ -22,6 +22,7 @@ import {
 import {
   ArrowLeft01Icon,
   Delete02Icon,
+  Download01Icon,
   EyeIcon,
   FolderMinusIcon,
   FolderOpenIcon,
@@ -52,6 +53,7 @@ import {
   type CollectionProtection,
 } from '../../data/collections'
 import { revealItemFile } from '../../data/files'
+import { exportItemsJson, pickSaveFile } from '../../data/portability'
 import {
   listItems,
   loadItem,
@@ -80,6 +82,7 @@ const OPEN_ERROR = 'Kivo could not open this item. Try again.'
 const REVEAL_ERROR = 'Kivo could not reveal this file. It may be missing from this device.'
 const REMOVE_ERROR = 'Kivo could not remove this item from the collection. Try again.'
 const VIEW_ERROR = 'Kivo could not remember the collection layout. Try again.'
+const EXPORT_ERROR = 'Kivo could not export this collection. Try again.'
 
 // Kept so collections saved before the icon picker was removed still show the
 // icon they stored; anything unknown falls back to the folder.
@@ -99,10 +102,16 @@ function countCopy(count: number) {
 }
 
 // The list rows and the grid folder offer the same actions, so both build them here.
-function collectionActions(collection: Collection): ItemCardAction[] {
+function collectionActions(collection: Collection, exporting: boolean): ItemCardAction[] {
   return [
     { id: 'view', label: `View items in ${collection.name}`, icon: EyeIcon },
     { id: 'rename', label: `Rename ${collection.name}`, icon: NoteEditIcon },
+    {
+      id: 'export',
+      label: `Export ${collection.name}`,
+      icon: Download01Icon,
+      isDisabled: exporting,
+    },
     {
       id: 'delete',
       label: `Delete ${collection.name}`,
@@ -222,6 +231,7 @@ export function CollectionsPage() {
   const [editError, setEditError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Collection | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   const openedFromUrl = useRef(false)
   const loadedCollectionIdRef = useRef<string | null>(null)
@@ -488,7 +498,31 @@ export function CollectionsPage() {
   function handleMenuAction(collection: Collection, key: string) {
     if (key === 'view') runGated(collection, () => openCollection(collection))
     else if (key === 'rename') runGated(collection, () => openRename(collection))
+    else if (key === 'export') runGated(collection, () => void handleExportCollection(collection))
     else if (key === 'delete') runGated(collection, () => setDeleteTarget(collection))
+  }
+
+  // Export reads the collection once more so the file holds the live item ids,
+  // not the counts the list was rendered with.
+  async function handleExportCollection(collection: Collection) {
+    setActionError(null)
+    setExporting(true)
+
+    try {
+      const name = collection.name.replace(/[\\/:*?"<>|]/g, '_')
+      const path = await pickSaveFile(`${name}.json`)
+      if (!path) return
+
+      const loaded = await listItems({ collectionId: collection.id })
+      if (loaded.length === 0) return
+
+      await exportItemsJson(loaded.map((item) => item.id), path)
+      notifySuccess('Collection exported as JSON')
+    } catch {
+      notifyError(EXPORT_ERROR)
+    } finally {
+      setExporting(false)
+    }
   }
 
   async function handleItemOpen(item: ItemSummary) {
@@ -779,7 +813,7 @@ export function CollectionsPage() {
               {filtered.map((collection) => (
                 <li key={collection.id} className="min-w-0">
                   <CollectionFolderFloat
-                    actions={collectionActions(collection)}
+                    actions={collectionActions(collection, exporting)}
                     collection={collection}
                     items={collectionItems[collection.id] ?? []}
                     locked={isLocked(collection)}
@@ -797,7 +831,7 @@ export function CollectionsPage() {
           <ListScrollArea>
             <ul className="grid gap-2">
               {filtered.map((collection) => {
-                const actions = collectionActions(collection)
+                const actions = collectionActions(collection, exporting)
 
                 return (
                   <li key={collection.id} className="min-w-0">

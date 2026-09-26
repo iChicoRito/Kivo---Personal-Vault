@@ -6,13 +6,20 @@ import {
   Label,
   Modal,
   Skeleton,
+  Select,
+  ListBox,
   TextField,
   Typography,
 } from '@heroui/react'
 import { FolderOpenIcon, Link02Icon, NoteEditIcon, Search01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 
-import { listItems, type ItemKind, type ItemSummary } from '../data/items'
+import { listItems, type ItemFilter, type ItemKind, type ItemSummary } from '../data/items'
+import { searchRelatedItems, type RelatedResult } from '../data/insights'
+import { listTags, type Tag } from '../data/tags'
+import { listCollections, type Collection } from '../data/collections'
+import { FilterMenu, type KindFilter } from '../components/items/FilterMenu'
+import { usePreferences } from '../app/preferences'
 import { ItemDetailsDialog } from '../features/items/ItemDetailsDialog'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -32,21 +39,29 @@ const KIND_ICONS: Record<ItemKind, IconSvgElement> = {
 const RESULT_LIMIT = 8
 
 export function NavbarSearch() {
+  const { preferences } = usePreferences()
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [kind, setKind] = useState<ItemKind | null>(null)
   const [items, setItems] = useState<ItemSummary[]>([])
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [attempt, setAttempt] = useState(0)
   const [openItemId, setOpenItemId] = useState<string | null>(null)
+  const [related, setRelated] = useState<RelatedResult[]>([])
+  const [relatedState, setRelatedState] = useState<LoadState>('idle')
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [tags, setTags] = useState<Tag[]>([])
+  const [filterKind, setFilterKind] = useState<KindFilter>('all')
+  const [filterCollection, setFilterCollection] = useState<string | null>(null)
+  const [filterTag, setFilterTag] = useState<string | null>(null)
+  const [filterFavorites, setFilterFavorites] = useState(false)
 
   const trimmedQuery = query.trim()
+  const semanticSearch = preferences.semanticSearch
 
-  // Ctrl+K (Cmd+K on macOS) opens the dialog from anywhere in the window. The
-  // hint badge shows the key; the palette planned for Phase 5 will decide later
-  // whether it wants the same keys.
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault()
         setIsOpen(true)
       }
@@ -66,7 +81,7 @@ export function NavbarSearch() {
     let active = true
     setLoadState('loading')
 
-    listItems({ query: trimmedQuery })
+    listItems({ query: trimmedQuery, ...(kind ? { kind } : {}) })
       .then((loaded) => {
         if (!active) return
         setItems(loaded)
@@ -79,13 +94,74 @@ export function NavbarSearch() {
     return () => {
       active = false
     }
-  }, [attempt, trimmedQuery])
+  }, [attempt, trimmedQuery, kind])
+
+  useEffect(() => {
+    if (!semanticSearch) return
+
+    let active = true
+
+    void Promise.all([listTags(), listCollections()])
+      .then(([loadedTags, loadedCollections]) => {
+        if (!active) return
+        setTags(Array.isArray(loadedTags) ? loadedTags : [])
+        setCollections(Array.isArray(loadedCollections) ? loadedCollections : [])
+      })
+      .catch(() => undefined)
+
+    return () => {
+      active = false
+    }
+  }, [semanticSearch])
+
+  useEffect(() => {
+    if (!semanticSearch || !trimmedQuery) {
+      setRelated([])
+      setRelatedState('idle')
+      return
+    }
+
+    const filter: ItemFilter = {}
+
+    if (filterKind !== 'all') filter.kind = filterKind
+    if (filterCollection) filter.collectionId = filterCollection
+    if (filterTag) filter.tag = filterTag
+    if (filterFavorites) filter.favorite = true
+
+    let active = true
+    setRelatedState('loading')
+
+    searchRelatedItems(trimmedQuery, Object.keys(filter).length ? filter : undefined)
+      .then((loaded) => {
+        if (!active) return
+        setRelated(Array.isArray(loaded) ? loaded : [])
+        setRelatedState('ready')
+      })
+      .catch(() => {
+        if (active) setRelatedState('error')
+      })
+
+    return () => {
+      active = false
+    }
+  }, [attempt, semanticSearch, trimmedQuery, filterKind, filterCollection, filterTag, filterFavorites])
+
+  function clearRelatedFilters() {
+    setFilterKind('all')
+    setFilterCollection(null)
+    setFilterTag(null)
+    setFilterFavorites(false)
+  }
 
   function closeSearch() {
     setIsOpen(false)
     setQuery('')
+    setKind(null)
     setItems([])
     setLoadState('idle')
+    setRelated([])
+    setRelatedState('idle')
+    clearRelatedFilters()
   }
 
   function openItem(id: string) {
@@ -95,6 +171,7 @@ export function NavbarSearch() {
 
   const visibleItems = items.slice(0, RESULT_LIMIT)
   const hasMore = items.length > RESULT_LIMIT
+  const visibleRelated = related.slice(0, RESULT_LIMIT)
 
   return (
     <div className="min-w-0 max-w-[520px] flex-1">
@@ -110,7 +187,7 @@ export function NavbarSearch() {
         <span className="min-w-0 flex-1 truncate">Search the vault</span>
         <Kbd>
           <Kbd.Abbr keyValue="ctrl" />
-          <Kbd.Content>K</Kbd.Content>
+          <Kbd.Content>F</Kbd.Content>
         </Kbd>
       </button>
 
@@ -135,6 +212,7 @@ export function NavbarSearch() {
                   <Label className="sr-only">Search</Label>
                   <Input autoFocus fullWidth placeholder="Search the vault" variant="secondary" />
                 </TextField>
+                <Select aria-label="Filter by type" selectedKey={kind ?? 'all'} onSelectionChange={(value) => setKind(value === 'all' || value === null ? null : value as ItemKind)}><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>{(['all', 'note', 'source', 'file'] as const).map((value) => <ListBox.Item key={value} id={value} textValue={value === 'all' ? 'All types' : KIND_LABELS[value]}>{value === 'all' ? 'All types' : KIND_LABELS[value]}</ListBox.Item>)}</ListBox></Select.Popover></Select>
 
                 {loadState === 'loading' ? (
                   <div
@@ -196,9 +274,7 @@ export function NavbarSearch() {
                             size={16}
                             strokeWidth={1.75}
                           />
-                          <Typography className="min-w-0 flex-1 truncate" type="body">
-                            {item.title}
-                          </Typography>
+                          <span className="min-w-0 flex-1"><Typography className="block truncate" type="body">{item.title}</Typography>{item.matchSnippet ? <span className="block truncate text-xs text-muted">{item.matchSnippet.split(new RegExp(`(${trimmedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')).map((part, index) => part.toLowerCase() === trimmedQuery.toLowerCase() ? <mark key={index}>{part}</mark> : part)}</span> : null}</span>
                           <Typography color="muted" type="body-xs">
                             {KIND_LABELS[item.kind]}
                           </Typography>
@@ -213,6 +289,99 @@ export function NavbarSearch() {
                       </li>
                     ) : null}
                   </ul>
+                ) : null}
+
+                {semanticSearch ? (
+                  <div className="grid gap-2 border-t border-default pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Typography type="body" weight="semibold">
+                        Related on this device
+                      </Typography>
+                      <FilterMenu
+                        kind={filterKind}
+                        collectionId={filterCollection}
+                        tag={filterTag}
+                        favoritesOnly={filterFavorites}
+                        collections={collections}
+                        tags={tags}
+                        onKindChange={setFilterKind}
+                        onCollectionChange={setFilterCollection}
+                        onTagChange={setFilterTag}
+                        onFavoritesChange={setFilterFavorites}
+                        onClear={clearRelatedFilters}
+                      />
+                    </div>
+                    <Typography color="muted" type="body-xs">
+                      Matches shared words. No text is generated.
+                    </Typography>
+
+                    {relatedState === 'loading' ? (
+                      <div
+                        aria-label="Finding related items"
+                        className="grid gap-2 px-1 py-2"
+                        role="status"
+                      >
+                        <span className="sr-only">Finding related items...</span>
+                        {Array.from({ length: 2 }, (_, index) => (
+                          <div
+                            key={index}
+                            aria-hidden="true"
+                            className="flex min-w-0 items-center gap-3 rounded-[calc(var(--radius)*2)] px-2 py-1.5"
+                          >
+                            <Skeleton className="size-8 shrink-0 rounded-(--radius)" />
+                            <Skeleton className="h-4 w-1/2" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {relatedState === 'error' ? (
+                      <Typography className="px-1 py-1" type="body-xs">
+                        The related search could not run.
+                      </Typography>
+                    ) : null}
+
+                    {relatedState === 'ready' && related.length === 0 ? (
+                      <Typography className="px-1 py-1" color="muted" type="body-xs">
+                        No related items share these words.
+                      </Typography>
+                    ) : null}
+
+                    {relatedState === 'ready' && visibleRelated.length > 0 ? (
+                      <ul aria-label="Related items" className="grid gap-1">
+                        {visibleRelated.map((result) => (
+                          <li key={result.item.id} className="min-w-0">
+                            <button
+                              className="flex w-full min-w-0 items-center gap-3 rounded-[calc(var(--radius)*2)] px-2 py-1.5 text-left hover:bg-(--default) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                              type="button"
+                              onClick={() => openItem(result.item.id)}
+                            >
+                              <HugeiconsIcon
+                                aria-hidden="true"
+                                className="shrink-0 text-muted"
+                                icon={KIND_ICONS[result.item.kind]}
+                                size={16}
+                                strokeWidth={1.75}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <Typography className="block truncate" type="body">
+                                  {result.item.title}
+                                </Typography>
+                                {result.matchedTerms.length > 0 ? (
+                                  <span className="block truncate text-xs text-muted">
+                                    {result.matchedTerms.join(', ')}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <Typography color="muted" type="body-xs">
+                                {KIND_LABELS[result.item.kind]}
+                              </Typography>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                 ) : null}
               </Modal.Body>
             </Modal.Dialog>

@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AppRoutes } from './app/router'
 import { PreferencesProvider } from './app/preferences'
+import { LockProvider } from './app/lock'
 import { VaultProvider } from './app/vault'
 import StatusScreen from './app/StatusScreen'
 import { FeedbackToastRegion } from './components/ui/FeedbackToast'
 import { initializeDatabase } from './data/database'
 import { loadBootState, type BootState } from './data/setup'
 import OnboardingPage from './features/onboarding/OnboardingPage'
-import UnlockPage from './features/security/UnlockPage'
 
 type AppStartupState =
   | { status: 'loading' }
@@ -18,7 +18,8 @@ type AppStartupState =
 export function App() {
   const [attempt, setAttempt] = useState(0)
   const [startup, setStartup] = useState<AppStartupState>({ status: 'loading' })
-  // Unlock lives in memory for this process only. It is never persisted.
+  // Onboarding hands the app over once; unlocking is owned by LockProvider
+  // afterwards, so nothing here has to track it.
   const [enteredApp, setEnteredApp] = useState(false)
 
   useEffect(() => {
@@ -72,30 +73,21 @@ function BootRoute({ route, onEnterApp }: { route: BootState; onEnterApp: () => 
     )
   }
 
-  if (route === 'locked') {
-    return (
-      <main
-        aria-label="Kivo application"
-        className="min-h-screen bg-background text-foreground"
-      >
-        <div id="kivo-content">
-          <UnlockPage onUnlocked={onEnterApp} />
-        </div>
-      </main>
-    )
-  }
-
-  return <ReadyApplication />
+  // The lock state lives in the provider, so a locked boot and a lock later in
+  // the session take the same path: routes never mount while locked.
+  return <ReadyApplication initialLocked={route === 'locked'} />
 }
 
-function ReadyApplication() {
+function ReadyApplication({ initialLocked }: { initialLocked: boolean }) {
   return (
     <PreferencesProvider>
-      <BrowserRouter>
-        <VaultProvider>
-          <AppRoutes />
-        </VaultProvider>
-      </BrowserRouter>
+      <LockProvider initialLocked={initialLocked}>
+        <BrowserRouter>
+          <VaultProvider>
+            <AppRoutes />
+          </VaultProvider>
+        </BrowserRouter>
+      </LockProvider>
       <FeedbackToastRegion />
     </PreferencesProvider>
   )

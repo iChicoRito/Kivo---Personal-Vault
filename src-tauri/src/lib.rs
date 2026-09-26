@@ -1,6 +1,10 @@
+mod backup;
 mod database;
+mod encryption;
 mod icons;
+mod insights;
 mod passwords;
+mod portability;
 mod security;
 mod vault;
 
@@ -40,13 +44,35 @@ pub fn run() {
             database::has_password_verifier,
             security::hash_password,
             security::verify_password,
+            encryption::read_protection_state,
+            encryption::unlock_content_vault,
+            encryption::lock_content_vault,
+            encryption::enable_encryption,
+            encryption::disable_encryption,
+            encryption::change_master_password,
+            backup::pick_backup_destination,
+            backup::create_backup,
+            backup::pick_backup_source,
+            backup::inspect_backup,
+            backup::restore_backup,
+            portability::pick_save_file,
+            portability::pick_folder_destination,
+            portability::export_note_markdown,
+            portability::export_items_json,
+            portability::export_vault_json,
+            portability::import_json,
+            portability::import_markdown,
             vault::import_file,
+            vault::index_file,
             vault::save_item,
             vault::load_item,
             vault::list_items,
             vault::set_item_tags,
             vault::list_collections,
-            vault::list_activity,
+            vault::list_item_versions,
+            vault::restore_item_version,
+            vault::read_item_file,
+            vault::load_storage_report,
             vault::list_index_state,
             vault::set_item_pinned,
             vault::set_items_favorite,
@@ -64,6 +90,10 @@ pub fn run() {
             vault::open_item_file,
             vault::reveal_item_file,
             vault::open_source_url,
+            insights::search_related_items,
+            insights::reindex_items,
+            insights::suggest_tags,
+            insights::summarize_item,
             icons::credential_icon,
             passwords::vault_status,
             passwords::setup_vault,

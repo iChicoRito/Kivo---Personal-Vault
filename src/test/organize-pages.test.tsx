@@ -56,11 +56,22 @@ const feedbackMock = vi.hoisted(() => ({
   trashWithUndo: vi.fn(),
 }))
 
+const portabilityMock = vi.hoisted(() => ({
+  pickSaveFile: vi.fn(),
+  pickFolderDestination: vi.fn(),
+  exportNoteMarkdown: vi.fn(),
+  exportItemsJson: vi.fn(),
+  exportVaultJson: vi.fn(),
+  importJson: vi.fn(),
+  importMarkdown: vi.fn(),
+}))
+
 vi.mock('../data/items', () => itemsMock)
 vi.mock('../data/files', () => filesMock)
 vi.mock('../data/collections', () => collectionsMock)
 vi.mock('../data/settings', () => settingsMock)
 vi.mock('../data/dashboard', () => dashboardMock)
+vi.mock('../data/portability', () => portabilityMock)
 vi.mock('../lib/feedback', () => feedbackMock)
 vi.mock('../features/sources/SaveSourceDialog', () => ({ default: sourceDialogMock }))
 
@@ -186,6 +197,13 @@ beforeEach(() => {
   collectionsMock.verifyCollectionSecret.mockResolvedValue(true)
   settingsMock.loadPreferences.mockResolvedValue({ ...DEFAULT_PREFERENCES })
   settingsMock.savePreferences.mockResolvedValue(undefined)
+  portabilityMock.pickSaveFile.mockResolvedValue(null)
+  portabilityMock.pickFolderDestination.mockResolvedValue(null)
+  portabilityMock.exportItemsJson.mockResolvedValue(undefined)
+  portabilityMock.exportNoteMarkdown.mockResolvedValue(undefined)
+  portabilityMock.exportVaultJson.mockResolvedValue(undefined)
+  portabilityMock.importJson.mockResolvedValue({ imported: 0, skipped: [] })
+  portabilityMock.importMarkdown.mockResolvedValue({ imported: 0, skipped: [] })
   dashboardMock.loadVaultSummary.mockResolvedValue({
     itemCount: 0,
     noteCount: 0,
@@ -548,6 +566,51 @@ describe('CollectionsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete collection' }))
 
     await waitFor(() => expect(collectionsMock.deleteCollection).toHaveBeenCalledWith(COLLECTION.id))
+  })
+
+  it('exports a collection as JSON with its live item ids', async () => {
+    collectionsMock.listCollections.mockResolvedValue([{ ...COLLECTION }])
+    itemsMock.listItems.mockResolvedValue([NOTE])
+    portabilityMock.pickSaveFile.mockResolvedValue('C:/exports/Work.json')
+
+    renderCollections({ collectionsView: 'list' })
+    await screen.findByRole('button', { name: 'Work' })
+    await openRowMenu('Work', 'Export Work')
+
+    await waitFor(() =>
+      expect(itemsMock.listItems).toHaveBeenCalledWith({ collectionId: COLLECTION.id }),
+    )
+    await waitFor(() =>
+      expect(portabilityMock.exportItemsJson).toHaveBeenCalledWith([NOTE.id], 'C:/exports/Work.json'),
+    )
+    expect(portabilityMock.pickSaveFile).toHaveBeenCalledWith('Work.json')
+    expect(feedbackMock.notifySuccess).toHaveBeenCalledWith('Collection exported as JSON')
+  })
+
+  it('does not export when the save picker is cancelled', async () => {
+    collectionsMock.listCollections.mockResolvedValue([{ ...COLLECTION }])
+    itemsMock.listItems.mockResolvedValue([NOTE])
+    portabilityMock.pickSaveFile.mockResolvedValue(null)
+
+    renderCollections({ collectionsView: 'list' })
+    await screen.findByRole('button', { name: 'Work' })
+    await openRowMenu('Work', 'Export Work')
+
+    await waitFor(() => expect(portabilityMock.pickSaveFile).toHaveBeenCalledWith('Work.json'))
+    expect(portabilityMock.exportItemsJson).not.toHaveBeenCalled()
+  })
+
+  it('does not export a collection that has no items', async () => {
+    collectionsMock.listCollections.mockResolvedValue([{ ...COLLECTION, itemCount: 0 }])
+    itemsMock.listItems.mockResolvedValue([])
+    portabilityMock.pickSaveFile.mockResolvedValue('C:/exports/Work.json')
+
+    renderCollections({ collectionsView: 'list' })
+    await screen.findByRole('button', { name: 'Work' })
+    await openRowMenu('Work', 'Export Work')
+
+    await waitFor(() => expect(portabilityMock.pickSaveFile).toHaveBeenCalled())
+    expect(portabilityMock.exportItemsJson).not.toHaveBeenCalled()
   })
 
   it('opens a collection from its list row and loads its items', async () => {

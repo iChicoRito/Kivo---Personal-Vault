@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
-import { buttonVariants, ScrollShadow } from '@heroui/react'
+import { Button, buttonVariants, ScrollShadow } from '@heroui/react'
 import { Outlet } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 
 import { GradualBlur } from '../components/ui/GradualBlur'
 import { AnimatedThemeToggler } from '../components/ui/animated-theme-toggler'
@@ -9,7 +10,12 @@ import { notifyError } from '../lib/feedback'
 import { cn } from '../lib/utils'
 import AppDock from './AppDock'
 import NavbarSearch from './NavbarSearch'
+import { CommandPalette } from './CommandPalette'
+import { shortcuts, matchesShortcut } from './shortcuts'
+import { QuickAddDialog } from '../features/quick-add/QuickAddDialog'
+import { ShortcutsDialog } from '../features/shortcuts/ShortcutsDialog'
 import { usePreferences } from './preferences'
+import { useLock } from './lock'
 
 function ThemeToggle() {
   const { resolvedTheme, updatePreferences } = usePreferences()
@@ -68,6 +74,7 @@ function useHideOnScroll(scrollerRef: RefObject<HTMLElement | null>) {
 }
 
 function AppNavbar({ hidden }: { hidden: boolean }) {
+  const appLock = useLock()
   return (
     <header
       id="kivo-navbar"
@@ -86,7 +93,10 @@ function AppNavbar({ hidden }: { hidden: boolean }) {
         zIndex={-1}
       />
       <NavbarSearch />
-      <ThemeToggle />
+      <div className="flex items-center gap-2">
+        {appLock ? <Button variant="secondary" onPress={() => void appLock.lock()}>Lock Kivo</Button> : null}
+        <ThemeToggle />
+      </div>
     </header>
   )
 }
@@ -94,6 +104,29 @@ function AppNavbar({ hidden }: { hidden: boolean }) {
 export default function AppShell() {
   const mainRef = useRef<HTMLDivElement>(null)
   const hidden = useHideOnScroll(mainRef)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [quickAction, setQuickAction] = useState<'file' | 'source' | 'collection' | undefined>()
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      const match = shortcuts.find((shortcut) => matchesShortcut(event, shortcut.id))
+      if (!match) return
+      if (match.id === 'search') return // NavbarSearch owns search focus.
+      if (match.id === 'favorite') return // No selected item in the shell; do not override browser bookmarks.
+      if (event.repeat) return
+      event.preventDefault()
+      if (match.id === 'palette') setPaletteOpen(true)
+      else if (match.id === 'newNote') navigate('/notes/new')
+      else if (match.id === 'quickAdd') { setQuickAction(undefined); setQuickOpen(true) }
+      else navigate(`/${match.id}`)
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [navigate, location.pathname])
 
   return (
     <div className="min-h-screen bg-background text-foreground" id="kivo-shell">
@@ -114,6 +147,9 @@ export default function AppShell() {
         </ScrollShadow>
 
         <AppDock />
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onQuickAdd={(action) => { setQuickAction(action); setQuickOpen(true) }} onShortcuts={() => setShortcutsOpen(true)} />
+        <QuickAddDialog key={quickAction ?? 'menu'} open={quickOpen} initialAction={quickAction ?? null} onClose={() => setQuickOpen(false)} />
+        <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       </div>
     </div>
   )

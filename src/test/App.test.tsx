@@ -44,11 +44,18 @@ const dashboardData = vi.hoisted(() => ({
   loadVaultSummary: vi.fn(),
 }))
 
+const protectionData = vi.hoisted(() => ({
+  readProtectionState: vi.fn(),
+  unlockVault: vi.fn(),
+  lockVault: vi.fn(),
+}))
+
 vi.mock('../data/database', () => ({
   initializeDatabase: boot.initializeDatabase,
 }))
 
 vi.mock('../data/settings', () => settings)
+vi.mock('../data/protection', () => protectionData)
 
 vi.mock('../data/items', () => itemsData)
 vi.mock('../data/collections', () => collectionsData)
@@ -87,6 +94,7 @@ const EMPTY_SUMMARY = {
 
 function resetBoot() {
   for (const mock of Object.values(boot)) mock.mockReset()
+  for (const mock of Object.values(protectionData)) mock.mockReset()
 
   for (const mock of [
     ...Object.values(itemsData),
@@ -95,6 +103,13 @@ function resetBoot() {
   ]) {
     mock.mockReset()
   }
+
+  protectionData.readProtectionState.mockResolvedValue({
+    lockEnabled: true,
+    encryptionEnabled: false,
+  })
+  protectionData.unlockVault.mockResolvedValue(true)
+  protectionData.lockVault.mockResolvedValue(undefined)
 
   itemsData.listItems.mockResolvedValue([])
   itemsData.loadItem.mockResolvedValue(undefined)

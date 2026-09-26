@@ -28,6 +28,10 @@ import {
   type VaultItem,
 } from '../../data/items'
 import { notifyError, notifySuccess, trashWithUndo } from '../../lib/feedback'
+import { FilePreviewDialog } from '../preview/FilePreviewDialog'
+import { matchesShortcut } from '../../app/shortcuts'
+import { indexFile, listIndexState, type IndexState } from '../../data/indexing'
+import { exportItemsJson, pickSaveFile } from '../../data/portability'
 
 type ItemDetailsDialogProps = {
   itemId: string | null
@@ -95,6 +99,8 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [indexStatus, setIndexStatus] = useState<IndexState['status'] | null>(null)
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -138,6 +144,13 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
     }
   }, [itemId])
 
+  useEffect(() => {
+    if (!itemId || item?.kind !== 'file' || !item.file?.originalName.toLowerCase().endsWith('.pdf')) { setIndexStatus(null); return }
+    let active = true
+    listIndexState().then((states) => { if (active) setIndexStatus(states.find((state) => state.itemId === itemId)?.status ?? null) }).catch(() => { if (active) setIndexStatus(null) })
+    return () => { active = false }
+  }, [itemId, item])
+
   async function persist(patch: Partial<ItemInput>, syncForm = false): Promise<boolean> {
     if (!item) return false
 
@@ -164,6 +177,17 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
     const saved = await persist({ isFavorite: next })
     if (!saved) setFavorite(previous)
   }
+
+  useEffect(() => {
+    if (!itemId || !item || loadState !== 'ready') return
+    function onKey(event: KeyboardEvent) {
+      if (!matchesShortcut(event, 'favorite')) return
+      event.preventDefault()
+      void handleFavoriteChange(!favorite)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [itemId, item, favorite, loadState])
 
   async function handleCollectionChange(next: string | null) {
     const previous = collectionId
@@ -368,6 +392,7 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
                   <TagPicker
                     label="Tags"
                     value={tags}
+                    itemId={item.id}
                     onChange={(next) => void handleTagsChange(next)}
                   />
 
@@ -416,8 +441,12 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
                           This file is missing from the vault folder.
                         </Typography>
                       ) : null}
+                      {indexStatus === 'no_text' ? <Typography color="muted" type="body-xs">No searchable text in this PDF</Typography> : null}
+                      {indexStatus === 'pending' ? <Typography color="muted" type="body-xs">Indexing PDF text...</Typography> : null}
+                      {indexStatus === 'failed' ? <Button variant="secondary" onPress={() => { void indexFile(item.id).then((state) => setIndexStatus(state.status)).catch(() => notifyError('Could not retry PDF indexing.')) }}>Retry PDF indexing</Button> : null}
 
                       <div className="flex flex-wrap gap-2">
+                        <Button isDisabled={item.fileMissing} variant="secondary" onPress={() => setPreviewOpen(true)}>Preview</Button>
                         <Button
                           isDisabled={item.fileMissing}
                           variant="secondary"
@@ -440,6 +469,9 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
             </Modal.Body>
 
             <Modal.Footer>
+              {loadState === 'ready' && item ? <Button variant="secondary" onPress={() => {
+                void (async () => { try { const path = await pickSaveFile(`${item.title.replace(/[\\/:*?"<>|]/g, '_')}.json`); if (path) { await exportItemsJson([item.id], path); notifySuccess('Item exported as JSON') } } catch { notifyError('Could not export item. Try again.') } })()
+              }}>Export as JSON</Button> : null}
               {loadState === 'ready' && item ? (
                 <Button variant="danger" onPress={() => setConfirmOpen(true)}>
                   Move to trash
@@ -462,6 +494,7 @@ export function ItemDetailsDialog({ itemId, onClose, onChanged }: ItemDetailsDia
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => void handleTrash()}
       />
+      <FilePreviewDialog itemId={previewOpen ? item?.id ?? null : null} onClose={() => setPreviewOpen(false)} />
     </Modal>
   )
 }

@@ -24,6 +24,10 @@ export type Preferences = {
   notesView: NoteView
   sourcesView: SourceView
   collectionsView: CollectionsView
+  autoLockMinutes: number
+  semanticSearch: boolean
+  autoTag: boolean
+  summaries: boolean
 }
 
 export async function loadProfile(): Promise<Profile> {

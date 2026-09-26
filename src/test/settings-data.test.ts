@@ -24,6 +24,10 @@ const PREFERENCES = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  autoLockMinutes: 0,
+  semanticSearch: false,
+  autoTag: false,
+  summaries: false,
 } as const
 
 beforeEach(() => {

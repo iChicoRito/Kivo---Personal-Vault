@@ -233,7 +233,7 @@ describe('Primary dock navigation', () => {
     const dock = await screen.findByRole('navigation', { name: 'Primary navigation' })
     const links = within(dock).getAllByRole('link')
 
-    expect(dockDestinations).toHaveLength(10)
+    expect(dockDestinations).toHaveLength(11)
     expect(links).toHaveLength(dockDestinations.length)
 
     expect(

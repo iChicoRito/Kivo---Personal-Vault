@@ -33,6 +33,7 @@ const destinationLabels = [
   'Password Manager',
   'Favorites',
   'Trash',
+  'Storage Manager',
   'Settings',
 ] as const
 
@@ -46,6 +47,7 @@ const hrefByLabel: Record<string, string> = {
   'Password Manager': '/passwords',
   Favorites: '/favorites',
   Trash: '/trash',
+  'Storage Manager': '/storage',
   Settings: '/settings',
 }
 

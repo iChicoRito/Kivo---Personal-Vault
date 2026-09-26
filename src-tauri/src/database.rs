@@ -19,6 +19,10 @@ const COLLECTION_PROTECTION_MIGRATION: &str =
     include_str!("../migrations/0008_collection_protection.sql");
 const INLINE_TAGS: &str = include_str!("../migrations/0009_inline_tags.sql");
 const PASSWORD_VAULT_MIGRATION: &str = include_str!("../migrations/0010_password_vault.sql");
+const PHASE_FIVE_MIGRATION: &str = include_str!("../migrations/0011_phase_five.sql");
+const PHASE_SIX_MIGRATION: &str = include_str!("../migrations/0012_phase_six_protection.sql");
+const PHASE_SEVEN_MIGRATION: &str = include_str!("../migrations/0013_phase_seven.sql");
+const ACTIVITY_HISTORY_REMOVAL: &str = include_str!("../migrations/0014_drop_activity.sql");
 
 struct Migration {
     version: i64,
@@ -68,12 +72,31 @@ const MIGRATIONS: &[Migration] = &[
         version: 10,
         sql: PASSWORD_VAULT_MIGRATION,
     },
+    Migration {
+        version: 11,
+        sql: PHASE_FIVE_MIGRATION,
+    },
+    Migration {
+        version: 12,
+        sql: PHASE_SIX_MIGRATION,
+    },
+    Migration {
+        version: 13,
+        sql: PHASE_SEVEN_MIGRATION,
+    },
+    Migration {
+        version: 14,
+        sql: ACTIVITY_HISTORY_REMOVAL,
+    },
 ];
 
 pub struct DatabaseState {
     connection: Mutex<Option<Connection>>,
     path: PathBuf,
     files_dir: PathBuf,
+    // The in-memory content key lives with the connection so one managed state
+    // owns both and the commands cannot disagree about which vault is open.
+    content_key: crate::encryption::ContentKeyState,
 }
 
 #[derive(Deserialize)]
@@ -109,6 +132,14 @@ pub struct Preferences {
     pub notes_view: String,
     pub sources_view: String,
     pub collections_view: String,
+    #[serde(default)]
+    pub auto_lock_minutes: i64,
+    #[serde(default)]
+    pub semantic_search: bool,
+    #[serde(default)]
+    pub auto_tag: bool,
+    #[serde(default)]
+    pub summaries: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -125,6 +156,7 @@ impl DatabaseState {
             connection: Mutex::new(None),
             path,
             files_dir,
+            content_key: crate::encryption::ContentKeyState::default(),
         }
     }
 
@@ -154,6 +186,7 @@ impl DatabaseState {
             .map_err(|error| format!("Could not enable foreign keys: {error}"))?;
         apply_migrations(&mut connection)
             .map_err(|error| format!("Could not migrate local database: {error}"))?;
+        crate::encryption::recover_files(&connection, &self.files_dir)?;
 
         *stored_connection = Some(connection);
         Ok(())
@@ -177,6 +210,27 @@ impl DatabaseState {
 
     pub(crate) fn files_dir(&self) -> &Path {
         &self.files_dir
+    }
+
+    pub(crate) fn database_path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn content_key(&self) -> &crate::encryption::ContentKeyState {
+        &self.content_key
+    }
+
+    // Drops the live connection so restore can replace the database file. The
+    // connection is reopened through `initialize`, which also migrates and
+    // recovers any interrupted file conversion.
+    pub(crate) fn close_connection(&self) -> Result<(), String> {
+        let mut stored = self.lock_connection()?;
+        drop(stored.take());
+        Ok(())
+    }
+
+    pub(crate) fn reopen_connection(&self) -> Result<(), String> {
+        self.initialize()
     }
 
     fn boot_state(&self) -> Result<BootState, String> {
@@ -227,12 +281,18 @@ impl DatabaseState {
         let verifier = validate_verifier(verifier)?;
 
         let mut connection = self.require_connection()?;
+        if crate::encryption::is_enabled(connection.as_ref().expect("checked above"))? {
+            return Err("Use change_master_password while encryption is enabled".into());
+        }
         write_password_verifier(connection.as_mut().expect("checked above"), verifier)
             .map_err(|error| format!("Could not save app lock: {error}"))
     }
 
     fn remove_password_verifier(&self) -> Result<(), String> {
         let mut connection = self.require_connection()?;
+        if crate::encryption::is_enabled(connection.as_ref().expect("checked above"))? {
+            return Err("Disable encryption before removing app lock".into());
+        }
         clear_password_verifier(connection.as_mut().expect("checked above"))
             .map_err(|error| format!("Could not remove app lock: {error}"))
     }
@@ -279,6 +339,7 @@ fn validate_preferences(preferences: &Preferences) -> Result<(), String> {
         && matches!(preferences.notes_view.as_str(), "grid" | "list")
         && matches!(preferences.sources_view.as_str(), "grid" | "list")
         && matches!(preferences.collections_view.as_str(), "grid" | "list");
+    let valid = valid && preferences.auto_lock_minutes >= 0;
 
     if valid {
         Ok(())
@@ -433,7 +494,7 @@ pub fn write_profile(connection: &mut Connection, profile: &ProfileInput) -> rus
 
 pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences> {
     connection.query_row(
-        "SELECT theme, density, start_at_login, notes_view, sources_view, collections_view FROM preferences WHERE id = 1",
+        "SELECT theme, density, start_at_login, notes_view, sources_view, collections_view, auto_lock_minutes, semantic_search, auto_tag, summaries FROM preferences WHERE id = 1",
         [],
         |row| {
             Ok(Preferences {
@@ -443,6 +504,10 @@ pub fn read_preferences(connection: &Connection) -> rusqlite::Result<Preferences
                 notes_view: row.get(3)?,
                 sources_view: row.get(4)?,
                 collections_view: row.get(5)?,
+                auto_lock_minutes: row.get(6)?,
+                semantic_search: row.get::<_, i64>(7)? != 0,
+                auto_tag: row.get::<_, i64>(8)? != 0,
+                summaries: row.get::<_, i64>(9)? != 0,
             })
         },
     )
@@ -453,10 +518,20 @@ pub fn write_preferences(
     preferences: &Preferences,
 ) -> rusqlite::Result<()> {
     let transaction = connection.transaction()?;
+    // Read the stored switch first so turning Related search off can clear its
+    // derived vectors in the same transaction.
+    let previous_semantic_search: Option<i64> = transaction
+        .query_row(
+            "SELECT semantic_search FROM preferences WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
     let updated = transaction.execute(
         "UPDATE preferences
          SET theme = ?1, density = ?2, start_at_login = ?3, notes_view = ?4, sources_view = ?5,
-             collections_view = ?6
+              collections_view = ?6, auto_lock_minutes = ?7, semantic_search = ?8, auto_tag = ?9,
+              summaries = ?10
          WHERE id = 1",
         params![
             preferences.theme,
@@ -465,11 +540,19 @@ pub fn write_preferences(
             preferences.notes_view,
             preferences.sources_view,
             preferences.collections_view,
+            preferences.auto_lock_minutes,
+            i64::from(preferences.semantic_search),
+            i64::from(preferences.auto_tag),
+            i64::from(preferences.summaries),
         ],
     )?;
 
     if updated == 0 {
         return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+
+    if previous_semantic_search == Some(1) && !preferences.semantic_search {
+        transaction.execute("DELETE FROM item_vectors", [])?;
     }
 
     transaction.commit()
@@ -479,6 +562,9 @@ pub fn write_password_verifier(
     connection: &mut Connection,
     verifier: &str,
 ) -> rusqlite::Result<()> {
+    if crate::encryption::is_enabled(connection).map_err(|_| rusqlite::Error::InvalidQuery)? {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
     let transaction = connection.transaction()?;
     transaction.execute(
         "INSERT INTO security (id, password_verifier, updated_at)
@@ -493,6 +579,9 @@ pub fn write_password_verifier(
 }
 
 pub fn clear_password_verifier(connection: &mut Connection) -> rusqlite::Result<()> {
+    if crate::encryption::is_enabled(connection).map_err(|_| rusqlite::Error::InvalidQuery)? {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
     let transaction = connection.transaction()?;
     transaction.execute(
         "UPDATE security
@@ -676,13 +765,53 @@ mod tests {
     }
 
     #[test]
+    fn bundled_sqlite_supports_fts5() {
+        let connection = Connection::open_in_memory().expect("open memory database");
+        connection.execute_batch("CREATE VIRTUAL TABLE probe USING fts5(body); INSERT INTO probe(body) VALUES ('local search');").expect("FTS5 available");
+        let count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM probe WHERE probe MATCH 'local'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query FTS5");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn phase_five_upgrades_password_vault_without_losing_credentials() {
+        let mut connection = Connection::open_in_memory().expect("open database");
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version <= 10)
+        {
+            connection
+                .execute_batch(migration.sql)
+                .expect("apply existing migration");
+        }
+        connection
+            .pragma_update(None, "user_version", 10)
+            .expect("mark password vault version");
+        connection.execute("INSERT INTO credentials(id, service, password_nonce, password_ciphertext, created_at, updated_at) VALUES ('credential-1', 'Kept', x'010203', x'040506', '2026-01-01', '2026-01-01')", []).expect("seed credential");
+        apply_migrations(&mut connection).expect("upgrade version 10 vault");
+        assert_eq!(read_user_version(&connection), 14);
+        assert!(table_exists(&connection, "credentials"));
+        assert!(table_exists(&connection, "item_search"));
+        assert!(table_exists(&connection, "item_versions"));
+        assert!(column_exists(&connection, "index_state", "status"));
+        let (nonce, ciphertext): (Vec<u8>, Vec<u8>) = connection.query_row("SELECT password_nonce, password_ciphertext FROM credentials WHERE id = 'credential-1'", [], |row| Ok((row.get(0)?, row.get(1)?))).expect("credential survives upgrade");
+        assert_eq!(nonce, [1, 2, 3]);
+        assert_eq!(ciphertext, [4, 5, 6]);
+    }
+
+    #[test]
     fn migration_applies_and_is_idempotent() {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
         apply_migrations(&mut connection).expect("second migration");
 
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
 
         for table in [
             "profile",
@@ -691,7 +820,6 @@ mod tests {
             "security",
             "items",
             "files",
-            "activity",
             "index_state",
             "vault_config",
             "credentials",
@@ -702,6 +830,10 @@ mod tests {
         assert!(
             !table_exists(&connection, "tags"),
             "tags live on the item row now"
+        );
+        assert!(
+            !table_exists(&connection, "activity"),
+            "activity history was removed"
         );
         assert!(
             !table_exists(&connection, "item_tags"),
@@ -723,7 +855,7 @@ mod tests {
         let mut connection = Connection::open_in_memory().expect("open in-memory database");
 
         apply_migrations(&mut connection).expect("first migration");
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
 
         // Dropping a table gives the test a way to detect whether the migration ran again.
         connection
@@ -736,7 +868,7 @@ mod tests {
             !table_exists(&connection, "preferences"),
             "an up-to-date database must not re-run its migration"
         );
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
     }
 
     #[test]
@@ -759,7 +891,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
         assert_eq!(
             read_preferences(&connection).expect("read preferences"),
             Preferences {
@@ -769,6 +901,10 @@ mod tests {
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
                 collections_view: "grid".to_string(),
+                auto_lock_minutes: 0,
+                semantic_search: false,
+                auto_tag: false,
+                summaries: false,
             }
         );
 
@@ -827,7 +963,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
         assert!(
             !table_exists(&connection, "starter_collections"),
             "the onboarding table is dropped after the copy"
@@ -860,6 +996,10 @@ mod tests {
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
                 collections_view: "grid".to_string(),
+                auto_lock_minutes: 0,
+                semantic_search: false,
+                auto_tag: false,
+                summaries: false,
             }
         );
     }
@@ -902,7 +1042,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
 
         let (title, content, is_pinned, deleted_at, icon): (
             String,
@@ -967,7 +1107,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
         let collections_view: String = connection
             .query_row(
                 "SELECT collections_view FROM preferences WHERE id = 1",
@@ -1010,7 +1150,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
         let (protection, secret_hash): (String, Option<String>) = connection
             .query_row(
                 "SELECT protection, secret_hash FROM collections WHERE id = 'col-old'",
@@ -1069,7 +1209,7 @@ mod tests {
 
         apply_migrations(&mut connection).expect("upgrade database");
 
-        assert_eq!(read_user_version(&connection), 10);
+        assert_eq!(read_user_version(&connection), 14);
         let tags: String = connection
             .query_row("SELECT tags FROM items WHERE id = 'item-1'", [], |row| {
                 row.get(0)
@@ -1229,6 +1369,10 @@ mod tests {
                 notes_view: "grid".to_string(),
                 sources_view: "grid".to_string(),
                 collections_view: "grid".to_string(),
+                auto_lock_minutes: 0,
+                semantic_search: false,
+                auto_tag: false,
+                summaries: false,
             }
         );
 

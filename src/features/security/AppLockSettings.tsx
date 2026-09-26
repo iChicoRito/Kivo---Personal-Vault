@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Button, Card, Input, Label, Skeleton, TextField, Typography } from '@heroui/react'
+import { Button, Card, Input, Label, Radio, RadioGroup, Skeleton, TextField, Typography } from '@heroui/react'
 
 import {
   hasAppLock,
@@ -9,6 +9,8 @@ import {
   verifyPassword,
 } from '../../data/security'
 import { notifyError, notifySuccess } from '../../lib/feedback'
+import { changeMasterPassword, readProtectionState } from '../../data/protection'
+import { usePreferences } from '../../app/preferences'
 
 type Mode = 'loading' | 'off' | 'on' | 'error'
 
@@ -31,6 +33,8 @@ export default function AppLockSettings() {
   const [busy, setBusy] = useState(false)
   const [confirmingRemoval, setConfirmingRemoval] = useState(false)
   const busyRef = useRef(false)
+  const { preferences, updatePreferences } = usePreferences()
+  const [autoLockError, setAutoLockError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -114,15 +118,7 @@ export default function AppLockSettings() {
     setStatusMessage(null)
 
     try {
-      const verifier = await readAppLockVerifier()
-      const matched = verifier !== null && (await verifyPassword(currentPassword, verifier))
-
-      if (!matched) {
-        setError(WRONG_PASSWORD_MESSAGE)
-        return
-      }
-
-      await setAppLock(newPassword)
+      await changeMasterPassword(currentPassword, newPassword)
       resetFields()
       setStatusMessage('Your Master Password was changed.')
       notifySuccess('Master password changed')
@@ -163,6 +159,11 @@ export default function AppLockSettings() {
     setStatusMessage(null)
 
     try {
+      const protection = await readProtectionState()
+      if (protection.encryptionEnabled) {
+        setRemoveError('Turn off encryption before removing app lock.')
+        return
+      }
       const verifier = await readAppLockVerifier()
       const matched = verifier !== null && (await verifyPassword(currentPassword, verifier))
 
@@ -195,6 +196,7 @@ export default function AppLockSettings() {
         <Typography color="muted" type="body">
           App lock keeps Kivo closed to other people. It does not encrypt your files.
         </Typography>
+        <Typography color="muted" type="body">If you forget your Master Password, encrypted content cannot be recovered.</Typography>
 
         {statusMessage ? (
           <Typography role="status" type="body">
@@ -264,6 +266,14 @@ export default function AppLockSettings() {
           {mode === 'on' && (
             <div className="flex flex-col gap-6">
               <Typography type="h3">App lock is on.</Typography>
+              <RadioGroup name="auto-lock" value={String(preferences.autoLockMinutes)} onChange={(value) => {
+                setAutoLockError(null)
+                void updatePreferences({ autoLockMinutes: Number(value) }).catch(() => setAutoLockError('Could not save automatic lock setting. Try again.'))
+              }}>
+                <Label>Lock after inactivity</Label>
+                <div className="grid gap-1">{[0, 5, 15, 30, 60].map((minutes) => <Radio className="min-h-11" key={minutes} value={String(minutes)}><Radio.Content><Radio.Control><Radio.Indicator /></Radio.Control>{minutes ? `${minutes} minutes` : 'Off'}</Radio.Content></Radio>)}</div>
+              </RadioGroup>
+              {autoLockError ? <Typography role="alert" className="text-danger" type="body">{autoLockError}</Typography> : null}
 
               <form
                 className="flex flex-col gap-4"

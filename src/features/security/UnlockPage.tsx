@@ -3,6 +3,7 @@ import { Button, Card, FieldError, Input, Label, TextField, Typography } from '@
 
 import PageHeader from '../../app/PageHeader'
 import { readAppLockVerifier, verifyPassword } from '../../data/security'
+import { readProtectionState, unlockVault as unlockContentVault } from '../../data/protection'
 
 export type UnlockPageProps = {
   onUnlocked?: () => void
@@ -39,7 +40,10 @@ export default function UnlockPage({ onUnlocked }: UnlockPageProps) {
         return
       }
 
-      const matched = await verifyPassword(password, verifier)
+      const { encryptionEnabled } = await readProtectionState()
+      const matched = encryptionEnabled
+        ? await unlockContentVault(password)
+        : await verifyPassword(password, verifier)
 
       if (matched) {
         setPassword('')

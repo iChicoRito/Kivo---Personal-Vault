@@ -15,6 +15,7 @@ import {
 
 import { listCollections, type Collection } from '../../data/collections'
 import { listTags, type Tag } from '../../data/tags'
+import { TagSuggestions } from './TagSuggestions'
 
 type ConfirmDialogProps = {
   open: boolean
@@ -72,9 +73,10 @@ type TagPickerProps = {
   value: string[]
   onChange: (next: string[]) => void
   label?: string
+  itemId?: string
 }
 
-export function TagPicker({ value, onChange, label }: TagPickerProps) {
+export function TagPicker({ value, onChange, label, itemId }: TagPickerProps) {
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState('')
@@ -147,6 +149,8 @@ export function TagPicker({ value, onChange, label }: TagPickerProps) {
           No tags yet.
         </Typography>
       ) : null}
+
+      {itemId ? <TagSuggestions itemId={itemId} value={value} onChange={onChange} /> : null}
 
       <div className="flex flex-wrap items-end gap-2">
         <TextField className="min-w-40 flex-1" value={draft} onChange={setDraft}>

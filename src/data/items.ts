@@ -38,7 +38,7 @@ export type ItemSummary = Pick<
   | 'isPinned'
   | 'content'
   | 'file'
-> & { deletedAt?: string | null }
+> & { deletedAt?: string | null; matchSnippet?: string | null }
 
 export type ItemSort = 'title' | 'created' | 'updated' | 'kind'
 

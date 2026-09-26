@@ -64,6 +64,10 @@ const DEFAULT_PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  autoLockMinutes: 0,
+  semanticSearch: false,
+  autoTag: false,
+  summaries: false,
 }
 
 function createDefaultState(): BrowserPreviewState {
@@ -117,6 +121,16 @@ export async function browserInvoke<T>(command: string, args: InvokeArgs = {}): 
   const state = readState()
 
   switch (command) {
+    case 'list_items':
+    case 'list_item_versions':
+    case 'list_index_state':
+      return [] as T
+    case 'load_storage_report':
+      return { totalBytes: 0, databaseBytes: 0, fileBytes: 0, fileCount: 0, groups: [], largest: [] } as T
+    case 'read_item_file':
+    case 'restore_item_version':
+    case 'index_file':
+      throw new Error('This action needs the Kivo desktop app.')
     case 'initialize_database':
       return undefined as T
     case 'load_boot_state':

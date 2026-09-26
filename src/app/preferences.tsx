@@ -36,6 +36,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   notesView: 'grid',
   sourcesView: 'grid',
   collectionsView: 'grid',
+  autoLockMinutes: 0,
+  semanticSearch: false,
+  autoTag: false,
+  summaries: false,
 }
 
 const FALLBACK_PREFERENCES: PreferencesContextValue = {
@@ -100,6 +104,10 @@ function normalizePreferences(value: Preferences | null | undefined): Preference
     notesView: value?.notesView === 'list' ? 'list' : DEFAULT_PREFERENCES.notesView,
     sourcesView: value?.sourcesView === 'list' ? 'list' : 'grid',
     collectionsView: value?.collectionsView === 'list' ? 'list' : 'grid',
+    autoLockMinutes: [0, 5, 15, 30, 60].includes(value?.autoLockMinutes ?? 0) ? value?.autoLockMinutes ?? 0 : 0,
+    semanticSearch: value?.semanticSearch ?? DEFAULT_PREFERENCES.semanticSearch,
+    autoTag: value?.autoTag ?? DEFAULT_PREFERENCES.autoTag,
+    summaries: value?.summaries ?? DEFAULT_PREFERENCES.summaries,
   }
 }
 
