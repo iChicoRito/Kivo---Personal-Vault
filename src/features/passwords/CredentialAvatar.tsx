@@ -67,13 +67,16 @@ export function CredentialAvatar({ service, url }: CredentialAvatarProps) {
   const initial = service.trim().charAt(0).toUpperCase() || '?'
 
   if (host && icon && !broken) {
+    // Favicons are often 16-32px; keep them at icon size inside the circle instead of stretching.
     return (
-      <img
-        alt=""
-        className="size-12 shrink-0 rounded-full bg-default object-cover"
-        src={icon}
-        onError={() => setBroken(true)}
-      />
+      <span className="grid size-12 shrink-0 place-items-center rounded-full bg-default">
+        <img
+          alt=""
+          className="size-6 object-contain"
+          src={icon}
+          onError={() => setBroken(true)}
+        />
+      </span>
     )
   }
 
