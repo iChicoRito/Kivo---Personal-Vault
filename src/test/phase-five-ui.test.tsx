@@ -28,7 +28,23 @@ it('shows storage sizes and an empty file list', async () => {
   getTauriInvoke().mockResolvedValue({ totalBytes: 1024, databaseBytes: 1024, fileBytes: 0, fileCount: 0, groups: [], largest: [] })
   render(<MemoryRouter><StorageManagerPage /></MemoryRouter>)
   expect(await screen.findByText('No managed files yet. Add a file to see it here.')).toBeInTheDocument()
-  expect(screen.getAllByText('1 KB')).toHaveLength(2)
+  expect(screen.getAllByText('1 KB')).toHaveLength(3)
+})
+
+it('lists the largest files with usage by type and asks before trashing one', async () => {
+  getTauriInvoke().mockResolvedValue({
+    totalBytes: 3072,
+    databaseBytes: 1024,
+    fileBytes: 2048,
+    fileCount: 1,
+    groups: [{ label: 'PDFs', count: 1, bytes: 2048 }],
+    largest: [{ itemId: 'f1', title: 'Lease', originalName: 'lease.pdf', byteSize: 2048, importedAt: '2026-09-24T00:00:00Z' }],
+  })
+  render(<MemoryRouter><StorageManagerPage /></MemoryRouter>)
+  expect(await screen.findByText('Lease')).toBeInTheDocument()
+  expect(screen.getByRole('img', { name: 'PDFs 2 KB, Database 1 KB' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Move Lease to Trash' }))
+  expect(await screen.findByText('Move this file to Trash?')).toBeInTheDocument()
 })
 
 it('shows versions and shortcut reference', async () => {
