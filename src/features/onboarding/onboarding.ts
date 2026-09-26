@@ -21,7 +21,7 @@ export const STARTER_COLLECTION_DETAILS: Record<
   'Images & Media': 'Photos, screenshots, and other visual files',
 }
 
-export const ONBOARDING_STEPS = ['welcome', 'profile', 'collections', 'lock', 'complete'] as const
+export const ONBOARDING_STEPS = ['intro', 'welcome', 'profile', 'collections', 'lock', 'complete'] as const
 
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]
 

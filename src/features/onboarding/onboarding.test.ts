@@ -36,8 +36,8 @@ describe('onboarding draft', () => {
     ])
   })
 
-  it('keeps the five onboarding steps in order', () => {
-    expect(ONBOARDING_STEPS).toEqual(['welcome', 'profile', 'collections', 'lock', 'complete'])
+  it('keeps the six onboarding steps in order', () => {
+    expect(ONBOARDING_STEPS).toEqual(['intro', 'welcome', 'profile', 'collections', 'lock', 'complete'])
   })
 })
 
@@ -118,6 +118,7 @@ describe('toSetupInput', () => {
 
 describe('step transitions', () => {
   it('walks forward through every step and stops at the end', () => {
+    expect(getNextStep('intro')).toBe('welcome')
     expect(getNextStep('welcome')).toBe('profile')
     expect(getNextStep('profile')).toBe('collections')
     expect(getNextStep('collections')).toBe('lock')
@@ -130,6 +131,7 @@ describe('step transitions', () => {
     expect(getPreviousStep('lock')).toBe('collections')
     expect(getPreviousStep('collections')).toBe('profile')
     expect(getPreviousStep('profile')).toBe('welcome')
-    expect(getPreviousStep('welcome')).toBeNull()
+    expect(getPreviousStep('welcome')).toBe('intro')
+    expect(getPreviousStep('intro')).toBeNull()
   })
 })

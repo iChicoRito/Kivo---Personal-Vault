@@ -130,6 +130,24 @@ function typeInto(input: HTMLElement, value: string) {
   fireEvent.change(input, { target: { value } })
 }
 
+// Onboarding opens on a 5 s logo intro. Only setTimeout is faked, so React's
+// scheduler (setImmediate) and the boot promises keep running for real.
+function fakeIntroTimer() {
+  vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] })
+}
+
+// The intro timer starts in an effect, so flush pending effects before advancing.
+async function passIntro() {
+  try {
+    await act(async () => {})
+    act(() => {
+      vi.advanceTimersByTime(5000)
+    })
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 async function finishOnboarding() {
   fireEvent.click(screen.getByRole('button', { name: 'Get Started' }))
   typeInto(screen.getByLabelText('Your name'), 'Ada')
@@ -197,10 +215,13 @@ describe('App root', () => {
     boot.initializeDatabase.mockResolvedValue({})
     boot.loadBootState.mockResolvedValue('onboarding')
 
+    fakeIntroTimer()
     render(<App />)
 
+    expect(await screen.findByRole('heading', { name: 'Kivo', exact: true })).toBeInTheDocument()
+    await passIntro()
     expect(
-      await screen.findByRole('heading', {
+      screen.getByRole('heading', {
         name: 'Everything important, in one place.',
         exact: true,
       }),
@@ -214,12 +235,11 @@ describe('App root', () => {
     boot.loadBootState.mockResolvedValue('onboarding')
     boot.completeSetup.mockResolvedValue(undefined)
 
+    fakeIntroTimer()
     render(<App />)
 
-    await screen.findByRole('heading', {
-      name: 'Everything important, in one place.',
-      exact: true,
-    })
+    await screen.findByRole('heading', { name: 'Kivo', exact: true })
+    await passIntro()
 
     await finishOnboarding()
 

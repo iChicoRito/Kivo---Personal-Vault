@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { completeSetup, type SetupInput } from '../data/setup'
@@ -20,8 +21,18 @@ vi.mock('../data/security', () => ({
 const completeSetupMock = vi.mocked(completeSetup)
 const hashPasswordMock = vi.mocked(hashPassword)
 
+// Renders onboarding and lets the 5 s logo intro run, so tests start on the welcome step.
+function renderPastIntro(ui: ReactElement) {
+  vi.useFakeTimers()
+  const view = render(ui)
+  act(() => vi.advanceTimersByTime(5000))
+  vi.useRealTimers()
+
+  return view
+}
+
 function renderOnboarding(onCompleted = vi.fn()) {
-  render(<OnboardingPage onCompleted={onCompleted} />)
+  renderPastIntro(<OnboardingPage onCompleted={onCompleted} />)
 
   return { onCompleted }
 }
@@ -81,6 +92,26 @@ describe('OnboardingPage steps', () => {
     completeSetupMock.mockResolvedValue(undefined)
   })
 
+  it('opens on the logo intro and moves to welcome after 5 seconds', () => {
+    vi.useFakeTimers()
+    const { container } = render(<OnboardingPage />)
+
+    expect(screen.getByRole('heading', { name: 'Kivo' })).toHaveFocus()
+    expect(screen.getByText('Your personal space for everything you want to keep close')).toBeInTheDocument()
+    expect(container.querySelector('svg.kivo-logo-intro')).toBeInTheDocument()
+
+    act(() => vi.advanceTimersByTime(4500))
+    expect(screen.getByRole('heading', { name: 'Kivo' }).closest('header')).toHaveClass('kivo-intro-leaving')
+
+    act(() => vi.advanceTimersByTime(499))
+    expect(screen.queryByRole('heading', { name: 'Everything important, in one place.' })).not.toBeInTheDocument()
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(screen.getByRole('heading', { name: 'Everything important, in one place.' })).toHaveFocus()
+    expect(container.querySelector('svg.kivo-logo-intro')).not.toBeInTheDocument()
+    vi.useRealTimers()
+  })
+
   it('starts with Figma chrome and no step-label strip', () => {
     renderOnboarding()
 
@@ -89,7 +120,7 @@ describe('OnboardingPage steps', () => {
       screen.getByText(
         'Keep your notes, files, useful links, documents, and personal information organized inside your own private vault.',
       ),
-    ).toHaveClass('text-center')
+    ).toHaveStyle({ textAlign: 'center' })
     expect(screen.queryByRole('list', { name: 'Setup steps' })).not.toBeInTheDocument()
     expect(screen.queryByText('KIVO', { selector: 'p' })).not.toBeInTheDocument()
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
@@ -112,7 +143,7 @@ describe('OnboardingPage steps', () => {
   })
 
   it('renders onboarding content without a Card surface', () => {
-    const { container } = render(<OnboardingPage />)
+    const { container } = renderPastIntro(<OnboardingPage />)
 
     expect(container.querySelector('[data-slot="card"]')).not.toBeInTheDocument()
   })
@@ -429,7 +460,7 @@ describe('OnboardingPage completion', () => {
   })
 
   it('renders a safe disabled final action when no completion callback is provided', async () => {
-    render(<OnboardingPage />)
+    renderPastIntro(<OnboardingPage />)
     reachLock()
     clickButton('Skip for now')
 
